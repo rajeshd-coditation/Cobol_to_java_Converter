@@ -23,6 +23,7 @@ The framework supports:
 
 * **Repository:** [OpenSourceCobol4j](https://github.com/opensourcecobol/opensourcecobol4j.git)
 * **Purpose:** Converts COBOL programs to Java using `cobj`
+* **Testing repo:**(https://github.com/aws-samples/aws-mainframe-modernization-carddemo.git)
 
 > All enhancements in this project are built on top of this base framework.
 
