@@ -242,7 +242,5 @@ Cobol_to_java_Converter/
 
 ---
 
-✅ This is now in a **clean, professional README format** suitable for GitHub and internal documentation.
-All bash commands and `.env` setups are clearly separated.
 
 ---
