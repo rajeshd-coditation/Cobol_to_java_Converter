@@ -12,19 +12,29 @@ This project is built upon the [OpenSourceCobol4j](https://github.com/opensource
 
 ---
 
-## Getting Started
+---
 
-### 1. Prerequisites
+## Quick Start: Clone & Setup
+
+Follow these steps to get the project running on your local machine:
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/saip-coditation/Cobol_to_java_Converter.git
+cd Cobol_to_java_Converter
+```
+
+### 2. Prerequisites
 Ensure you have the following installed:
-- Node.js & npm
-- OpenSourceCobol4j (`cobj`)
-- GnuCOBOL (`cobc`) - for native execution comparison
-- Java Development Kit (JDK 8+)
+- **Node.js**: Version 14 or higher.
+- **Java JDK**: Version 8 or higher.
+- **GnuCOBOL (cobc)**: Required for original COBOL execution comparison.
+- **OpenSourceCobol4j (cobj)**: Required for standard local conversion.
 
-### 2. Installation
+### 3. Installation
 Navigate to the web UI directory and install dependencies:
 ```bash
-cd opensourcecobol4j/tools/web-ui
+cd opensource/tools/web-ui
 npm install
 ```
 
