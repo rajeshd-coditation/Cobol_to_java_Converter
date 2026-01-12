@@ -1,0 +1,51 @@
+name: windows-test
+
+on:
+  workflow_call:
+    inputs:
+      test-name:
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download libcobj.jar
+      uses: actions/download-artifact@v7
+      with:
+        name: libcobj.jar
+        path: libcobj/app/build/libs/
+    
+    - name: Download cobj.exe
+      uses: actions/download-artifact@v7
+      with:
+        name: cobj.exe
+        path: win/x64/Release/
+      
+    - name: Install Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+    
+    - name: Install perl
+      uses: shogo82148/actions-setup-perl@v1
+      with:
+        perl-version: "5.32"
+        distribution: strawberry
+    
+    - name: Run tests ${{ inputs.test-name }}
+      run: |
+        cd win
+        ./make-install.ps1
+        $env:CLASSPATH="C:\opensourcecobol4j\lib\libcobj.jar"
+        $env:PATH+=";C:\opensourcecobol4j\bin\;C:\opensourcecobol4j\config\"
+        cd ../tests/cobol85/${{ inputs.test-name }}
+        perl ../report.pl
+        type report.txt
+        findstr "Successfully executed:" ./report.txt > ./result-check
+        findstr "100.00%" ./result-check

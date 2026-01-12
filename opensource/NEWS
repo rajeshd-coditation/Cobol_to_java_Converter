@@ -1,0 +1,650 @@
+NEWS - user visible changes				-*- outline -*-
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.16
+
+** New Features
+
+(1) Implementation of CANCEL ALL
+(2) Improve readability of generated code
+  * Rename some variables to more descriptive names
+  * Replace magic numbers with constants or calculations between constants
+
+** Bug Fixes
+
+(1) Fix `-j` option and `-o` option
+(2) Fix cobj-idx installation issues
+(3) Fix configuration items related to maximum size of PIC N items
+(4) Fix cobj command to detect duplicate labels
+(5) Fix `doc/converted_Java_file_JP.md`
+
+** Miscellaneous
+
+(1) Remove unused code from libcobj.jar (runtime library)
+(2) Remove unnecessary code from generated Java code to improve readability
+(3) Improve Dev Container configuration
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.15
+
+** Bug Fixes
+
+(1) Fix a bug related to EXTERNAL items.
+
+** Miscellaneous
+
+(1) Slightly improve the readability of generated Java code for GO TO statements.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.14
+
+** Improvement
+(1) `cobj` now preserves string concatenation structure in the generated Java code.
+
+** Bug Fixes
+
+(1) Fix the implementation of `PROGRAM STATUS`.
+
+** Miscellaneous
+
+(1) For Windows support, tests are now run on Windows Server 2025.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.13
+
+** Bug Fixes
+
+(1) Fix file locking of SEQUENTIAL, LINE SEQUENTIAL and RELATIVE file types.
+(2) Fix reading process for variable length SEQUENTIAL files.
+
+** Miscellaneous
+
+(1) `cobj-idx unlock` and `cobj-idx migrate` can handle multiple files at once.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.12
+
+** New Features
+
+(1) Implemented new file locking and record locking for INDEXED files.
+(2) Add a new sub command `migrate` for `cobj-idx`.
+  * With this command, you can convert an old version of an INDEXED file to a new version compatible with the latest opensource COBOL 4J.
+(3) Add a new sub command `unlock` for `cobj-idx`.
+  * With this command, you can unlock all record locks and file locks on an INDEXED file.
+(4) Add documentation of locking for INDEXED files.
+
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.11
+
+** Bug Fixes
+
+(1) Fix OPEN operation for indexed files. (#676)
+  * The runtime library now correctly sets the file status to 30 when attempting to open indexed files with invalid or corrupted file formats.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.10
+
+** New Features
+
+(1) Add a manual for the compiler configuration file (#665)
+(2) Add a built-in subroutine
+  * C$SLEEP (#669)
+  
+** Miscellaneous
+
+(1) Improve the test coverage slightly (#667, #664)
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.9
+
+** New Features
+
+(1) Add a sub command create for cobj-idx.
+  * `cobj-idx create` creates a new indexed file.
+  
+** Fix
+
+(1) Handle non-ASCII characters in EXTERNAL items and EXTERNAL file names correctly.
+(2) Show error messages if unimplemented subroutines are used.
+(3) Fix non-ASCII characters in external items and external file descriptors
+  * The older version does not convert `－` in EXTERNAL items and EXTERNAL file names into another valid character in Java.
+  * The older version converts `ＢＣ` in EXTERNAL file names into invalid characters.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.8-hotfix1
+
+** Bug Fixes
+
+  (1) Fix code generations for some WRITE statements.
+    * Older versions of the compiler converts some WRITE statements into invalid Java code.
+  (2) Fix the compiler to handle source code with UTF-8 encoded half-width Katakana characters correctly.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.8
+
+** Bug Fixes
+
+  (1) Fix a bug of duplicate record keys of indexed files.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.7-hotfix1
+
+** New Features
+
+  (1) Fix bugs related to UTF-8
+    * With older versions, DISPLAY statements output invalid UTF-8 data when the arguments are sub items of group fields.
+    * With older versions, initilizing data with VALUE clauses fails in some cases.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.7
+
+** New Features
+
+  (1) Implement the environment variable `COB_TERMINAL_ENCODING`.
+    * If the value of `COB_TERMINAL_ENCODING` is `UTF-8`, the DISPLAY statement outputs data after converting it to UTF-8. Otherwise, it outputs raw data (typically encoded in Shift JIS).
+    * If the value of `COB_TERMINAL_ENCODING` is `UTF-8`, the ACCEPT statement processes input data as UTF-8 encoded. Otherwise, it processes input data as Shift JIS encoded.
+  (2) Fix the UTF-8 compatible compiler to recognize that the size of multibyte characters in COBOL source code as 2 bytes instead of 3 bytes.
+    * This change allows users to write more multibyte characters on each line of the COBOL source code.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.6
+
+** New Features
+
+  (1) Compile UTF-8 Source Code
+    * The latest version of cobj is now able to accept UTF-8 encoded COBOL and generate UTF-8 encoded Java.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.5
+
+** New Features
+
+  (1) Convert string literals containing SJIS characters to Java string literals. (#561)
+    * The older versions convert string literals containing SJIS characters into byte arrays with hexdecimal integers.
+      * Older versions convert `"日本語"` into `CobolUtil.toBytes((byte)0x93, (byte)0xfa, (byte)0x96, (byte)0x7b, (byte)0x8c, (byte)0xea)`.
+      * Latest version converts `"日本語"` to `CobolUtil.stringToBytes("日本語")`.
+
+** Bug Fixes
+
+  (1) Fix comparisons of COMP data.
+    * With older versions, comparisons of COMP data are invalid in some cases.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.4
+
+*** Bug Fixes
+  (1) Process Japanese identifiers in COBOL correctly (#540)
+    * The older versions convert some Japanese characters in COBOL identifiers to another characters in Java.
+  (2) Fix the conditions `PERFORM UNTIL` (#544)
+    * If COBOL source code contains divisions in conditions of `PERFORM UNTIL`, the older versions emit compile errors.
+  (3) Fix `SEARCH` statements with data specified `OCCURS` and `DEPENDING`(#545)
+    * The older versions emit compile errors when `SEARCH` statements with data specified `OCCURS` and `DEPENDING`
+  (4) Fix `ADD` statements and `SUBTRACT` statements (#546)
+    * In some case, the result of `SUBTRACT` was previously incorrect when the operands contais PIC S9(n) negative values.
+    * In some case, the result of `ADD` was -0 instead of +0 previously.
+  (5) Fix the process of checking signs of PIC 9(n) containing spaces (#549)
+  (6) Fix `INSPECT` statements (#550)
+    * The older versions change signs of some values accidentally because of the bug of `INSPECT` statements.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.3
+
+** New Features
+  (1) Add a new option `-variable`
+    * With `-variable`, cobj allows 73 or more characters for each lines
+  (2) Add documentations that describe the structure of libcobj and generated Java files
+  (3) Add Visual Studio Code Dev Container of opensource COBOL 4J
+
+** Bug Fixes
+  (1) Fix a build error of opensource COBOL 4J on Windows 10
+  (2) Fix a build error of opensource COBOL 4J on Docker
+  (3) Fix `cobj-api`
+    * `cobj-api` previously generated invalid constructors in record classses
+  (4) Fix typos of `cobj-idx` command
+  (5) Fix a command line option `-fserial-variable`
+
+** Miscellaneous
+  (1) Improve the readability of variable names containing multi-byte characters
+  (2) Convert some EVALUATE statements to switch statements
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.2
+
+** New Features
+  (1) Add a new command line option `-Wtruncate`
+** Bug Fixes
+  (1) Fix `CALL (an integer) BY CONTENT`.
+  (2) Change `-m` option so that generated jar files contains only class files.
+      Now `-m` becomes an alias of `-jar`.
+  (3) Show an error message when SCREEN SECTION is found.
+** Miscellaneous
+  (1) Improve code generated by cobj-api.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.1
+
+** New Features
+  (1) Release [documentations](https://opensourcecobol.github.io/opensourcecobol4j/javadoc/libcobj/index.html) of the runtime library `libcobj.jar`
+  (2) opensource COBOL 4J on Windows passed COBOL85 test suites
+** Miscellaneous
+  (1) Upgrade dependencies of `libcobj.jar` to the latest versions
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.1.0
+
+** New Features
+  (1) Support Windows
+  (2) Add `-Wimplicit-define`
+** Bug Fixes
+  (1) Fix READ PREVIOUS statement after START statement with <= operator
+  (2) Fix Java code generated by cobj-api. Symbols "-" in Java variables are converted to "_"
+** Miscellaneous
+  (1) Refactor libcobj/
+  (2) Support Ubuntu 24.04
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.22
+
+** New Features
+  (1) Add cobj-api command
+  (2) Implement `-Wstrict-typing`
+** Miscellaneous
+  (1) Simplify generated Java code based on SonarQube analysis
+  (2) Improve the error message for record keys with duplicates
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.21
+
+** New Features
+  (1) Implement a new option `-info-json-dir`
+  (2) Fix DISPLAY/ACCEPT for environment variables
+  (3) Implement a new option `-ext`
+  (4) Implement a new option `-Wcall-params`
+** Miscellaneous
+  (1) Improve the maintainability of generate Java files
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.20
+
+** New Features
+  (1) Add command line options
+    * -conf: specify the configuration file
+    * -std: specify the dialect
+    * -Wconstant: Warn inconsistent constant
+    * -Warchaic: Warn if archaic features are used
+    * -Wobsolete: Warn if obsolete features are used
+  (2) Add intrinsic functions
+    * LOCALE-DATE
+    * LOCALE-TIME
+    * LOCALE-TIME-FROM-SECONDS
+** Bug Fixes
+  (1) Fix runtime checkings
+  (2) Detect invalid indexed record keys
+  (3) Accept field names which contain Japanese characters
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.19
+
+** New Features
+  (1) A new CLI tool for indexed files
+  (2) Implement `COB_FILE_SEQ_WRITE_BUFFER_SIZE`
+  (3) Implement options `-ffold-copy-upper` and `-ffold-copy-lower`
+** Changed
+  (1) Change label names in Java source files based on COBOL labels
+** Bug Fixes
+  (1) Fix CobolUtil.isNationalPadding
+** Miscellaneous
+  (1) Refactor source code and resolve all gcc warnings
+  (2) Remove unused directory
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.18
+
+** New Features
+  (1) Support Amazon Linux 2023
+  (2) Implement runtime numeric checkings
+  (3) Implement sorting a table based on ebcdic
+  (4) Implement KEY IS option of SORT statements
+  (5) Add documents that describes installations and requirements
+  (6) Implement the environemt variable COB_NIBBLE_C_UNSIGNED
+  (7) Add built-in subroutines
+    (a) `C$CALLEDBY`
+    (b) `C$LIST-DIRECTORY`
+  (8) Implement `NUMBER-OF-CALL-PARAMETERS`
+** Bug fixes
+  (1) Fix the message of COB_VERBOSE file sort
+  (2) Fix the process that checks MOVE statements
+  (3) Fix `INSPECT` statement
+  (4) Fix error handlings of 0 divisions
+  (5) Fix an error of comparing large numbers
+  (6) Fix checkings for subscripts
+  (7) Fix FUNCTION VARIANCE
+** Miscellaneous
+  (1) Optimize the file reading process
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.17
+
+** New Features
+  (1) Implement sorting a table
+  (2) Implement functions SUBSTITUTE and SUBSTITUTE-CASE
+** Miscellaneous
+  (1) Support JDK 11
+    (a) Older versions are tested with JDK 17 and 1.0.17 is tested with JDK 11.
+    (b) Plan to support JDK 8 in the future.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.16
+
+** New Features
+  (1) Publish libcobj.jar in GitHub Packages
+  (2) Implement intrinsic functions
+    (a) ORD-MAX
+    (b) ORD-MIN
+    (c) SECONDS-FROM-FORMATTED-TIME
+    (d) SIGN
+    (e) STORED-CHAR-LENGTH
+    (f) TRIM
+
+** Bug fixes
+  (1) Fix `DECIMAL POINT IS COMMA` in `SPECIAL NAMES` clause.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.15
+
+** New Features
+  (1) Add new intrinsic functions
+     (a) EXCEPTION-FILE
+     (b) EXCEPTION-LOCATION
+     (c) EXCEPTION-STATEMENT
+     (d) EXCEPTION-STATUS
+     (e) FRACTION-PART
+  (2) Add -Wredefinition option
+  (3) Implement FD with EXTERNAL clause
+
+** Bug fixes
+  (1) Fix a build error on some platforms
+
+** Miscellaneous
+  (1) Add a guidelines for contributing 
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.14
+
+** New Features
+  (1) Add `-jar` and `-single-jar` option
+  (2) Add FUNCTION COMBINED-DATETIM
+  (3) Add FUNCTION CONCATENATE
+
+** Bug fixes
+  (1) Fix INDEXED files
+  (2) Fix comparison of PIC N
+
+** Miscellaneous
+  (1) Improve the readability of CALL statements
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.13
+
+** New Features
+  (1) Add -debug option
+  (2) Add -Wparentheses option
+  (3) Add -Wcolumn-overflow option
+  (4) Add -fmfcomment option
+  (5) Add -ffunctions-all option
+  (6) Implement COB_IO_ASSUME_REWRITE
+  (7) Output version strings in generated Java files
+
+** Improve Performance
+  (1) Optimize ADD statement and SUBTRACT statement
+  (2) Optimize comparison of PIC S9(n)V(m)
+  (3) Implement the precomputation for CobolDataStorage
+
+** Bug fixes
+  (1) Fix non-NIST tests
+  (2) Fix CALL parameter
+  (3) Fix COMPUTE statement
+  (4) Fix SORT statement
+  (5) Fix EXIT PERFORM CYCLE
+  (6) Fix functions CURRENT-DATE and SYSTEM
+  (1) Fix displaying numbers
+
+** Miscellaneous
+  (1) Improve the variable names in generated Java files
+  (2) Update tests for NIST COBOL85 tests
+  (3) Refactor generated Java files
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.12
+
+** New Features
+  (1) Add -fdefaultbyte option
+
+** Improve Performance
+  (1) Improve the performance of converting String to a byte array and comparision of 9(m)V9(n)
+  (2) Improve the performance of file processing slightly
+
+** Bug fixes
+  (1) Fix the bugs of USAGE COMP, USAGE COMP-3 and PIC N(m)
+  (2) Fix CANCEL statement
+
+** Miscellaneous
+  (1) Run NIST85 tests for Relative files and add the test status to README.md
+  (2) Refactor Java files in libcobj/ in order to pass static analysis "PMD"
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.11
+
+** New Features
+  (1) Add -j and -java-source-dir options to control the file paths where Java files are generated
+  (2) Add -o and -class-file-dir options to control the file paths where class files are generated
+
+** Bug fixes
+  (1) Fix a bug related to RELATIVE files
+  (2) Fix a minor bug
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.10
+
+** Bug fixes
+  (1) Fix a bug related to string literals containing specified multi-byte characters
+    * For example, "十郎"
+
+** Miscellaneous
+  (1) Fix some tests
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.9
+
+** New Features
+    (1) Implement -constant option and $IF macro
+    (2) Improve the readability of Shift_JIS string literals in generated Java files
+
+** Bug fixes
+    (1) Fix some mathematical functions
+    (2) Fix error messages for invalid MOVE statements
+    (3) Fix some broken tests
+
+** Miscellaneous
+    (1) Remove some unused variables in generated Java files
+    (2) Fix some warning messages of make command
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.8
+
+** New Features
+    (1) Implement RELATIVE files
+       (a) Pass all NIST tests on Relative files
+    (2) Implement ${DESTDIR} of libcobj/Makefile
+
+** Bug fixes
+    (1) Fix move statement for COMP-3
+       (a) Fix moveFrom method of CobolNumericPackedField
+    (2) Fix warnings found by static analyzers
+
+** Miscellaneous
+    (1) Format all C source code in cobj/ using clang-format
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.7
+
+** New Features
+    (1) Implement DELETE FILE statement of SEQUENTIAL files and LINE SEQUENTIAL files
+    (2) Improve Java interface, much better way to call COBOL from Java
+    (3) Add -java-package option
+    (4) Implement SET ENVIRONMENT statement
+
+** Bug fixes
+    (1) Fix the bug involved with the environment variables COB_I_O_CREATE and COB_EXTEND_CREATE
+    (2) Fix the comparison process of COMP-3
+    (3) Fix EXIT PERFORM and EXIT PERFORM CYCLE
+
+** Miscellaneous
+    (1) Format all Java source code in libcobj/ using Google Java Format
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.6
+
+** New Features
+    (1) Add -fshort-variable option
+    (2) make install command installs libcobj.jar in ${prefix}/lib/opensourcecobol4j
+
+** Bug fixes
+    (1) Fix FUNCTION CURRENT-DATE
+
+** Miscellaneous
+    (1) Build and run tests on AlmaLinux 9
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.5
+
+** New Features
+    (1)  -m option and cobjrun command (an experimental feature)
+    (2)  -g option
+    (3)  -E option
+    (4)  -B option
+    (5)  --list-reserved option
+    (6)  -fsyntax-only option
+    (7)  -Wunreachable option
+    (8)  -t option
+    (9)  -C option
+    (10) -free and -free_1col_aster options
+
+** Bug fixes
+
+    (1) Fix exit perform and perform cycle
+    (2) Fix comparing NATIONAL characters
+    (3) Fix "FUNCTION CURRENT-DATE"
+    (4) Fix the bug of "IS NUMERIC" for COMP-3 data
+    (5) Fix comparing HIGH-VALUE and PIC X(n) data
+    (6) Fix moving sign-leading-separate to COMP3
+
+** Miscellaneous
+
+    (1) Remove libcob/ directory
+    (2) Resolve some warnings displayed when executing make command
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.4
+
+** New Features
+    (1) Rename cobc, the compile command, to cobj.
+    (2) -fserial-variable option
+        (2-1) By default, Java variable names are f_{COBOL variable name} or b_{COBOL variable name}. With -fvar-number option, Java variable names are f_{serial number}.
+    (3) Improve the performance of control statements.
+    (4) In v1.0.3 and earlier, the memory consumption increases the number of GOTO loops increases. In v1.0.4, the memory problem is solved.
+        (4-1) Due to the fix, the number of class files that cobj command genearates increase compared to earlier version in some cases.
+    (6) Implement -ftrace and -ftraceall options.
+    (7) Change the license of libcobj to LGPL3.
+
+** Bug fixes
+
+    (1) Fix the problem of signed comp-3 data.
+    (2) Fix the problem of MOVE statement.
+    (3) Fix the problem of EXTERNAL
+
+** Miscellaneous
+
+    (1) Remove some unnecessary directories(bin/, vbisam/, m4/, win32).
+    (2) Remove dependencies on ncurses.
+    (3) Fix the build system of tests/ directory.
+    (4) Add test cases for new features and bug fixes.
+    (5) When converting COBOL source code with EXTERNAL to Java source code, insert line breaks to make them easier to read.
+
+-----------------------------------------------------------------------
+
+
+* opensource COBOL 4J 1.0.3
+
+** New features
+    (1) Change the storage library for indexed file to SQLite.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.2
+
+** New features
+    (1) Upgrade the license to GPL3.
+
+** Bug fixes
+    (1) Fix the problem that cobc translates EXIT PERFORM statements to invalid Java source code.
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.1
+
+** Bug fixes
+    (1) Fix the transformation of call arguments
+
+-----------------------------------------------------------------------
+
+* opensource COBOL 4J 1.0.0
+
+** Bug fixes
+    (1) Fix the status code after opening indexed files.
+    (2) Fix the behavior of delete and rewrite indexed files
+
+-----------------------------------------------------------------------
+
+* release opensource COBOL 4J developers edition.
+
+-----------------------------------------------------------------------

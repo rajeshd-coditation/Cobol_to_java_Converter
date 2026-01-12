@@ -1,0 +1,17 @@
+{
+    "name": "opensource COBOL 4J development",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "postCreateCommand": ".devcontainer/boot.sh && source ~/.bashrc",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "bitlang.cobol",
+                "ms-vscode.cpptools",
+                "vscjava.vscode-java-pack",
+                "daohong-emilio.yash"
+            ]
+        }
+    }
+}

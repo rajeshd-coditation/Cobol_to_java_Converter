@@ -1,0 +1,136 @@
+AT_SETUP([dollarif defined - true])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW1 DEFINED
+           DISPLAY 'SW1 DEFINED'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW1 prog.cob])
+AT_CHECK([${RUN_MODULE} prog], [0], [SW1 DEFINED
+])
+
+AT_CLEANUP
+
+AT_SETUP([dollarif defined - false])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW2 NOT DEFINED
+           DISPLAY 'SW2 NOT DEFINED'.
+      $ELSE
+           DISPLAY 'SW2 DEFINED'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW2 prog.cob])
+AT_CHECK([${RUN_MODULE} prog], [0], [SW2 DEFINED
+])
+
+AT_CLEANUP
+
+AT_SETUP([dollarif value match - true])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW3 = "1"
+           DISPLAY 'SW3 = 1'.
+      $ELSE
+           DISPLAY 'SW3 != 1'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW3\"1\" prog.cob])
+AT_CHECK([java prog], [0], [SW3 = 1
+])
+
+
+AT_CLEANUP
+
+AT_SETUP([dollarif value match - false])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW3 = "1"
+           DISPLAY 'SW3 = 1'.
+      $ELSE
+           DISPLAY 'SW3 != 1'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW3\"2\" prog.cob])
+AT_CHECK([java prog], [0], [SW3 != 1
+])
+
+AT_CLEANUP
+
+AT_SETUP([dollarif value match - not true])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW4 NOT = "1"
+           DISPLAY 'SW4 != 1'.
+      $ELSE
+           DISPLAY 'SW4 = 1'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW4\"2\" prog.cob])
+AT_CHECK([java prog], [0], [SW4 != 1
+])
+
+AT_CLEANUP
+
+AT_SETUP([dollarif value match - not false])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       PROCEDURE DIVISION.
+      $IF SW4 NOT = "1"
+           DISPLAY 'SW4 != 1'.
+      $ELSE
+           DISPLAY 'SW4 = 1'.
+      $END
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} --constant=SW4\"1\" prog.cob])
+AT_CHECK([java prog], [0], [SW4 = 1
+])
+
+AT_CLEANUP
+
+AT_SETUP([column 7 is undefined value])
+
+AT_DATA([prog.cob], [
+       IDENTIFICATION   DIVISION.
+       PROGRAM-ID.      prog.
+       DATA             DIVISION.
+      1WORKING-STORAGE  SECTION.
+       PROCEDURE        DIVISION.
+           DISPLAY "OK".
+           STOP RUN.
+])
+
+AT_CHECK([${COMPILE} prog.cob], [1], [], 
+[prog.cob:4: Error: Invalid indicator '1' at column 7
+])
+
+AT_CLEANUP

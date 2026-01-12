@@ -1,0 +1,21 @@
+#!/bin/bash
+
+CHECK_RESULT=$(clang-format --dry-run \
+cobj.c \
+cobj.h \
+codegen.c \
+config.c \
+error.c \
+field.c \
+reserved.c \
+tree.c \
+tree.h \
+typeck.c 2>&1)
+
+if [ -z "$CHECK_RESULT" ]
+then
+	true
+else
+	echo ${CHECK_RESULT}
+	false
+fi

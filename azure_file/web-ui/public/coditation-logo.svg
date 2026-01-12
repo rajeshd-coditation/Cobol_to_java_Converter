@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 50">
+  <!-- Coditation Logo - Transparent SVG -->
+  
+  <!-- Outer circle ring -->
+  <circle cx="25" cy="25" r="20" fill="none" stroke="#ffffff" stroke-width="4"/>
+  
+  <!-- Inner blob shape (C shape with dot) -->
+  <ellipse cx="22" cy="25" rx="10" ry="10" fill="#818cf8"/>
+  <circle cx="38" cy="25" r="4" fill="#818cf8"/>
+  
+  <!-- Connection between blob and dot -->
+  <rect x="28" y="22" width="10" height="6" fill="#818cf8"/>
+  
+  <!-- CODITATION text -->
+  <text x="58" y="33" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="600" fill="#ffffff" letter-spacing="2">CODITATION</text>
+</svg>

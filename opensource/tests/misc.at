@@ -1,0 +1,60 @@
+# Copyright (C) 2021-2022 TOKYO SYSTEM HOUSE Co., Ltd.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this software; see the file COPYING.  If not, write to
+# the Free Software Foundation, 51 Franklin Street, Fifth Floor
+# Boston, MA 02110-1301 USA
+AT_INIT([miscellaneous])
+
+m4_include([signed-comp3.at])
+m4_include([index-comp.at])
+m4_include([compare-national.at])
+m4_include([current-date.at])
+m4_include([comp3-is-numeric.at])
+m4_include([high-low-value.at])
+m4_include([move-sign-leading-separate-to-signed-comp3.at])
+m4_include([java-interface.at])
+m4_include([comp3-int.at])
+m4_include([env.at])
+m4_include([exit-perform.at])
+m4_include([comp-overflow.at])
+m4_include([compare-national-diff-size.at])
+m4_include([compare-9.at])
+m4_include([comp3-overflow.at])
+m4_include([cancel-hyphen.at])
+m4_include([string-call-parameter.at])
+m4_include([display-numeric.at])
+m4_include([exit-perform-cycle.at])
+m4_include([version-string-in-java.at])
+m4_include([comp3-compute.at])
+m4_include([index-file-status.at])
+m4_include([comp-n.at])
+m4_include([fd-external.at])
+m4_include([compile-multiple-files.at])
+m4_include([compare-large-number.at])
+m4_include([validate-indexed-file-keys.at])
+m4_include([record-key-duplicates-error.at])
+#m4_include([copy-comments.at])
+m4_include([read_prev_after_start.at])
+m4_include([japanese-char-section-var.at])
+m4_include([evaluate-switch.at])
+m4_include([fserial-variable.at])
+m4_include([file-handler-japanese.at])
+m4_include([perform-until-div.at])
+m4_include([search-occurs-depending.at])
+m4_include([fix-subtract.at])
+m4_include([display-numeric-NUMERIC-class.at])
+m4_include([display-inspect-sign.at])
+m4_include([comp1-comp2.at])
+m4_include([variable-length-file.at])
+m4_include([convert-string-concat.at])
