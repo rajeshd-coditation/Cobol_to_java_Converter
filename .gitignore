@@ -79,17 +79,17 @@ configure~
 report.html
 
 # Web UI
-azure_file/web-ui/node_modules/
-azure_file/web-ui/.env
+opensource/tools/web-ui/node_modules/
+opensource/tools/web-ui/.env
 
 # Large Files & Test Artifacts
 CobolToJava_CardDemo.zip
-azure_file/DA-S-FAVOUT
-azure_file/carddemo_output/
-azure_file/cobol_output/
-azure_file/azure_cobol_output_*/
-azure_file/work/
-azure_file/java/
-azure_file/scanner.log
-azure_file/report.json
-azure_file/server.log
+opensource/tools/DA-S-FAVOUT
+opensource/tools/carddemo_output/
+opensource/tools/cobol_output/
+opensource/tools/azure_cobol_output_*/
+opensource/tools/work/
+opensource/tools/java/
+opensource/tools/scanner.log
+opensource/tools/report.json
+opensource/tools/server.log
