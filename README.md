@@ -5,7 +5,7 @@
 
 ## Overview
 
-This project extends the **OpenSourceCobol4j** framework to provide a **modern Web UI** and an **AI-powered COBOL → Java conversion pipeline**.
+This project extends the **OpenSourceCobol4j** framework to provide a **modern Web UI** and an **AI-powered COBOL → Java conversion pipeline**. 
 
 The framework supports:
 
