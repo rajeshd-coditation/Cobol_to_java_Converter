@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- White-label: Coditation Branding -->
+    <title>COBOL to Java Conversion | Coditation</title>
+    <meta name="description"
+        content="Transform legacy COBOL repositories to modern Java with Coditation's automated conversion platform. Fast, reliable, and accurate code migration.">
+    <meta name="keywords" content="COBOL, Java, conversion, migration, legacy modernization, Coditation">
+    <meta name="author" content="Coditation">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="coditation-logo.png">
+
+    <!-- Open Graph / Social Sharing -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="COBOL to Java Conversion | Coditation">
+    <meta property="og:description" content="Transform legacy COBOL repositories to modern Java with one click">
+    <meta property="og:image" content="coditation-logo.png">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#100c3b">
+    <meta name="msapplication-TileColor" content="#100c3b">
+
+    <!-- Fonts & Styles -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css" rel="stylesheet">
+</head>
+
+
+
+<body>
+    <div class="background-effects">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="app-shell">
+        <!-- Slim top header: brand + repo input + actions -->
+        <header class="app-header">
+            <div class="brand">
+                <img src="https://cdn.prod.website-files.com/610bfc91018da08fe2526479/6128cb53ba31083c8a8d524e_logo%203.svg" alt="Coditation" class="coditation-logo">
+            </div>
+
+            <div class="header-input-group">
+                <input type="text" id="repoInput"
+                    placeholder="Git URL or local repository path"
+                    autocomplete="off">
+                <div class="sample-wrap">
+                    <button id="sampleBtn" class="btn-pill btn-ghost" type="button"
+                        title="Pick a bundled sample repo">
+                        Try sample ▾
+                    </button>
+                    <div id="sampleMenu" class="sample-menu hidden"></div>
+                </div>
+                <button id="convertBtn" class="btn-pill btn-primary" disabled
+                    title="Enter a repository URL or pick a sample first">
+                    <span class="btn-text">Convert</span>
+                    <span class="btn-loader hidden"></span>
+                </button>
+                <div id="activeFileBreadcrumb" class="active-file-breadcrumb hidden">
+                    <span class="breadcrumb-spinner"></span>
+                    <span class="breadcrumb-label">Converting</span>
+                    <span class="breadcrumb-name" id="activeFileName">—</span>
+                    <span class="breadcrumb-extra" id="activeFileExtra"></span>
+                </div>
+                <button id="stopBtn" class="btn-pill btn-stop" type="button" disabled
+                    title="No conversion is currently running">
+                    Stop
+                </button>
+                <button id="resetBtn" class="btn-pill btn-ghost" type="button"
+                    onclick="resetSession()" title="Clear current results and start fresh">
+                    Reset
+                </button>
+                <button id="drawerToggleBtn" class="btn-pill btn-ghost" type="button"
+                    onclick="toggleRightDrawer()" title="Show activity / stream / history">
+                    Activity
+                    <span id="drawerBadge" class="drawer-badge hidden">0</span>
+                </button>
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark theme" id="themeToggleBtn">
+                    <span id="themeIcon">☀</span>
+                </button>
+            </div>
+
+            <div class="header-meta">
+                <!-- Hidden but kept for app.js compatibility -->
+                <div id="aiStatusBadge" class="hidden"></div>
+                <!-- Note: emoji icons removed across the UI for a cleaner typographic look -->
+                <div id="azureToggleSection" class="hidden">
+                    <label><input type="checkbox" id="useAzureAI" checked></label>
+                </div>
+
+                <!-- Human review toggle (HITL) -->
+                <div class="human-review-wrap">
+                    <label class="btn-pill btn-toggle" id="reviewModeLabel">
+                        <input type="checkbox" id="reviewModeToggle">
+                        <span class="toggle-text">
+                            Human review
+                            <span id="reviewQueueBadge" class="review-queue-badge hidden">0</span>
+                        </span>
+                    </label>
+                    <button type="button" class="info-icon" tabindex="0"
+                        aria-label="What does Human review do?">i</button>
+                    <div class="info-popover">
+                        <div class="info-popover-title">What "Human review" does</div>
+                        <p>When ON, the conversion <strong>pauses after each file</strong> the AI translates. The node turns <span class="info-pill awaiting">amber</span> on the graph and shows up under <strong>Awaiting review</strong> in the sidebar.</p>
+                        <div class="info-popover-section">You can then:</div>
+                        <ul>
+                            <li>Click the amber node → modal opens with COBOL on the left and editable Java on the right</li>
+                            <li><strong>Approve as-is</strong> — write the AI's output to disk</li>
+                            <li><strong>Save edits &amp; approve</strong> — write your edited version to disk</li>
+                            <li><strong>Reject</strong> — mark the file as failed</li>
+                        </ul>
+                        <div class="info-popover-section">Optional glob filter:</div>
+                        <p>If you set a pattern like <code>**/critical/*.cbl</code>, only files matching it will pause for review. Everything else flows through automatically.</p>
+                        <div class="info-popover-section">Bulk actions:</div>
+                        <p>When multiple files queue up, use <strong>Approve all</strong> / <strong>Reject all</strong> in the sidebar to clear the queue at once.</p>
+                    </div>
+                </div>
+
+                <!-- Optional glob filter — only pause for matching paths -->
+                <input type="text" id="reviewGlobInput" class="btn-pill review-glob"
+                    placeholder="filter e.g. **/critical/*.cbl"
+                    title="Optional: only pause for files matching this glob pattern">
+            </div>
+        </header>
+
+        <!-- Workflow stepper -->
+        <div id="workflowBar" class="workflow-bar">
+            <div class="wf-step active" data-step="input">
+                <span class="wf-num">1</span>
+                <span class="wf-label">Input</span>
+            </div>
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="select">
+                <span class="wf-num">2</span>
+                <span class="wf-label">Select files</span>
+            </div>
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="analyze">
+                <span class="wf-num">3</span>
+                <span class="wf-label">Analyze deps</span>
+            </div>
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="convert">
+                <span class="wf-num">4</span>
+                <span class="wf-label">Convert</span>
+            </div>
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="review">
+                <span class="wf-num">5</span>
+                <span class="wf-label">Review</span>
+            </div>
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="results">
+                <span class="wf-num">6</span>
+                <span class="wf-label">Results</span>
+            </div>
+        </div>
+
+        <!-- Workspace: sidebar + main canvas -->
+        <div class="workspace">
+            <aside class="sidebar phase-hide" data-show-phases="analyze convert review results">
+                <div class="hero-copy">
+                    <h1 class="hero-title">COBOL <span class="highlight">→</span> Java</h1>
+                    <p class="hero-tagline">Live, AI-driven legacy modernization</p>
+                </div>
+
+                <!-- Activity moved to right drawer; legacy stub keeps JS happy -->
+                <div id="chatMessages" class="hidden"></div>
+                <div id="chatActions" class="hidden"></div>
+
+                <!-- Live counts (populated during conversion) -->
+                <div id="liveCounts" class="live-counts hidden">
+                    <div class="live-row">
+                        <span class="live-label">Total</span>
+                        <span class="live-value" id="liveTotal">0</span>
+                    </div>
+                    <div class="live-row done">
+                        <span class="live-label"><span class="live-dot done"></span>Done</span>
+                        <span class="live-value" id="liveDone">0</span>
+                    </div>
+                    <div class="live-row active">
+                        <span class="live-label"><span class="live-dot active"></span>Converting</span>
+                        <span class="live-value" id="liveActive">0</span>
+                    </div>
+                    <div class="live-row awaiting">
+                        <span class="live-label"><span class="live-dot awaiting"></span>Awaiting review</span>
+                        <span class="live-value" id="liveAwaiting">0</span>
+                    </div>
+                    <div class="live-row failed">
+                        <span class="live-label"><span class="live-dot failed"></span>Failed</span>
+                        <span class="live-value" id="liveFailed">0</span>
+                    </div>
+                    <div class="live-row skipped">
+                        <span class="live-label"><span class="live-dot skipped"></span>Skipped</span>
+                        <span class="live-value" id="liveSkipped">0</span>
+                    </div>
+                </div>
+
+                <!-- Status + progress -->
+                <div id="statusSection" class="status-section hidden">
+                    <div class="status-header">
+                        <span class="status-label">Status</span>
+                        <span id="statusBadge" class="status-badge">Running</span>
+                    </div>
+                    <div id="progressContainer" class="progress-container">
+                        <div class="progress-info">
+                            <span id="progressStep" class="progress-step">Initializing…</span>
+                            <span id="progressPercent" class="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div id="progressBar" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Risks / warnings panel -->
+                <div id="risksPanel" class="risks-panel hidden">
+                    <div class="risks-header">
+                        <span>Risks &amp; warnings</span>
+                        <span id="risksCount" class="risks-count">0</span>
+                    </div>
+                    <div id="risksList" class="risks-list"></div>
+                </div>
+
+                <!-- Token usage panel -->
+                <div id="tokenPanel" class="token-panel hidden">
+                    <div class="token-header">LLM tokens</div>
+                    <div class="token-row"><span>Prompt in</span><span id="tokenIn" class="token-value">0</span></div>
+                    <div class="token-row"><span>Completion out</span><span id="tokenOut" class="token-value">0</span></div>
+                    <div class="token-row total"><span>Total</span><span id="tokenTotal" class="token-value">0</span></div>
+                    <div class="token-row dim"><span>API calls</span><span id="tokenCalls" class="token-value">0</span></div>
+                </div>
+
+                <!-- Coming-soon / disabled features (transparency for the demo) -->
+                <!-- All "Coming soon" features have been implemented -->
+
+                <p class="sidebar-hint">Supports Git URLs and local filesystem paths.</p>
+            </aside>
+
+            <!-- Empty state: shown before anything is loaded (OUTSIDE workspace, centered over full area) -->
+            <div id="canvasEmptyState" class="canvas-empty-state phase-hide" data-show-phases="input">
+                <div class="empty-hero">
+                    <!-- Animated conversion flow -->
+                    <div class="hero-anim">
+                        <div class="hero-anim-box cobol">
+                            <div class="hero-anim-label">COBOL</div>
+                            <div class="hero-anim-code" id="heroCobolCode"></div>
+                        </div>
+                        <div class="hero-anim-arrow">
+                            <div class="hero-anim-engine">
+                                <span class="hero-engine-label">Coditation AI</span>
+                            </div>
+                            <div class="hero-anim-particles">
+                                <span class="particle p1"></span>
+                                <span class="particle p2"></span>
+                                <span class="particle p3"></span>
+                            </div>
+                        </div>
+                        <div class="hero-anim-box java">
+                            <div class="hero-anim-label">Java</div>
+                            <div class="hero-anim-code" id="heroJavaCode"></div>
+                        </div>
+                    </div>
+                    <p class="hero-subtitle">Paste a repo URL or click <strong>Try sample</strong> to begin</p>
+                </div>
+            </div>
+
+            <main class="canvas-area">
+                <!-- Live dependency graph -->
+                <div class="graph-section phase-hide" data-show-phases="analyze convert review results">
+                    <div class="graph-header">
+                        <h3>Dependency Graph</h3>
+                        <div class="graph-legend">
+                            <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
+                            <span class="legend-item"><span class="legend-dot active"></span>Converting</span>
+                            <span class="legend-item"><span class="legend-dot awaiting"></span>Awaiting review</span>
+                            <span class="legend-item"><span class="legend-dot done"></span>Done</span>
+                            <span class="legend-item"><span class="legend-dot failed"></span>Failed</span>
+                            <span class="legend-item"><span class="legend-dot skipped"></span>Skipped</span>
+                        </div>
+                    </div>
+                    <div class="graph-canvas-wrap">
+                        <div id="graphCanvas" class="graph-canvas empty"></div>
+                        <div class="graph-controls">
+                            <button class="graph-ctrl" onclick="graphZoom(1.3)" title="Zoom in">+</button>
+                            <button class="graph-ctrl" onclick="graphZoom(0.7)" title="Zoom out">−</button>
+                            <button class="graph-ctrl fit" onclick="graphFit()" title="Fit all nodes">Fit</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KPI summary bar (appears on completion) -->
+                <div id="kpiBar" class="kpi-bar hidden phase-hide" data-show-phases="results">
+                    <div class="kpi"><div class="kpi-value" id="kpiTotal">0</div><div class="kpi-label">Total files</div></div>
+                    <div class="kpi"><div class="kpi-value" id="kpiConverted">0</div><div class="kpi-label">Converted</div></div>
+                    <div class="kpi"><div class="kpi-value" id="kpiSuccessRate">0%</div><div class="kpi-label">Success rate</div></div>
+                    <div class="kpi"><div class="kpi-value" id="kpiAccuracy">0%</div><div class="kpi-label">Avg accuracy</div></div>
+                    <div class="kpi"><div class="kpi-value" id="kpiTokens">0</div><div class="kpi-label">LLM tokens</div></div>
+                    <div class="kpi"><div class="kpi-value" id="kpiDuration">--</div><div class="kpi-label">Duration</div></div>
+                    <button class="kpi-export-btn" onclick="exportReport()" title="Download report">Export</button>
+                </div>
+
+                <!-- Results browser: appears after conversion completes -->
+                <section id="browserSection" class="browser-section hidden phase-hide" data-show-phases="results">
+                    <div class="browser-header">
+                        <h3>Results browser</h3>
+                        <div class="browser-meta">
+                            <span id="browserCount">0 files</span>
+                            <span class="browser-hint">Click a file to view COBOL and Java side by side.</span>
+                        </div>
+                    </div>
+                    <!-- Compact terminal: inline input + side-by-side output -->
+                    <div id="runOutputPanel" class="run-terminal hidden">
+                        <div class="run-terminal-header">
+                            <span class="run-terminal-title">Run</span>
+                            <span id="runOutputFile" class="run-terminal-file"></span>
+                            <div class="run-inline-input">
+                                <input id="runInputField" class="run-input-compact" type="text"
+                                    placeholder="stdin input (e.g. 1,4 or 1\\n100.50\\n4)"
+                                    onkeydown="if(event.key==='Enter'){runSelectedFile()}">
+                                <button id="runBtn" class="btn-pill btn-primary btn-sm" onclick="runSelectedFile()">Run</button>
+                            </div>
+                            <button class="run-close-btn" onclick="closeRunOutput()" title="Close">×</button>
+                        </div>
+                        <div class="run-output-grid">
+                            <div class="run-output-pane cobol">
+                                <div class="run-output-pane-header">
+                                    <span class="run-pane-title">COBOL output</span>
+                                    <span id="runCobolMeta" class="run-pane-meta"></span>
+                                </div>
+                                <pre id="runCobolOutput" class="run-output-body"><code></code></pre>
+                            </div>
+                            <div class="run-output-pane java">
+                                <div class="run-output-pane-header">
+                                    <span class="run-pane-title">Java output</span>
+                                    <span id="runJavaMeta" class="run-pane-meta"></span>
+                                </div>
+                                <pre id="runJavaOutput" class="run-output-body"><code></code></pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="browser-grid">
+                        <div class="browser-tree" id="browserTree">
+                            <div class="empty-state">Loading…</div>
+                        </div>
+                        <div class="browser-pane">
+                            <div class="pane-header cobol-header">
+                                <span class="pane-title" id="browserCobolTitle">Original COBOL</span>
+                            </div>
+                            <pre id="browserCobolCode" class="browser-code"><code>Select a file from the tree to preview…</code></pre>
+                        </div>
+                        <div class="browser-pane">
+                            <div class="pane-header java-header">
+                                <span class="pane-title" id="browserJavaTitle">Generated Java</span>
+                            </div>
+                            <pre id="browserJavaCode" class="browser-code"><code>Select a file from the tree to preview…</code></pre>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Details moved into the Review assistant chat panel above -->
+            </main>
+        </div>
+
+            <section id="resultsSection" class="results-section hidden">
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon total"></div>
+                        <div class="stat-value" id="totalFiles">0</div>
+                        <div class="stat-label">Total Detected</div>
+                        <div class="stat-sublabel">COBOL files found</div>
+                    </div>
+
+                    <div class="stat-card glass-card highlight-card">
+                        <div class="stat-icon success"></div>
+                        <div class="stat-value" id="convertedFiles">0</div>
+                        <div class="stat-label">Fully Converted</div>
+                        <div class="stat-sublabel">Usable Java output</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon error"></div>
+                        <div class="stat-value" id="errorFiles">0</div>
+                        <div class="stat-label">Not Converted</div>
+                        <div class="stat-sublabel">See reasons below</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon rate">📈</div>
+                        <div class="stat-value" id="successRate">0%</div>
+                        <div class="stat-label">Success Rate</div>
+                        <div class="stat-sublabel">Fully converted / Total</div>
+                    </div>
+                    <div class="stat-card glass-card accuracy-card" id="accuracyCard">
+                        <div class="stat-icon accuracy"></div>
+                        <div class="stat-value" id="conversionAccuracy">0%</div>
+                        <div class="stat-label">Conversion Rate</div>
+                        <div class="stat-sublabel">Code coverage per file</div>
+                    </div>
+                </div>
+
+                <!-- Detailed Report -->
+                <div id="detailedReport" class="hidden" style="margin-bottom: 32px;">
+                    <h3 class="section-subtitle">Validation Insights</h3>
+                    <div id="reportContent">
+                    </div>
+                </div>
+
+                <!-- Why Some Files Don't Convert - Dynamic Section -->
+                <div id="conversionInfoSection" class="conversion-info glass-card hidden">
+                    <div class="info-header">
+                        <span class="info-title">Why some files weren't converted</span>
+                    </div>
+                    <div class="info-content" id="conversionBreakdown">
+                        <!-- Will be dynamically populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="files-panel glass-card">
+                    <div class="panel-tabs">
+                        <button class="tab-btn active" data-tab="converted">Fully converted</button>
+                        <button class="tab-btn" data-tab="skipped">Skipped</button>
+                        <button class="tab-btn" data-tab="error">Not converted</button>
+                    </div>
+                    <div class="panel-content">
+                        <div id="convertedPanel" class="file-list active">
+                            <p class="empty-state">No converted files yet</p>
+                        </div>
+                        <div id="skippedPanel" class="file-list">
+                            <p class="empty-state">No skipped files</p>
+                        </div>
+                        <div id="errorPanel" class="file-list">
+                            <p class="empty-state">No error files</p>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-content">
+                <p class="footer-brand">© 2026 <strong>Coditation</strong>. All rights reserved.</p>
+                <p class="footer-links">
+                    <a href="https://coditation.com" target="_blank">Website</a>
+                    <span class="separator">•</span>
+                    <a href="https://coditation.com/contact" target="_blank">Contact</a>
+                </p>
+            </div>
+        </footer>
+
+
+    </div>
+
+    <div id="codeModal" class="modal hidden">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">File Preview</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <pre id="codePreview"><code></code></pre>
+        </div>
+    </div>
+
+    <!-- Comparison Modal for COBOL vs Java output -->
+    <div id="comparisonModal" class="modal hidden">
+        <div class="modal-content glass-card comparison-modal">
+            <div class="modal-header">
+                <h3 id="comparisonTitle">Output Comparison</h3>
+                <button class="close-btn" onclick="closeComparisonModal()">&times;</button>
+            </div>
+            <div class="comparison-container">
+                <div class="comparison-pane">
+                    <div class="pane-header">
+                        <span class="pane-title">Native COBOL output</span>
+                    </div>
+                    <pre id="nativeOutput" class="output-content"><code>No output available</code></pre>
+                </div>
+                <div class="comparison-divider"></div>
+                <div class="comparison-pane">
+                    <div class="pane-header">
+                        <span class="pane-title">Java output</span>
+                    </div>
+                    <pre id="javaOutput" class="output-content"><code>No output available</code></pre>
+                </div>
+            </div>
+            <div id="diffSection" class="diff-section hidden">
+                <div class="diff-header">
+                    <span>Difference details</span>
+                </div>
+                <pre id="diffOutput" class="diff-content"><code></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dual Code View Modal (COBOL Source vs Java Code) -->
+    <div id="codeComparisonModal" class="modal hidden">
+        <div class="modal-content glass-card comparison-modal code-comparison-modal">
+            <div class="modal-header">
+                <h3 id="codeComparisonTitle">Code Comparison</h3>
+                <button class="close-btn" onclick="closeCodeComparisonModal()">&times;</button>
+            </div>
+            <div class="comparison-container">
+                <div class="comparison-pane">
+                    <div class="pane-header cobol-header">
+                        <span class="pane-title">Original COBOL source</span>
+                    </div>
+                    <pre id="cobolSource" class="output-content code-content"><code>Loading COBOL source…</code></pre>
+                </div>
+                <div class="comparison-divider"></div>
+                <div class="comparison-pane">
+                    <div class="pane-header java-header">
+                        <span class="pane-title">Generated Java</span>
+                    </div>
+                    <pre id="javaCode" class="output-content code-content"><code>Loading Java code...</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Analysis Modal -->
+    <div id="aiModal" class="modal hidden">
+        <div class="modal-content glass-card ai-modal">
+            <div class="modal-header">
+                <h3 id="aiModalTitle">AI analysis</h3>
+                <button class="close-btn" onclick="closeAiModal()">&times;</button>
+            </div>
+            <div id="aiModalContent" class="ai-modal-content">
+                <div class="ai-loading">
+                    <div class="ai-spinner"></div>
+                    <p>Analyzing with AI...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right slide-out drawer: unified Details timeline -->
+    <aside id="rightDrawer" class="right-drawer hidden">
+        <div class="drawer-handle" onclick="toggleRightDrawer()" title="Hide drawer">›</div>
+        <div class="drawer-inner">
+            <div class="drawer-title-bar">
+                <span class="drawer-title">Details</span>
+                <span id="chatStatusPill" class="chat-status idle">Idle</span>
+            </div>
+            <div id="detailsTimeline" class="details-timeline">
+                <div class="empty-state">Activity will appear here once a conversion starts.</div>
+            </div>
+            <!-- Hidden: keeps legacy element references alive for pollStatus / app.js -->
+            <div id="logsContainer" class="hidden"><pre id="logsOutput"></pre></div>
+            <div id="detailsFilesList" class="hidden"></div>
+            <div id="historyList" class="hidden"></div>
+        </div>
+    </aside>
+
+    <!-- Graph hover tooltip -->
+    <div id="graphTooltip" class="graph-tooltip"></div>
+
+    <!-- Toast container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Pre-conversion file selection modal -->
+    <div id="preConvertModal" class="modal hidden">
+        <div class="modal-content glass-card pre-convert-modal">
+            <div class="modal-header">
+                <h3>Select files to convert</h3>
+                <button class="close-btn" onclick="closePreConvertModal()">&times;</button>
+            </div>
+            <div class="pre-convert-meta">
+                <div class="pre-convert-counts" id="preConvertCounts">Loading…</div>
+                <div class="pre-convert-search">
+                    <input type="text" id="preConvertSearch" placeholder="Filter by path…">
+                </div>
+                <div class="pre-convert-bulk">
+                    <button class="btn-pill btn-ghost" onclick="preConvertSelectAll()">Select all</button>
+                    <button class="btn-pill btn-ghost" onclick="preConvertSelectNone()">Select none</button>
+                    <button class="btn-pill btn-ghost" onclick="preConvertSelectCobol()">COBOL only</button>
+                </div>
+            </div>
+            <div id="preConvertList" class="pre-convert-list">
+                <div class="empty-state">Scanning repository…</div>
+            </div>
+            <div class="pre-convert-actions">
+                <span id="preConvertSelected" class="pre-convert-selected">0 selected</span>
+                <button class="btn-pill btn-ghost" onclick="closePreConvertModal()">Cancel</button>
+                <button class="btn-pill btn-primary" id="preConvertStartBtn" onclick="preConvertStart()">Start conversion</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- HITL Review Modal -->
+    <div id="reviewModal" class="modal hidden">
+        <div class="modal-content glass-card review-modal">
+            <div class="modal-header">
+                <h3 id="reviewModalTitle">Review conversion</h3>
+                <button class="close-btn" onclick="closeReviewModal()">&times;</button>
+            </div>
+            <div class="review-body">
+                <div class="review-pane">
+                    <div class="pane-header"><span class="pane-title">Original COBOL</span></div>
+                    <pre id="reviewCobolSource" class="output-content code-content"><code>Loading…</code></pre>
+                </div>
+                <div class="comparison-divider"></div>
+                <div class="review-pane">
+                    <div class="pane-header"><span class="pane-title">Generated Java (editable)</span></div>
+                    <textarea id="reviewJavaCode" class="review-textarea" spellcheck="false"></textarea>
+                </div>
+            </div>
+            <div id="reviewDiffPanel" class="review-diff-panel hidden">
+                <div class="diff-title-bar">
+                    <span>Changes from AI output</span>
+                    <button class="btn-pill btn-ghost" style="height:26px;padding:0 10px;font-size:10px" onclick="hideReviewDiff()">Close diff</button>
+                </div>
+                <pre id="reviewDiffContent" class="review-diff-content"></pre>
+            </div>
+            <div class="review-actions">
+                <button class="btn-pill btn-ghost" onclick="showReviewDiff()" title="Compare your edits against the original AI output">Show diff</button>
+                <div style="flex:1"></div>
+                <button class="btn-pill btn-ghost review-reject" onclick="submitReview('reject')">Reject</button>
+                <button class="btn-pill btn-ghost review-edit" onclick="submitReview('edit')">Save edits &amp; approve</button>
+                <button class="btn-pill btn-primary" onclick="submitReview('approve')">Approve as-is</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cytoscape + fcose layout for the live dependency graph -->
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
+    <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
+    <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+    <script src="graph.js"></script>
+    <!-- Prism.js core + languages + line-numbers plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cobol.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

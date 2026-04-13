@@ -77,19 +77,27 @@ cobj -v
 
 ## Installation
 
-### 1. Navigate to Web UI
+### 1. Clone & enter the repo
 
 ```bash
-cd opensourcecobol4j/tools/web-ui
+git clone <this-repo-url> cobol-to-java-converter
+cd cobol-to-java-converter/opensourcecobol4j/tools/web-ui
 ```
 
-### 2. Install Dependencies
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+# edit .env and fill in your Azure OpenAI credentials
+```
+
+### 3. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Run the Application
+### 4. Run the application
 
 ```bash
 npm start
@@ -207,7 +215,7 @@ http://localhost:3000
 
 ### Step 4: Configure Environment
 
-Create `.env` in `tools/web-ui/`:
+Copy `.env.example` to `.env` in `opensourcecobol4j/tools/web-ui/` and fill in:
 
 ```env
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
@@ -222,14 +230,23 @@ AZURE_AGENT_ID=your-agent-id
 ## Project Structure
 
 ```text
-Cobol_to_java_Converter/
-├── opensourcecobol4j/     # Base framework (extended)
-│   └── tools/
-│       ├── web-ui/
-│       ├── cobol_repo_scanner.sh
-│       └── azureAgent.js
-├── server.js
-└── README.md
+cobol-to-java-converter/
+├── README.md
+├── todo.md
+├── .gitignore
+└── opensourcecobol4j/             # Vendored OpenSourceCobol4j base framework
+    ├── libcobj/                   # Java runtime library (upstream)
+    ├── carddemo-app/              # AWS CardDemo COBOL fixture
+    └── tools/
+        ├── cobol_repo_scanner.sh
+        └── web-ui/                # Node.js + Express web UI
+            ├── server.js
+            ├── aiAgent.js         # OpenAI helper (error analysis / autofix)
+            ├── azureAgent.js      # Azure AI Foundry conversion agent
+            ├── public/            # Static frontend assets
+            ├── docs/              # Project guides & reports
+            ├── package.json
+            └── .env.example
 ```
 
 ---

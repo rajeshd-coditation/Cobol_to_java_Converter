@@ -79,17 +79,30 @@ configure~
 report.html
 
 # Web UI
-opensource/tools/web-ui/node_modules/
-opensource/tools/web-ui/.env
+opensourcecobol4j/tools/web-ui/node_modules/
+opensourcecobol4j/tools/web-ui/.env
+opensourcecobol4j/tools/web-ui/*.log
+opensourcecobol4j/tools/web-ui/.server.pid
 
 # Large Files & Test Artifacts
 CobolToJava_CardDemo.zip
-opensource/tools/DA-S-FAVOUT
-opensource/tools/carddemo_output/
-opensource/tools/cobol_output/
-opensource/tools/azure_cobol_output_*/
-opensource/tools/work/
-opensource/tools/java/
-opensource/tools/scanner.log
-opensource/tools/report.json
-opensource/tools/server.log
+opensourcecobol4j/tools/DA-S-FAVOUT
+opensourcecobol4j/tools/carddemo_output/
+opensourcecobol4j/tools/cobol_output/
+opensourcecobol4j/tools/azure_cobol_output_*/
+opensourcecobol4j/tools/work/
+opensourcecobol4j/tools/java/
+opensourcecobol4j/tools/scanner.log
+opensourcecobol4j/tools/report.json
+opensourcecobol4j/tools/server.log
+opensourcecobol4j/tools/test_out_check/
+opensourcecobol4j/tools/test_output/
+opensourcecobol4j/tools/test_proj/
+opensourcecobol4j/tools/test_src/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

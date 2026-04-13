@@ -1,7 +1,0 @@
-[2025-12-29 20:00:51] [INFO] Using local directory: /home/admin1/Desktop/scan_whole_repo/opensourcecobol4j/tools/test_src
-[2025-12-29 20:00:51] [INFO] Scanning for include paths (directories with .cpy files)...
-[2025-12-29 20:00:51] [INFO] Added 0 include paths.
-[2025-12-29 20:00:51] [INFO] Starting scan...
-[2025-12-29 20:00:51] [SKIP] test.cbl - No IDENTIFICATION DIVISION found
-[2025-12-29 20:00:51] [INFO] Scan Complete. Report saved to /home/admin1/Desktop/scan_whole_repo/opensourcecobol4j/tools/test_out_check/report.json
-[2025-12-29 20:00:51] [INFO] Summary: Matches=0, Mismatches=0, Errors=0
