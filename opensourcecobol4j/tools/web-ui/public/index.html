@@ -527,6 +527,10 @@
                         <button class="tab-btn active" data-tab="converted">Fully converted</button>
                         <button class="tab-btn" data-tab="skipped">Skipped</button>
                         <button class="tab-btn" data-tab="error">Not converted</button>
+                        <button class="tab-btn" data-tab="orchestration" id="orchestrationTabBtn">
+                            Orchestration
+                            <span id="orchestrationTabCount" class="tab-count hidden">0</span>
+                        </button>
                     </div>
                     <div class="panel-content">
                         <div id="convertedPanel" class="file-list active">
@@ -537,6 +541,9 @@
                         </div>
                         <div id="errorPanel" class="file-list">
                             <p class="empty-state">No error files</p>
+                        </div>
+                        <div id="orchestrationPanel" class="file-list">
+                            <p class="empty-state">JCL orchestration will appear here once a conversion completes. Each job card shows its steps (EXEC PGM=…) with cross-references to the converted Java classes, the DD datasets each step reads/writes, and a suggested modern orchestrator (Spring Batch / Airflow / cron).</p>
                         </div>
                     </div>
                 </div>

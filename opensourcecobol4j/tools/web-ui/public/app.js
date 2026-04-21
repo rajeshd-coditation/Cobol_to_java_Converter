@@ -236,6 +236,15 @@ function resetResults() {
     convertedPanel.innerHTML = '<p class="empty-state">No converted files yet</p>';
     skippedPanel.innerHTML = '<p class="empty-state">No skipped files</p>';
     errorPanel.innerHTML = '<p class="empty-state">No error files</p>';
+    // Invalidate the lazy-loaded orchestration panel so the next tab open
+    // refetches against the new conversion rather than showing stale cards.
+    const orchEl = document.getElementById('orchestrationPanel');
+    if (orchEl) {
+        delete orchEl.dataset.loaded;
+        orchEl.innerHTML = '<p class="empty-state">JCL orchestration will appear here once a conversion completes. Each job card shows its steps (EXEC PGM=…) with cross-references to the converted Java classes, the DD datasets each step reads/writes, and a suggested modern orchestrator (Spring Batch / Airflow / cron).</p>';
+    }
+    const countEl = document.getElementById('orchestrationTabCount');
+    if (countEl) countEl.classList.add('hidden');
 }
 
 // Start conversion — pre-conversion HITL: scan first, let user select files,
@@ -1359,7 +1368,131 @@ function switchTab(tabName) {
     convertedPanel.classList.toggle('active', tabName === 'converted');
     skippedPanel.classList.toggle('active', tabName === 'skipped');
     errorPanel.classList.toggle('active', tabName === 'error');
+    const orchEl = document.getElementById('orchestrationPanel');
+    if (orchEl) orchEl.classList.toggle('active', tabName === 'orchestration');
+    // Lazy-load the orchestration panel — we don't fetch JCL analysis until
+    // the tab is actually opened to avoid hammering the server on every
+    // conversion result. Cached via panel's data attribute.
+    if (tabName === 'orchestration' && orchEl && !orchEl.dataset.loaded) {
+        loadOrchestrationPanel();
+    }
 }
+
+/**
+ * Fetch + render every JCL file's parsed analysis under the Orchestration
+ * tab. For each JCL file in the current conversion's report (status
+ * SKIPPED_JCL), hit /api/jcl-analysis — the server parses the JCL and
+ * cross-references PGM= entries against our converted Java classes,
+ * returning a `coverage` array and a target-orchestrator recommendation.
+ *
+ * The UI renders one expandable card per JCL file, each showing:
+ *   - Job name
+ *   - Each step's PGM= with a ✓ / ✗ against our converted Java (linked
+ *     to the Results Browser when we have a match)
+ *   - DD list with DSN targets
+ *   - Server's recommendation for a modern orchestrator
+ *
+ * Async loop runs requests in parallel (Promise.all) because each
+ * /api/jcl-analysis call is cheap (pure-parse, no AI).
+ */
+async function loadOrchestrationPanel() {
+    const panel = document.getElementById('orchestrationPanel');
+    if (!panel || !currentConversionId) return;
+    panel.dataset.loaded = '1'; // lock so we don't double-fetch on tab re-open
+    panel.innerHTML = '<p class="empty-state">Loading JCL analysis…</p>';
+
+    let browser;
+    try {
+        browser = await (await fetch(`/api/browser/${currentConversionId}`)).json();
+    } catch {
+        panel.innerHTML = '<p class="empty-state">Could not load the conversion report.</p>';
+        return;
+    }
+    const jclFiles = (browser.files || []).filter(f => f.status === 'SKIPPED_JCL');
+    const countEl = document.getElementById('orchestrationTabCount');
+    if (countEl) {
+        if (jclFiles.length > 0) {
+            countEl.textContent = jclFiles.length;
+            countEl.classList.remove('hidden');
+        } else {
+            countEl.classList.add('hidden');
+        }
+    }
+    if (jclFiles.length === 0) {
+        // Generic empty-state — not every converted repo ships JCL.
+        // Non-mainframe COBOL repos, course repos, and standalone
+        // utilities typically don't; that's fine, there's nothing to show.
+        panel.innerHTML = '<p class="empty-state">No JCL files were found in this conversion. If the converted repo is a mainframe project, check that .jcl / .proc files are present under the selected path — they\'re what populates this tab.</p>';
+        return;
+    }
+
+    const analyses = await Promise.all(jclFiles.map(async f => {
+        try {
+            const src = f.cobolSourcePath || f.cobolPath;
+            const url = `/api/jcl-analysis?conversionId=${encodeURIComponent(currentConversionId)}&path=${encodeURIComponent(src)}`;
+            const r = await fetch(url);
+            if (!r.ok) return { file: f, error: 'Parse failed: HTTP ' + r.status };
+            const data = await r.json();
+            return { file: f, data };
+        } catch (err) {
+            return { file: f, error: err.message };
+        }
+    }));
+
+    panel.innerHTML = analyses.map(({ file, data, error }) => {
+        const name = (file.cobolPath || '').split('/').pop();
+        if (error) {
+            return `<div class="orch-card"><div class="orch-card-head"><span class="orch-name">${escapeHtml(name)}</span></div><div class="orch-err">${escapeHtml(error)}</div></div>`;
+        }
+        const parsed = data && data.parsed;
+        const steps = (parsed && parsed.steps) || [];
+        const coverage = data && data.coverage || [];
+        const covMap = {};
+        for (const c of coverage) covMap[c.program] = c;
+        const rec = (data && data.recommendation) || '';
+        const jobName = (parsed && parsed.jobName) || '(no JOB card)';
+
+        const stepsHtml = steps.map(s => {
+            const pgm = s.exec && s.exec.pgm;
+            const proc = s.exec && s.exec.proc;
+            const cov = pgm ? covMap[pgm] : null;
+            let badge;
+            if (!pgm && proc) {
+                badge = `<span class="orch-badge orch-badge-proc">PROC ${escapeHtml(proc)}</span>`;
+            } else if (cov && cov.converted) {
+                badge = `<span class="orch-badge orch-badge-ok">✓ ${escapeHtml(cov.javaClass || pgm)}</span>`;
+            } else if (cov && cov.status && cov.status !== 'NOT_IN_CONVERSION') {
+                badge = `<span class="orch-badge orch-badge-warn" title="${escapeHtml(cov.status)}">${escapeHtml(pgm)} · ${escapeHtml(cov.status)}</span>`;
+            } else {
+                badge = `<span class="orch-badge orch-badge-miss" title="Not in this conversion">${escapeHtml(pgm || '(unknown)')}</span>`;
+            }
+            const dds = (s.dds || []).slice(0, 8).map(dd =>
+                `<span class="orch-dd" title="${dd.dsn ? escapeHtml(dd.dsn) : ''}">${escapeHtml(dd.name)}${dd.sysout ? ' (SYSOUT)' : ''}</span>`
+            ).join('');
+            const extraDds = (s.dds || []).length > 8 ? `<span class="orch-dd orch-dd-more">+${(s.dds || []).length - 8} more</span>` : '';
+            return `
+                <div class="orch-step">
+                    <div class="orch-step-head">
+                        <span class="orch-step-name">${escapeHtml(s.name || '(step)')}</span>
+                        ${badge}
+                    </div>
+                    ${dds || extraDds ? `<div class="orch-dds">${dds}${extraDds}</div>` : ''}
+                </div>`;
+        }).join('');
+
+        return `
+            <details class="orch-card" open>
+                <summary class="orch-card-head">
+                    <span class="orch-name">${escapeHtml(name)}</span>
+                    <span class="orch-job">${escapeHtml(jobName)}</span>
+                    <span class="orch-step-count">${steps.length} step${steps.length === 1 ? '' : 's'}</span>
+                </summary>
+                ${stepsHtml || '<p class="empty-state">No EXEC steps parsed.</p>'}
+                ${rec ? `<div class="orch-recommendation"><strong>Suggested orchestrator:</strong> ${escapeHtml(rec)}</div>` : ''}
+            </details>`;
+    }).join('');
+}
+window.loadOrchestrationPanel = loadOrchestrationPanel;
 // View Log content (reuses code modal)
 async function viewLog(filePath, title) {
     try {

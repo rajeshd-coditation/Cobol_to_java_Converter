@@ -19,7 +19,6 @@ Tractable wins. Pick any one and ship.
 
 Good single-session work. Each delivers a coherent feature.
 
-- [ ] **JCL orchestration tab in Results browser.** We already parse JCL (`/api/jcl-analysis`) but the output is only surfaced if a user hits the endpoint directly. Add a tab listing parsed steps (EXEC PGM=…, DD names, DSNs) with cross-references to converted Java classes ("This JCL invokes PAYROL00 → see `Payrol00.java`").
 - [ ] **Orchestration scaffolding in the zip download.** Emit `jobs/<JOB>.spring-batch.xml` or `jobs/<JOB>.yaml` (Airflow DAG) templates from parsed JCL into `/api/download/:id`. First pass can be a single opinionated template (Spring Batch); additional orchestrators are copy-paste.
 - [ ] **Fix-with-AI for COBOL.** Mirror of the Java repair loop. When `cobc` reports `'X' is not defined` with a typo-hint match, offer a one-click "apply suggested fix" that rewrites the source file (with `.cbl.before-fix` backup like the Java side does).
 - [ ] **Export as Maven project.** Extend `/api/download/:id` to emit `pom.xml` + `src/main/java/` layout. Current zip flatten-drops `.java` into `java/`; this is a strict superset.

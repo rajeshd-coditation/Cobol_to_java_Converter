@@ -1064,6 +1064,85 @@ body.pane-expanded-java  .browser-pane[data-pane="java"]  .pane-expand-btn {
 #retryFailedBtn:hover { background: rgba(245, 158, 11, 0.22); color: #fff; }
 body.theme-light #retryFailedBtn { color: #b45309; background: rgba(245, 158, 11, 0.10); }
 .retry-count { opacity: 0.85; margin-left: 2px; font-variant-numeric: tabular-nums; }
+
+/* Orchestration tab — one card per JCL file, each step showing PGM=
+   status (✓ converted / ⚠ status / ✗ not in conversion) + DD list.
+   Designed to scan-read; details collapse/expand for focus. §15 */
+.tab-count {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    min-width: 18px; height: 16px; padding: 0 5px;
+    margin-left: 6px;
+    font-size: 10px; font-weight: 700;
+    border-radius: 8px;
+    background: rgba(117, 69, 255, 0.20);
+    color: var(--c-accent-light);
+    vertical-align: 1px;
+}
+.orch-card {
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    padding: 10px 14px 12px;
+    margin: 10px 14px;
+    background: rgba(255, 255, 255, 0.02);
+}
+body.theme-light .orch-card { background: rgba(0, 0, 0, 0.015); }
+.orch-card-head {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12.5px;
+    cursor: pointer;
+    list-style: none;
+}
+.orch-card-head::-webkit-details-marker { display: none; }
+.orch-card-head::before {
+    content: '▸';
+    color: var(--c-text-mute);
+    transition: transform 180ms;
+}
+.orch-card[open] .orch-card-head::before { transform: rotate(90deg); }
+.orch-name { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; }
+.orch-job  { color: var(--c-text-dim); font-size: 11px; }
+.orch-step-count { color: var(--c-text-mute); font-size: 11px; margin-left: auto; }
+
+.orch-step {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 8px 0 8px 18px;
+    font-size: 12px;
+}
+body.theme-light .orch-step { border-top-color: rgba(0, 0, 0, 0.06); }
+.orch-step-head { display: flex; align-items: center; gap: 10px; }
+.orch-step-name { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--c-text); min-width: 90px; }
+.orch-badge {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+}
+.orch-badge-ok   { color: #4ade80; background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); }
+.orch-badge-warn { color: #fbbf24; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35); }
+.orch-badge-miss { color: #94a3b8; background: rgba(107, 114, 128, 0.12); border-color: rgba(107, 114, 128, 0.30); border-style: dashed; }
+.orch-badge-proc { color: #c4b5fd; background: rgba(124, 58, 237, 0.12); border-color: rgba(124, 58, 237, 0.35); }
+.orch-dds { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding-left: 100px; }
+.orch-dd {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--c-text-dim);
+}
+.orch-dd-more { font-style: italic; opacity: 0.7; }
+body.theme-light .orch-dd { background: rgba(0, 0, 0, 0.04); }
+.orch-recommendation {
+    margin-top: 10px; padding: 8px 12px;
+    background: rgba(117, 69, 255, 0.08);
+    border-left: 2px solid var(--c-accent-light);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--c-text-dim);
+}
+.orch-err { color: var(--c-error-light, #f87171); font-size: 12px; padding: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .browser-maximize-btn {
     display: inline-flex !important;
     align-items: center;
