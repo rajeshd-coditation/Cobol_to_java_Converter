@@ -176,7 +176,7 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [x] **Memory hygiene for `activeConversions`.** _Done 2026-04-21. `src/persistence/active-conversions-ttl.js` sweeps every 5 min, evicts completed entries older than 2h. Running conversions never evicted. Disk checkpoint survives; deep-linked users rehydrate on request._
 - [x] **Checkpoint GC.** _Done 2026-04-21. `cleanupOldCheckpoints()` runs once at boot, prunes entries older than 7 days based on the checkpoint's own completedAt/startedAt (not filesystem mtime)._
 - [ ] **`run.sh logs`** command — tail the webui.log.
-- [ ] **Token/accuracy telemetry endpoint.** `/api/stats` returning averages across recent conversions (avg tokens per file, avg accuracy, avg duration, fail rate by status).
+- [x] **Token/accuracy telemetry endpoint.** _Done 2026-04-21. `/api/stats` (src/routes/stats.js) rolls up every in-memory conversion: conversions count, files by status, avg/median accuracy, fail rate (successes / real attempts — skipped statuses excluded from denominator), tokens per conversion + per file + total calls, avg/median duration._
 - [x] **Health endpoint.** _Done 2026-04-21. `/api/health` returns uptime, activeConversions breakdown, AI availability, tmpdir. Safe to expose for k8s liveness probes._
 
 ## 18. Security / input hygiene

@@ -1786,6 +1786,7 @@ require('./src/routes/ai-analyze').mount(app, { aiAgent, azureAgent, buildAnalys
 require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent, activeConversions });
 require('./src/routes/status').mount(app, { activeConversions });
 require('./src/routes/health').mount(app, { activeConversions, AI_PROVIDER, aiAgent, azureAgent });
+require('./src/routes/stats').mount(app, { activeConversions });
 
 
 // Start server
