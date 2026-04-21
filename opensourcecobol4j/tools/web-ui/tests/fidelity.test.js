@@ -279,15 +279,11 @@ test('sibling Java signatures show up under CALL targets when the map is populat
 
 // ─── 14. autoFixJavaCode strips illegal `throws` patterns (COBOL-course crash driver) ──
 test('autoFixJavaCode removes illegal `throws` from for/while/if/switch/else/do statements', () => {
-    // Reach into azureAgent.js and extract the autoFixJavaCode fn — it's not
-    // exported, but we can grab its source and rebuild it in isolation to
-    // assert the regex behavior. If a future edit removes or weakens the
-    // illegal-throws stripper, this test fails before the next batch run
-    // ships broken Java that javac will reject.
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
-    const m = src.match(/function autoFixJavaCode\([\s\S]*?^}\n/m);
-    assert.ok(m, 'could not locate autoFixJavaCode in azureAgent.js');
-    const autoFix = new Function('return ' + m[0])();
+    // autoFixJavaCode moved to src/core/auto-fix-java.js — load it properly
+    // now that it's exported. If a future edit weakens the illegal-throws
+    // stripper, this test fails before the next batch run ships broken Java.
+    const { autoFixJavaCode: autoFix } = require('../src/core/auto-fix-java');
+    assert.ok(typeof autoFix === 'function', 'autoFixJavaCode must be exported from src/core/auto-fix-java');
 
     const cases = [
         'for (AcctFields acct : acctRecords) throws java.io.IOException {',
@@ -346,13 +342,11 @@ test('primary prompt gives the zero-padding example', () => {
 
 // ─── 15. autoFixJavaCode strips throws-IOException from pure-string helpers ──
 test('autoFixJavaCode strips `throws IOException` from pure-string helper methods', () => {
-    // This fix prevents the AI's mis-annotated helpers from breaking static-field
-    // initializers like `static final String H = repeatChar(' ', 60);`. Triggered
-    // on the COBOL Programming Course repo; narrow helper-name whitelist is
-    // intentional — we'd rather leave throws in place than over-strip.
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
-    const m = src.match(/function autoFixJavaCode\([\s\S]*?^}\n/m);
-    const autoFix = new Function('return ' + m[0])();
+    // Prevents the AI's mis-annotated helpers from breaking static-field
+    // initializers like `static final String H = repeatChar(' ', 60);`.
+    // Narrow helper-name whitelist is intentional — we'd rather leave
+    // throws in place than over-strip.
+    const { autoFixJavaCode: autoFix } = require('../src/core/auto-fix-java');
 
     // Pure helper with banned throws → should strip. The stripper's regex
     // anchors on a newline + indent + visibility modifier, so each method

@@ -75,14 +75,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Path to the scanner script
 const SCANNER_SCRIPT = path.join(__dirname, '..', 'cobol_repo_scanner.sh');
 
-// Helper function to convert to PascalCase for Java class names
-function toPascalCase(str) {
-    return str
-        .replace(/[-_]/g, ' ')
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join('');
-}
+// toPascalCase → src/util/pascal-case.js
+const { toPascalCase } = require('./src/util/pascal-case');
 
 // Java class-name normalization → src/core/normalize-class.js
 const { normalizeClassName } = require('./src/core/normalize-class');
