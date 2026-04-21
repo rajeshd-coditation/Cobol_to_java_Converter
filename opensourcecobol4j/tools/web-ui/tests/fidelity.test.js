@@ -306,6 +306,44 @@ test('autoFixJavaCode removes illegal `throws` from for/while/if/switch/else/do 
     }
 });
 
+// ─── Prompt-regression locks for the AI-behavior rules we added ─────────
+// Each of these exists because of an observed failure on a real repo.
+// If someone later edits a prompt and drops the rule, the test fails
+// before tokens get spent on a re-broken conversion.
+
+test('primary conversion prompt has COBOL ACCEPT EOF + default-zero rule', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    // ADDAMT.cobol repro: Java threw NumberFormatException / NullPointerException
+    // on stdin input "q" or EOF. Rule: default to 0 + null-check.
+    assert.match(src, /COBOL ACCEPT FROM SYSIN semantics/i,
+        'primary prompt must carry the COBOL ACCEPT semantics rule');
+    assert.match(src, /MUST NOT throw,\s*must NOT System\.exit/i,
+        'primary prompt must ban throwing / exiting on invalid stdin');
+    assert.match(src, /MUST check for null on Scanner\.nextLine/i,
+        'primary prompt must require null-check on Scanner reads');
+});
+
+test('repair (fixJavaCode) prompt carries ACCEPT + zero-pad rules', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    // These rules live in the repair system prompt so Fix-with-AI actually
+    // repairs the two runtime bugs we observed (NPE on input, bare %d).
+    assert.match(src, /DO NOT THROW on malformed STDIN input/i,
+        'repair prompt must tell the AI not to throw on stdin parse failure');
+    assert.match(src, /PRESERVE PIC 9\(N\) zero-padding/i,
+        'repair prompt must tell the AI to use %0Nd for PIC 9(N) DISPLAY');
+    assert.match(src, /String\.format\("%0Nd"/,
+        'repair prompt must give an explicit zero-padding example');
+});
+
+test('primary prompt gives the zero-padding example', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    // Full sample section + concrete example — rule must be discoverable.
+    assert.match(src, /PIC 9\(N\) zero-padded display format/i,
+        'primary prompt must carry the zero-padding section header');
+    assert.match(src, /String\.format\("%06d",\s*wsTotal\)/,
+        'primary prompt must include the concrete 6-digit zero-pad example');
+});
+
 // ─── 15. autoFixJavaCode strips throws-IOException from pure-string helpers ──
 test('autoFixJavaCode strips `throws IOException` from pure-string helper methods', () => {
     // This fix prevents the AI's mis-annotated helpers from breaking static-field

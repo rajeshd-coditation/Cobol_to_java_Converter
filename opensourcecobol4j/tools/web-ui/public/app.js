@@ -3906,6 +3906,13 @@ async function runSelectedFile() {
                 javaMeta.textContent = `exit ${data.java.exitCode} · ${data.java.duration}ms`;
             }
         }
+        // Render any program-written output files (PRTLINE, REPORT, REPOUT,
+        // etc.). Many COBOL programs write their real output to a FILE via
+        // WRITE statements, so stdout looks empty while the actual report
+        // sits in the work dir. Showing these here is how users see the
+        // real business output of both sides side-by-side.
+        renderRunOutputFiles(data);
+
         // Surface obvious divergence between COBOL and Java outputs so the user
         // knows when the Java is fabricating behavior (simulated CALLs, invented
         // HTTP handling, fake data) instead of matching the source program.
@@ -3921,6 +3928,65 @@ async function runSelectedFile() {
             else runBtn.textContent = 'Run program';
         }
     }
+}
+
+// Render program-written output files (PRTLINE, REPORT, etc.) below the
+// stdout panes. Many COBOL programs write to files via WRITE rather than
+// DISPLAY to stdout; without this panel the Run view looks empty when the
+// program actually produced a real report.
+function renderRunOutputFiles(data) {
+    const panel = document.getElementById('runOutputPanel');
+    if (!panel) return;
+    // Remove any previous output-files block.
+    panel.querySelectorAll('.run-output-files').forEach(n => n.remove());
+
+    const cobolFiles = (data.cobol && data.cobol.outputFiles) || [];
+    const javaFiles  = (data.java  && data.java.outputFiles)  || [];
+    if (cobolFiles.length === 0 && javaFiles.length === 0) return;
+
+    const container = document.createElement('div');
+    container.className = 'run-output-files';
+    container.innerHTML = `
+        <div class="run-output-files-header">
+            <span class="run-output-files-title">📄 Program-written output files</span>
+            <span class="run-output-files-hint">COBOL WRITE / Java <code>BufferedWriter</code> — not in stdout</span>
+        </div>
+        <div class="run-output-files-grid"></div>
+    `;
+    const grid = container.querySelector('.run-output-files-grid');
+
+    const renderSide = (label, files, sideClass) => {
+        const col = document.createElement('div');
+        col.className = 'run-output-files-col ' + sideClass;
+        col.innerHTML = `<div class="run-output-files-side-label">${label}</div>`;
+        if (!files.length) {
+            const empty = document.createElement('div');
+            empty.className = 'run-output-files-empty';
+            empty.textContent = '(no output files written)';
+            col.appendChild(empty);
+        } else {
+            for (const f of files) {
+                const item = document.createElement('details');
+                item.className = 'run-output-file';
+                const kb = (f.bytes / 1024).toFixed(1);
+                item.innerHTML = `
+                    <summary>
+                        <span class="of-name">${escapeHtml(f.name)}</span>
+                        <span class="of-size">${kb} KB</span>
+                    </summary>
+                    <pre class="of-body"><code></code></pre>
+                `;
+                item.querySelector('code').textContent = f.contentPreview || '(empty)';
+                // Expand the first file by default so the user sees something immediately.
+                if (files.indexOf(f) === 0) item.setAttribute('open', '');
+                col.appendChild(item);
+            }
+        }
+        grid.appendChild(col);
+    };
+    renderSide('COBOL wrote', cobolFiles, 'cobol-side');
+    renderSide('Java wrote',  javaFiles,  'java-side');
+    panel.appendChild(container);
 }
 
 // Show an AI-powered verdict comparing the COBOL and Java run outputs.

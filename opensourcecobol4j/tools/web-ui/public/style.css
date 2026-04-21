@@ -1362,6 +1362,139 @@ body:not(.theme-light) .accuracy-panel-penalty .pn-desc {
     color: #ebddb4;                                      /* readable cream */
 }
 
+/* ── Run panel: program-written output files (PRTLINE / REPORT / …) ─
+   COBOL programs frequently write their real output to a FILE instead
+   of stdout; this block surfaces those files side-by-side with the
+   Java side's output files. Both sides are collapsible details; first
+   file per side is auto-expanded. */
+.run-output-files {
+    margin: 12px 0 8px 0;
+    border: 1px solid rgba(124, 92, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(124, 92, 255, 0.04);
+    padding: 10px 12px;
+}
+body:not(.theme-light) .run-output-files {
+    border-color: rgba(124, 92, 255, 0.35);
+    background: rgba(124, 92, 255, 0.08);
+}
+.run-output-files-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.run-output-files-title {
+    font-weight: 600;
+    font-size: 12px;
+}
+.run-output-files-hint {
+    font-size: 11px;
+    color: var(--c-muted, #888);
+}
+.run-output-files-hint code {
+    font-size: 10.5px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.06);
+}
+body:not(.theme-light) .run-output-files-hint code {
+    background: rgba(255, 255, 255, 0.08);
+}
+.run-output-files-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.run-output-files-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.run-output-files-side-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--c-muted, #666);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    padding-bottom: 4px;
+}
+body:not(.theme-light) .run-output-files-side-label {
+    color: #a8a8c0;
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+.run-output-files-empty {
+    font-size: 11px;
+    color: var(--c-muted, #999);
+    font-style: italic;
+    padding: 6px 2px;
+}
+.run-output-file {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 5px;
+    background: var(--c-bg-raised, #fff);
+}
+body:not(.theme-light) .run-output-file {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+}
+.run-output-file > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    user-select: none;
+}
+.run-output-file > summary::-webkit-details-marker { display: none; }
+.run-output-file > summary::before {
+    content: '▸';
+    margin-right: 4px;
+    color: var(--c-muted, #888);
+    transition: transform 120ms;
+}
+.run-output-file[open] > summary::before {
+    transform: rotate(90deg);
+    display: inline-block;
+}
+.run-output-file .of-name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.run-output-file .of-size {
+    font-size: 10.5px;
+    color: var(--c-muted, #888);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    flex-shrink: 0;
+}
+.run-output-file .of-body {
+    margin: 0;
+    padding: 8px 10px 10px;
+    max-height: 240px;
+    overflow: auto;
+    font-size: 11px;
+    line-height: 1.45;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(0, 0, 0, 0.015);
+}
+body:not(.theme-light) .run-output-file .of-body {
+    border-top-color: rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.18);
+}
+.run-output-file .of-body code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    white-space: pre;
+}
+
 /* ── Run-compare verdict banner (AI-powered) ────────────────────────
    Shown after /api/compare-runs returns. Color-coded by severity. */
 .run-diverge-banner {

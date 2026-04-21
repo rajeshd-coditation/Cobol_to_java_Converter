@@ -841,6 +841,20 @@ try { amount = Integer.parseInt(rawAmount.trim()); }
 catch (NumberFormatException e) { amount = 0; }  // COBOL would see zeroes
 \`\`\`
 
+CRITICAL: PIC 9(N) zero-padded display format
+COBOL DISPLAY on a \`PIC 9(N)\` field ALWAYS prints N digits with leading
+zeroes (e.g. amount=8, PIC 9(6) → "000008"). Java's \`System.out.print(x)\`
+prints a variable-width integer ("8") which breaks any downstream diff
+against the COBOL output. Every numeric DISPLAY MUST use
+\`String.format("%0Nd", value)\` where N matches the COBOL PIC width.
+Examples:
+  COBOL: DISPLAY WS-TOTAL            (WS-TOTAL PIC 9(6), value 8)
+  Java:  System.out.print(String.format("%06d", wsTotal));   // "000008"
+  COBOL: DISPLAY "Line " WS-LINE-NO  (WS-LINE-NO PIC 9(3), value 42)
+  Java:  System.out.print("Line " + String.format("%03d", wsLineNo));  // "Line 042"
+For signed COBOL fields (\`PIC S9(N) … SIGN IS TRAILING SEPARATE\`) match
+the trailing-sign convention the original program emits.
+
 QUALITY REQUIREMENTS:
 1. Use REAL file I/O with BufferedReader/BufferedWriter for COBOL FILE operations
 2. On missing files: print an error and exit non-zero — do NOT fabricate data
@@ -2163,6 +2177,16 @@ async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, co
         '   files, DELETE that fallback. The repaired Java must fail the same\n' +
         '   way the COBOL does when input is missing: print a clear error and\n' +
         '   exit non-zero. No silent sample-data substitution.\n' +
+        '9. DO NOT THROW on malformed STDIN input. COBOL ACCEPT silently stores\n' +
+        '   zeroes on non-numeric text, and returns blanks forever on EOF. If\n' +
+        '   the current Java uses Integer.parseInt / new BigDecimal / similar\n' +
+        '   on stdin and the runtime output shows NumberFormatException or\n' +
+        '   NullPointerException, wrap the parse in try/catch default-zero\n' +
+        '   and null-check the Scanner.nextLine() return (treat null as "").\n' +
+        '10. PRESERVE PIC 9(N) zero-padding. COBOL DISPLAY of PIC 9(6) value 8\n' +
+        '    prints "000008", not "8". If the current Java prints bare ints\n' +
+        '    via System.out.print(x) or "%d", replace with String.format("%0Nd", x)\n' +
+        '    where N matches the PIC width declared in the COBOL source.\n' +
         '\n' +
         'Respect the same conventions as the original agent:\n' +
         '- One public class per file, no package declaration\n' +

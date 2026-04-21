@@ -1807,6 +1807,9 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
 
     const { spawnSync, execSync } = require('child_process');
     const result = { cobol: null, java: null };
+    // Record when the run actually started so the output-file scan below
+    // only picks files created/modified during THIS run.
+    const runStartMs = Date.now();
 
     // ─── Data-file dependency staging ──────────────────────────────────
     // The graph-building step already found which `SELECT … ASSIGN TO`
@@ -1999,6 +2002,37 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     error: 'GnuCOBOL (cobc) is not installed on this server. Install with `brew install gnu-cobol` to enable native COBOL execution.'
                 };
             } else {
+                // Fast pre-check: if this COBOL source uses DB2/CICS/IMS
+                // constructs, GnuCOBOL literally cannot compile it regardless
+                // of preprocessing (the stripped SQL declares SQLCODE/SQLCA
+                // that the remaining code references). Surface a clean
+                // "cannot run locally" message up front — don't waste cobc
+                // cycles or dump compiler errors the user can't act on. The
+                // Java side still runs below for a one-sided behavior check.
+                let cobolPrecheckSkip = null;
+                try {
+                    const srcText = fs.readFileSync(reportFile.source_path, 'utf-8');
+                    const execHit = srcText.match(/\bEXEC\s+(SQL|CICS|DLI|MQ)\b/i);
+                    if (execHit) {
+                        const kind = execHit[1].toUpperCase();
+                        cobolPrecheckSkip = {
+                            kind,
+                            message: 'COBOL cannot run locally: requires mainframe preprocessor ('
+                                + (kind === 'SQL'  ? 'DB2 precompiler — `db2 prep` / `dsnhpc`'
+                                 : kind === 'CICS' ? 'CICS translator — `DFHECP1$` / `cicstran`'
+                                 : kind === 'DLI'  ? 'IMS DLI — `DFSRRC00` load + DLI preprocessor'
+                                 :                   'MQ preprocessor')
+                                + ').\n\n'
+                                + 'GnuCOBOL has no preprocessor for ' + kind + ' directives. The Java\n'
+                                + 'conversion below simulates these constructs with TODO markers so\n'
+                                + 'you can read the business logic; the AI verdict above shows the\n'
+                                + 'best available semantic comparison.\n\n'
+                                + 'To run the COBOL for a true runtime compare, deploy on a z/OS or\n'
+                                + 'a mainframe-emulator environment with the required preprocessor.'
+                        };
+                    }
+                } catch {}
+
                 const cobolWork = path.join(os.tmpdir(), `cobrun_${Date.now()}`);
                 fs.mkdirSync(cobolWork, { recursive: true });
                 const binPath = path.join(cobolWork, 'cobprog');
@@ -2025,6 +2059,23 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                 let compiled = false;
                 const hasMultiple = allCobolSources.length > 1;
 
+                // Short-circuit for DB2/CICS/IMS programs. cobc will never
+                // compile these without a mainframe preprocessor; skip the
+                // whole compile + run block and surface the clean message
+                // we built above.
+                if (cobolPrecheckSkip) {
+                    result.cobol = {
+                        ok: false,
+                        output: '',
+                        error: cobolPrecheckSkip.message,
+                        requiresPrecompile: cobolPrecheckSkip.kind
+                    };
+                    log('cobol-compile', 'skipped-precompile', {
+                        file: reportFile.path,
+                        kind: cobolPrecheckSkip.kind
+                    });
+                }
+
                 // Compile every sibling (i.e. non-target) as a shared module. This
                 // way, a CALL 'FOO' from the target resolves regardless of whether
                 // FOO declares USING or not. The module file must be named by
@@ -2035,29 +2086,28 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                 // `PROGRAM-ID. FOO` or `AUTHOR. Bob`. GnuCOBOL treats that as
                 // a continuation and fails at the next DIVISION. We transparently
                 // add the missing period into a temp copy before compiling.
-                // Track what was modified in the preprocess pass, so we can
-                // surface it to the UI. Currently we fix/strip:
-                //   - missing periods on PROGRAM-ID/AUTHOR/… header paragraphs
-                //   - EXEC SQL … END-EXEC blocks (needs DB2 preprocessor — we
-                //     don't have one; comment them out so cobc can still
-                //     compile the non-SQL body)
-                //   - EXEC CICS / EXEC DLI / EXEC MQ blocks (same rationale)
-                const preprocessMods = { periodsAdded: 0, execBlocksStripped: 0 };
+                // Light preprocess pass — only fixes real mainframe sloppiness
+                // that vanilla gnucobol trips on:
+                //   - Missing trailing period on `AUTHOR.`, `DATE-WRITTEN.` etc.
+                //     commentary paragraphs. We collapse the value to empty
+                //     because many sources embed periods INSIDE author names
+                //     (e.g. "Otto B. Relational") which confuses the parser.
+                //   - PROGRAM-ID terminating period living in cols 73+ (fixed-
+                //     format Identification Area = ignored by cobc). Re-emit
+                //     the line so the terminator is in compiler-visible range.
+                //
+                // EXEC SQL / CICS / DLI / MQ stripping was removed — gnucobol
+                // can't run those programs regardless because the stripped
+                // blocks declare SQLCODE / SQLCA / DFHCOMMAREA that the rest
+                // of the source references, producing cascading "not defined"
+                // errors. The /api/run pre-check now short-circuits with a
+                // clean "requires DB2/CICS/IMS preprocessor" message instead.
+                const preprocessMods = { periodsAdded: 0 };
                 const preprocessSource = (srcPath) => {
                     try {
                         const orig = fs.readFileSync(srcPath, 'utf-8');
                         const lines = orig.split(/\r?\n/);
 
-                        // Step 1: normalize header paragraphs. GnuCOBOL trips
-                        // on both (a) missing trailing period and (b) embedded
-                        // periods inside author/installation names like
-                        // "AUTHOR.   Otto B. Relational." where "Otto B." has
-                        // an inner period and confuses the parser. Fix: for
-                        // IDENTIFICATION-DIVISION commentary paragraphs
-                        // (AUTHOR / INSTALLATION / DATE-WRITTEN / etc.), keep
-                        // just the paragraph header with a period and drop
-                        // whatever value followed. PROGRAM-ID is preserved
-                        // (it carries the actual program name).
                         const COMMENTARY_HEADERS = /^(\s*)(AUTHOR|DATE-WRITTEN|DATE-COMPILED|INSTALLATION|SECURITY|REMARKS)\s*\.(.*)$/i;
                         for (let i = 0; i < lines.length; i++) {
                             const l = lines[i];
@@ -2066,72 +2116,19 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                                 const indent = m[1];
                                 const kw = m[2].toUpperCase();
                                 const rest = m[3];
-                                // If there's anything after the period on this line OR
-                                // the continuation extends across following lines (common
-                                // for AUTHOR), collapse the value to empty.
                                 if (rest.trim().length > 0) {
                                     lines[i] = indent + kw + '.';
                                     preprocessMods.periodsAdded++;
                                 }
                                 continue;
                             }
-                            // PROGRAM-ID period-repair: Fixed-format COBOL
-                            // ignores cols 73+ (Identification Area). A
-                            // trailing `.` at col 75 — common in mainframe
-                            // sources — is invisible to cobc. So:
-                            //   1. consider only the first 72 cols when
-                            //      deciding if the statement terminator is
-                            //      present, and
-                            //   2. normalize the line to `PROGRAM-ID. NAME.`
-                            //      so the terminator lands well within area B.
                             const progRe = /^(\s*)PROGRAM-ID\s*\.\s*([A-Za-z0-9_-]+)/i;
                             const pm = l.match(progRe);
                             if (pm) {
                                 const contentInAreaB = l.slice(0, 72);
-                                // Does the statement-terminating period live in
-                                // the compiler-visible range? Ignore trailing
-                                // whitespace and the 73+ "comment" slice.
                                 if (!/\.\s*$/.test(contentInAreaB.trimEnd())) {
                                     lines[i] = pm[1] + 'PROGRAM-ID. ' + pm[2] + '.';
                                     preprocessMods.periodsAdded++;
-                                }
-                            }
-                        }
-
-                        // Step 2: strip EXEC SQL/CICS/DLI/MQ …  END-EXEC blocks.
-                        // GnuCOBOL has no preprocessor for these, so without
-                        // stripping they cause syntax errors and the whole
-                        // program fails to compile — preventing ANY runtime
-                        // comparison. We replace each block with a COBOL
-                        // comment ('*' in col 7) noting the removal, so:
-                        //   (a) cobc can compile the rest of the program
-                        //   (b) the user can see in the patched file that we
-                        //       touched it (and understand why COBOL output
-                        //       differs from what DB2/CICS would produce).
-                        let inExec = false;
-                        let execKind = '';
-                        for (let i = 0; i < lines.length; i++) {
-                            const l = lines[i];
-                            if (!inExec) {
-                                const m = l.match(/^(\s*(?:\d+\s+)?)\s*EXEC\s+(SQL|CICS|DLI|MQ)\b/i);
-                                if (m) {
-                                    inExec = true;
-                                    execKind = m[2].toUpperCase();
-                                    lines[i] = '      * ' + `[stripped by c2j: ${execKind} directive — gnucobol has no preprocessor for this in local compile]`;
-                                    // Single-line block?
-                                    if (/\bEND-EXEC\b/i.test(l)) {
-                                        inExec = false;
-                                        preprocessMods.execBlocksStripped++;
-                                    }
-                                    continue;
-                                }
-                            } else {
-                                if (/\bEND-EXEC\b/i.test(l)) {
-                                    lines[i] = '      * ' + `[stripped: end of ${execKind} block]`;
-                                    inExec = false;
-                                    preprocessMods.execBlocksStripped++;
-                                } else {
-                                    lines[i] = '      * ' + `[stripped: inside ${execKind} block] ` + l.trim().slice(0, 120);
                                 }
                             }
                         }
@@ -2175,7 +2172,9 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     `-frelax-syntax-checks -Wno-obsolete ${includeFlags}`,
                     includeFlags
                 ];
-                if (hasMultiple) {
+                // Skip all compile work if the pre-check already decided COBOL
+                // can't run locally (DB2/CICS/IMS).
+                if (hasMultiple && !result.cobol) {
                     for (const info of sourceInfo) {
                         if (info.path === reportFile.source_path) continue; // skip target, compiled as exec below
                         const pid = info.programId;
@@ -2266,50 +2265,20 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                         } catch {}
                     }
 
-                    // Surface what the preprocessor touched so the user knows
-                    // why the COBOL may still fail (or why its behavior is
-                    // reduced vs. the real mainframe output).
-                    const modsNote = (preprocessMods.periodsAdded || preprocessMods.execBlocksStripped)
-                        ? `\n\nPreprocessor mods applied: ${preprocessMods.periodsAdded} header-period fix(es), ${preprocessMods.execBlocksStripped} EXEC SQL/CICS/DLI block(s) stripped (local gnucobol has no preprocessor for those).`
+                    // Surface the preprocessor periods fix-count if it was
+                    // non-trivial, so the user sees we touched the source.
+                    const modsNote = preprocessMods.periodsAdded
+                        ? `\n\nPreprocessor mods applied: ${preprocessMods.periodsAdded} header-period fix(es).`
                         : '';
-                    // If we stripped SQL/CICS/DLI blocks AND the remaining
-                    // compile error references variables those blocks normally
-                    // declare (SQLCODE, SQLCA, DFHCOMMAREA, PCB-*), surface a
-                    // clear "cannot run locally" message instead of dumping
-                    // raw compiler spew the user can't act on. GnuCOBOL has
-                    // no DB2/CICS/IMS preprocessor — the program is simply
-                    // unrunnable locally and the user should compare against
-                    // the Java output + AI verdict.
-                    const stripCascade = preprocessMods.execBlocksStripped > 0
-                        && /\b(SQLCODE|SQLCA|SQLSTATE|SQLERRM|DFHCOMMAREA|DFHAID|PCB-[A-Z0-9_-]+)\b.*not defined/i.test(lastErr);
-                    let friendlyNote = '';
-                    if (stripCascade) {
-                        // ASCII-only separator — em-dashes sometimes render as
-                        // mojibake (replacement char) through certain toolchain
-                        // code-page paths. Equals + dashes reproduce the visual
-                        // break safely across every terminal/browser/font.
-                        friendlyNote = '\n\n' + '='.repeat(60) + '\n'
-                            + 'This program uses DB2 SQL / CICS / IMS constructs that require a\n'
-                            + 'mainframe preprocessor (DB2 precompiler / CICS translator / DLI).\n'
-                            + 'GnuCOBOL does not have those preprocessors, so the program cannot\n'
-                            + 'be compiled or run locally for a direct COBOL-vs-Java comparison.\n\n'
-                            + '-> Use the Java output (which simulates these constructs with TODO\n'
-                            + '   markers) and the AI verdict above for semantic comparison.\n'
-                            + '='.repeat(60);
-                    }
                     result.cobol = {
                         ok: false,
                         output: '',
-                        error: (stripCascade
-                            ? 'COBOL cannot run locally: requires DB2/CICS/IMS preprocessor.'
-                            : 'COBOL compile failed (tried all dialect/format combinations):\n' + lastErr)
-                            + typoHint + modsNote + friendlyNote
+                        error: 'COBOL compile failed (tried all dialect/format combinations):\n' + lastErr + typoHint + modsNote
                     };
                 } else if (compiled) {
                     log('cobol-compile', 'ok', {
                         file: reportFile.path,
-                        periodsAdded: preprocessMods.periodsAdded,
-                        execBlocksStripped: preprocessMods.execBlocksStripped
+                        periodsAdded: preprocessMods.periodsAdded
                     });
                 }
                 if (!result.cobol && compiled) {
@@ -2366,7 +2335,10 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                             ? (run.error.message.includes('ENOBUFS')
                                 ? 'Output exceeded buffer (program likely in an input loop)'
                                 : (wasTimedOut ? null : run.error.message))
-                            : null
+                            : null,
+                        // Internal hint for listOutputFiles — stripped from
+                        // the response before sending.
+                        _workDir: cobolWork
                     };
                 }
             }
@@ -2382,6 +2354,90 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     if (result.cobol && result.cobol.error)  result.cobol.error  = stripAnsi(result.cobol.error);
     if (result.java  && result.java.output)  result.java.output  = stripAnsi(result.java.output);
     if (result.java  && result.java.error)   result.java.error   = stripAnsi(result.java.error);
+
+    // ─── Surface output files (PRTLINE, REPORT, OUT*, etc.) ───────────
+    // Many COBOL programs write their real output to a FILE via WRITE,
+    // not to SYSOUT. The stdout panel alone makes this look like "COBOL
+    // produced nothing" when the program actually wrote a report file.
+    // For each side, list files in its work_dir that were created or
+    // modified during the run (mtime >= runStart), skipping source/class
+    // files and the staged inputs so only NEW program-written files show.
+    // Each entry: { name, bytes, contentPreview }. Preview capped at 8KB.
+    const listOutputFiles = (workDir, runStartMs, excludeNames) => {
+        const out = [];
+        if (!workDir || !fs.existsSync(workDir)) return out;
+        try {
+            const OUT_PREVIEW_MAX = 8000;
+            // Skip source files, class files, and every common compiler
+            // binary output (.dylib/.so/.dll/.o/.exe). Also skip any file
+            // whose first bytes look binary — real COBOL program outputs
+            // are textual reports (PRTLINE, REPOUT, etc.).
+            const SKIP_EXT = /\.(java|class|cbl|cob|cobol|cpy|copy|dylib|so|dll|o|obj|exe|jar)$/i;
+            const KNOWN_COMPILE_BINARY_NAMES = new Set(['cobprog', 'a.out']);
+            for (const name of fs.readdirSync(workDir)) {
+                if (excludeNames && excludeNames.has(name)) continue;
+                if (SKIP_EXT.test(name)) continue;
+                if (KNOWN_COMPILE_BINARY_NAMES.has(name)) continue;
+                // Hidden / lockfiles — uninteresting.
+                if (name.startsWith('.')) continue;
+                const fp = path.join(workDir, name);
+                let stat;
+                try { stat = fs.statSync(fp); } catch { continue; }
+                if (!stat.isFile()) continue;
+                // Only files touched during this run.
+                if (runStartMs && stat.mtimeMs < runStartMs - 100) continue;
+                // Binary sniff — first 512 bytes should be mostly printable.
+                // Skips native binaries that slip past the extension filter.
+                let contentPreview = null;
+                try {
+                    const buf = fs.readFileSync(fp);
+                    const head = buf.slice(0, Math.min(512, buf.length));
+                    let nonText = 0;
+                    for (const b of head) {
+                        if (b === 9 || b === 10 || b === 13) continue;      // tab, LF, CR
+                        if (b >= 32 && b < 127) continue;                   // printable ASCII
+                        nonText++;
+                    }
+                    // Real COBOL output files frequently contain UTF-8 replacement
+                    // chars (�) when writing high-bit bytes through
+                    // default encoding. 30% threshold keeps these text-like
+                    // reports visible while still rejecting native binaries
+                    // (which are typically >60% non-printable).
+                    if (nonText / (head.length || 1) > 0.30) continue;
+                    const text = buf.toString('utf-8');
+                    contentPreview = buf.length > OUT_PREVIEW_MAX
+                        ? text.slice(0, OUT_PREVIEW_MAX) + `\n\n[…truncated — file is ${buf.length} bytes total]`
+                        : text;
+                } catch { continue; }
+                out.push({ name, bytes: stat.size, contentPreview });
+            }
+        } catch {}
+        // Stable order: by name
+        out.sort((a, b) => a.name.localeCompare(b.name));
+        return out;
+    };
+    try {
+        // Exclude the input data files we staged for each side (they were
+        // copied in from the scan's data-file lookup) so the list shows
+        // only what the PROGRAM wrote during this run.
+        const stagedInputs = new Set(Object.keys(conversion.dataFileLookup || {}));
+        // Expand variants that get staged (raw, .txt, .dat, upper, lower).
+        const staged = new Set();
+        for (const nm of stagedInputs) {
+            const bases = [nm, nm.toLowerCase(), nm.toUpperCase()];
+            for (const b of bases) { staged.add(b); staged.add(b + '.txt'); staged.add(b + '.dat'); }
+        }
+        if (result.java && reportFile.work_dir) {
+            result.java.outputFiles = listOutputFiles(reportFile.work_dir, runStartMs, staged);
+        }
+        // COBOL work dir: captured only when we successfully ran COBOL.
+        // Reuse `cobolWork` if it's in scope (compile path). For simplicity
+        // we read it from result.cobol if we attached it, else skip.
+        if (result.cobol && result.cobol._workDir) {
+            result.cobol.outputFiles = listOutputFiles(result.cobol._workDir, runStartMs, staged);
+            delete result.cobol._workDir;
+        }
+    } catch {}
 
     // Cache last run outputs per file so /api/fix-java can feed them to the
     // repair agent as context.
