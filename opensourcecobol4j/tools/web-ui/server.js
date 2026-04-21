@@ -123,6 +123,8 @@ const { stripAnsi } = require('./src/util/strip-ansi');
 const { listOutputFiles } = require('./src/core/run/list-output-files');
 const { preprocessCobolSource } = require('./src/core/run/cobol-preprocess');
 const { resolveDataAssignments, stageDataFilesInto } = require('./src/core/run/data-file-staging');
+const { buildConversionGraph } = require('./src/core/conversion-graph');
+const { parseJcl } = require('./src/scan/jcl-parser');
 const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
 require('./src/routes/convert-local').mount(app, {
     activeConversions,
@@ -324,202 +326,17 @@ app.post('/api/convert-azure', async (req, res) => {
                 return;
             }
 
-            // --- Build dependency graph for live visualization ---------------
-            // Nodes: every COBOL program + copybook. Edges: COPY / CALL refs.
-            const idOf = (p) => path.relative(inputPath, p);
-            const graphNodes = [];
-            const graphEdges = [];
-            const fileStates = {};
-            const nameIndex = {}; // upper-cased basename → node id
-
-            for (const p of cobolFiles) {
-                const id = idOf(p);
-                graphNodes.push({
-                    id, label: path.basename(p), type: 'program', path: p,
-                    reason: 'COBOL program (.cbl) — will be converted to Java'
-                });
-                fileStates[id] = 'pending';
-                nameIndex[path.basename(p, path.extname(p)).toUpperCase()] = id;
-            }
-            for (const p of allFiles.copybookFiles) {
-                const id = idOf(p);
-                graphNodes.push({
-                    id, label: path.basename(p), type: 'copybook', path: p,
-                    reason: 'Copybook (.cpy) — included as a Java model when referenced by a converted program'
-                });
-                fileStates[id] = 'skipped';
-                nameIndex[path.basename(p, path.extname(p)).toUpperCase()] = id;
-            }
-
-            // First pass: read each COBOL file once, cache content, extract PROGRAM-ID.
-            // CALL statements resolve by PROGRAM-ID (not filename) at runtime, so we
-            // must index by both for the graph to reflect real dependencies.
-            const programIdRe = /^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)['"]?/im;
-            const fileContents = new Map(); // p -> source text
-            for (const p of cobolFiles) {
-                let content = '';
-                try { content = fs.readFileSync(p, 'utf-8'); } catch { continue; }
-                fileContents.set(p, content);
-                const m = content.match(programIdRe);
-                if (m) {
-                    const pid = m[1].toUpperCase();
-                    // Don't clobber an existing filename→id mapping with a different file's PROGRAM-ID
-                    if (!nameIndex[pid]) nameIndex[pid] = idOf(p);
-                }
-            }
-
-            const copyRe = /COPY\s+['"]?([A-Z0-9_-]+)['"]?/gi;
-            const callRe = /CALL\s+['"]([A-Z0-9_-]+)['"]/gi;
-            // --- Data-file dependency detection --------------------------
-            // Parse `SELECT … ASSIGN TO '<name>'` in each COBOL program and
-            // match against scanned data files. These data dependencies become
-            // first-class graph nodes (type 'data') with edges from the program
-            // that reads/writes them. Used by:
-            //   - the run endpoint (stages matched data files into the work dir
-            //     so SELECTs actually find real files)
-            //   - the AI conversion context (model knows which data files exist
-            //     and can generate proper FileReader paths)
-            //   - the UI graph (user sees "CBL0011 → ACCTREC.dat" dependency)
-            const assignRe = /SELECT\s+[\w-]+\s+ASSIGN\s+TO\s+(?:['"]([^'"]+)['"]|([A-Z0-9_-]+))/gi;
-            // Data files the scanner already identified in the repo
-            const dataPool = allFiles.dataFiles.concat(allFiles.otherFiles).map(p => ({
-                path: p,
-                base: path.basename(p).toUpperCase(),
-                stem: path.basename(p, path.extname(p)).toUpperCase()
-            }));
-            const dataNodeById = {}; // id → true (to avoid duplicate nodes)
-            const dataFileLookup = {}; // UPPERCASE expected name → matched absolute path
-
-            for (const p of cobolFiles) {
-                const content = fileContents.get(p);
-                if (!content) continue;
-                const sourceId = idOf(p);
-                const seen = new Set();
-                let m;
-                while ((m = copyRe.exec(content)) !== null) {
-                    const target = nameIndex[m[1].toUpperCase()];
-                    if (target && target !== sourceId && !seen.has('c|' + target)) {
-                        graphEdges.push({ source: sourceId, target, kind: 'copy' });
-                        seen.add('c|' + target);
-                    }
-                }
-                while ((m = callRe.exec(content)) !== null) {
-                    const target = nameIndex[m[1].toUpperCase()];
-                    if (target && target !== sourceId && !seen.has('l|' + target)) {
-                        graphEdges.push({ source: sourceId, target, kind: 'call' });
-                        seen.add('l|' + target);
-                    }
-                }
-                // SELECT … ASSIGN TO — data file references
-                while ((m = assignRe.exec(content)) !== null) {
-                    const raw = (m[1] || m[2] || '').trim();
-                    if (!raw || /^(PRINTER|CONSOLE|RANDOM|DISK|TAPE|STDIN|STDOUT|DISPLAY)$/i.test(raw)) continue;
-                    const expected = raw.toUpperCase();
-                    // Match against scanned data files (exact base, stem, or with .txt/.dat suffix)
-                    const hit = dataPool.find(e =>
-                        e.base === expected
-                        || e.stem === expected
-                        || e.base === expected + '.TXT'
-                        || e.base === expected + '.DAT'
-                    );
-                    if (!hit) continue;
-                    const dataId = idOf(hit.path);
-                    dataFileLookup[expected] = hit.path;
-                    // Lazily create the data node (not already in graphNodes)
-                    if (!dataNodeById[dataId]) {
-                        graphNodes.push({
-                            id: dataId,
-                            label: path.basename(hit.path),
-                            type: 'data',
-                            path: hit.path,
-                            reason: `Data file referenced via SELECT … ASSIGN TO '${raw}'`
-                        });
-                        fileStates[dataId] = 'skipped';
-                        dataNodeById[dataId] = true;
-                    }
-                    const edgeKey = 'd|' + sourceId + '->' + dataId;
-                    if (!seen.has(edgeKey)) {
-                        graphEdges.push({ source: sourceId, target: dataId, kind: 'data', via: raw });
-                        seen.add(edgeKey);
-                    }
-                }
-            }
-
-            // --- JCL-derived data-file mapping ---------------------------
-            // Real enterprise COBOL doesn't encode filesystem paths in
-            // SELECT/ASSIGN. It uses DD names, and the JCL job maps each DD
-            // to a real dataset (e.g. //ACCTREC DD DSN=&SYSUID..DATA). Parse
-            // every JCL file in the repo and add the DD→file mappings to
-            // the data-file lookup, so SELECT ACCT-REC ASSIGN TO ACCTREC
-            // correctly resolves to Labs/data/data (renamed ACCTREC at run).
-            // Per-program JCL invocation context. Keyed by UPPERCASE PROGRAM-ID;
-            // each entry lists every JCL step that invokes this program and the
-            // DDs it stages. Fed into the AI conversion prompt so a COBOL
-            // `SELECT … ASSIGN TO FOO` becomes a Java file path of `FOO`
-            // (matching the JCL DD name) with a comment pointing at the real
-            // DSN — not a guessed filename. Without this the AI has to invent
-            // paths and produces unstageable file references.
-            const jclContextByProgram = {};
-            const addJclInvocation = (pgm, jclFile, stepName, dds) => {
-                const key = pgm.toUpperCase();
-                (jclContextByProgram[key] = jclContextByProgram[key] || []).push({
-                    jclFile: path.relative(inputPath, jclFile),
-                    stepName,
-                    dds: dds.map(d => ({
-                        name: d.name,
-                        dsn:  d.dsn || null,
-                        disp: d.disp || null,
-                        sysout: !!d.sysout
-                    }))
-                });
-            };
-
-            for (const jclPath of allFiles.jclFiles) {
-                try {
-                    const jcl = fs.readFileSync(jclPath, 'utf-8');
-                    const parsed = parseJcl(jcl);
-                    if (!parsed) continue;
-                    for (const step of parsed.steps || []) {
-                        // Record which program this step invokes and the DDs
-                        // staged for it — used by the AI conversion context.
-                        if (step.exec && step.exec.pgm) {
-                            addJclInvocation(step.exec.pgm, jclPath, step.name, step.dds || []);
-                        }
-
-                        for (const dd of step.dds || []) {
-                            if (!dd.name || !dd.dsn) continue;
-                            // DSN often uses mainframe conventions like &SYSUID..DATA.
-                            // For the course repo, `..DATA` resolves to `Labs/data/data`.
-                            // We normalize: strip leading symbol, split on dot, take the
-                            // last qualifier and look for a repo file matching it.
-                            const qual = dd.dsn
-                                .replace(/^[&]?[A-Z0-9]+\./i, '')   // drop leading &SYSUID.
-                                .split('.')
-                                .filter(Boolean)
-                                .pop();
-                            if (!qual) continue;
-                            const candidates = dataPool.filter(e =>
-                                e.base.startsWith(qual.toUpperCase())
-                                || e.stem === qual.toUpperCase()
-                            );
-                            if (candidates.length > 0) {
-                                const upperDD = dd.name.toUpperCase();
-                                if (!dataFileLookup[upperDD]) {
-                                    dataFileLookup[upperDD] = candidates[0].path;
-                                }
-                            }
-                        }
-                    }
-                } catch {}
-            }
-
-            conversion.dataFileLookup = dataFileLookup; // used by /api/run
-            conversion.jclContext     = jclContextByProgram; // used by processFile
-            conversion.graph = { nodes: graphNodes, edges: graphEdges };
-            conversion.fileStates = fileStates;
-            conversion.currentFiles = [];
-            conversion.inputPath = inputPath;
-            // -----------------------------------------------------------------
+            // Build the dependency graph + data-file lookup + JCL context in
+            // one pass → src/core/conversion-graph.js. The worker rebuilds its
+            // own PROGRAM-ID map from graph nodes, so fileContents/nameIndex
+            // don't need to leak out of the helper.
+            const graphBuild = buildConversionGraph({ inputPath, cobolFiles, allFiles, parseJcl });
+            conversion.dataFileLookup = graphBuild.dataFileLookup; // used by /api/run
+            conversion.jclContext     = graphBuild.jclContextByProgram; // used by processFile
+            conversion.graph          = graphBuild.graph;
+            conversion.fileStates     = graphBuild.fileStates;
+            conversion.currentFiles   = [];
+            conversion.inputPath      = inputPath;
 
 
             // Parallel processing configuration
@@ -1895,27 +1712,7 @@ require('./src/routes/post-review').mount(app, { activeConversions });
 // classifyArtifact + buildManualReviewMd → src/core/manual-review.js
 const { buildManualReviewMd } = require('./src/core/manual-review');
 
-// ----------------------------------------------------------------------
-// JCL analysis — JCL is not COBOL and isn't converted, but if the repo
-// ships JCL it carries crucial orchestration info (what program runs,
-// against which datasets, in what order). We parse it here and surface
-// the findings so the user sees more than just "SKIPPED_JCL".
-// ----------------------------------------------------------------------
-
-/**
- * Parse a single JCL file into a structured analysis.
- * Extracts:
- *   - jobName: from //JOBNAME JOB ...
- *   - steps: [{ name, exec: { pgm | proc }, dds: [{ name, dsn, disp }] }]
- *   - programs: unique set of PGM= values (for matching to converted Java)
- *   - datasets: unique list of DSN= values
- * Intentionally forgiving — mainframe JCL has many dialects and line-
- * continuation quirks. We catch what we can and move on.
- */
-// JCL parser → src/scan/jcl-parser.js
-const { parseJcl } = require('./src/scan/jcl-parser');
-
-// /api/jcl-analysis → src/routes/jcl.js
+// /api/jcl-analysis → src/routes/jcl.js (parseJcl imported near the top).
 require('./src/routes/jcl').mount(app, { activeConversions, parseJcl });
 
 // /api/download/:id → src/routes/download.js
