@@ -415,3 +415,49 @@ test('autoFixJavaCode strips `throws IOException` from pure-string helper method
             `expected throws PRESERVED on real I/O method:\n${wrapped}\n  → ${out}`);
     }
 });
+
+// ─── 16. validateRepoUrl: shell-metachar guard (§18.3 security) ──────────
+test('validateRepoUrl rejects shell-metacharacter injection attempts', () => {
+    const { validateRepoUrl } = require('../src/util/validate-repo-url');
+    const bad = [
+        'https://evil.com; rm -rf /',
+        'https://evil.com`whoami`',
+        'https://evil.com$(ls)',
+        'git@evil:path && echo pwn',
+        'https://evil.com\nmalicious',
+        '/tmp/path"with\\quotes',
+    ];
+    for (const input of bad) {
+        const r = validateRepoUrl(input);
+        assert.equal(r.ok, false, `should reject: ${JSON.stringify(input)} (got ${JSON.stringify(r)})`);
+    }
+});
+
+// ─── 17. validateRepoUrl: scheme whitelist ───────────────────────────────
+test('validateRepoUrl rejects non-http/non-git@ URL schemes', () => {
+    const { validateRepoUrl } = require('../src/util/validate-repo-url');
+    const bad = ['file:///etc/passwd', 'ftp://anon@host/repo', 'javascript:alert(1)', 'data:text/plain,hi'];
+    for (const input of bad) {
+        const r = validateRepoUrl(input);
+        assert.equal(r.ok, false, `should reject scheme: ${input} (got ${JSON.stringify(r)})`);
+    }
+});
+
+// ─── 18. validateRepoUrl: good inputs pass ──────────────────────────────
+test('validateRepoUrl accepts http(s), git@, and local paths', () => {
+    const { validateRepoUrl } = require('../src/util/validate-repo-url');
+    const goodUrls = [
+        'https://github.com/user/repo.git',
+        'http://internal.corp/repo',
+        'git@github.com:user/repo.git',
+    ];
+    for (const input of goodUrls) {
+        const r = validateRepoUrl(input);
+        assert.equal(r.ok, true, `should accept: ${input}`);
+        assert.equal(r.kind, 'url');
+    }
+    const goodPath = '/Users/me/path/to/repo';
+    const r = validateRepoUrl(goodPath);
+    assert.equal(r.ok, true, `should accept path: ${goodPath}`);
+    assert.equal(r.kind, 'path');
+});

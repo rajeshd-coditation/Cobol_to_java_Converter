@@ -16,19 +16,21 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
+const { validateRepoUrl } = require('../util/validate-repo-url');
 
 function mount(app, deps) {
     const { azureAgent } = deps;
 
     app.post('/api/scan-repo', async (req, res) => {
         const { repoUrl } = req.body || {};
-        if (!repoUrl || !repoUrl.trim()) {
-            return res.status(400).json({ error: 'Repository URL or path is required' });
+        const check = validateRepoUrl(repoUrl);
+        if (!check.ok) {
+            return res.status(400).json({ error: check.error });
         }
         try {
-            let inputPath = repoUrl.trim();
+            let inputPath = check.value;
             let cloned = false;
-            if (inputPath.startsWith('http') || inputPath.startsWith('git@')) {
+            if (check.kind === 'url') {
                 const cloneDir = path.join(os.tmpdir(), `repo_scan_${Date.now()}`);
                 execSync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });
                 inputPath = cloneDir;

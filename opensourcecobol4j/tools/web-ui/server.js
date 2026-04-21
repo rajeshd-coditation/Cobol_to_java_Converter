@@ -119,6 +119,7 @@ const { preprocessCobolSource } = require('./src/core/run/cobol-preprocess');
 const { resolveDataAssignments, stageDataFilesInto } = require('./src/core/run/data-file-staging');
 const { buildConversionGraph } = require('./src/core/conversion-graph');
 const { parseJcl } = require('./src/scan/jcl-parser');
+const { validateRepoUrl } = require('./src/util/validate-repo-url');
 const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
 require('./src/routes/convert-local').mount(app, {
     activeConversions,
@@ -135,8 +136,9 @@ require('./src/routes/convert-local').mount(app, {
 app.post('/api/convert-azure', async (req, res) => {
     const { repoUrl, reviewMode, reviewGlob, selectedFiles } = req.body;
 
-    if (!repoUrl || repoUrl.trim() === '') {
-        return res.status(400).json({ error: 'Repository URL or path is required' });
+    const urlCheck = validateRepoUrl(repoUrl);
+    if (!urlCheck.ok) {
+        return res.status(400).json({ error: urlCheck.error });
     }
 
     if (!azureAgent.isAvailable()) {
@@ -194,11 +196,11 @@ app.post('/api/convert-azure', async (req, res) => {
         };
 
         try {
-            // Determine input path
-            let inputPath = repoUrl.trim();
+            // urlCheck was validated synchronously above; we know the value
+            // is safe to shell-interpolate.
+            let inputPath = urlCheck.value;
 
-            // If it's a git URL, clone it first
-            if (inputPath.startsWith('http') || inputPath.startsWith('git@')) {
+            if (urlCheck.kind === 'url') {
                 conversion.logs.push(' Cloning repository...\n');
                 const cloneDir = path.join(os.tmpdir(), `repo_${conversionId}`);
                 const { execSync } = require('child_process');
@@ -1765,7 +1767,7 @@ require('./src/routes/ai-analyze').mount(app, { aiAgent, azureAgent, buildAnalys
 
 // /api/ai/provider, /api/dependencies → src/routes/misc.js
 // Mount routes now that AI_PROVIDER / aiAgent / azureAgent are all in scope.
-require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent });
+require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent, activeConversions });
 require('./src/routes/status').mount(app, { activeConversions });
 
 
