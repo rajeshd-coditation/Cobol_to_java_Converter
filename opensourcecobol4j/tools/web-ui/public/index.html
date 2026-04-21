@@ -292,6 +292,23 @@
                             <span class="legend-item"><span class="legend-dot failed"></span>Failed</span>
                             <span class="legend-item"><span class="legend-dot skipped"></span>Skipped</span>
                         </div>
+                        <details class="graph-legend-edges" style="margin-top: .35rem;">
+                            <summary style="cursor: pointer; font-size: .78rem; color: var(--text-muted, #888);">Edge &amp; node kinds</summary>
+                            <div class="graph-legend" style="margin-top: .35rem; flex-wrap: wrap; gap: .5rem .9rem;">
+                                <span class="legend-item"><span class="legend-edge" style="background:#a3a3a3;color:#a3a3a3;"></span>CALL</span>
+                                <span class="legend-item"><span class="legend-edge" style="background:#3b82f6;color:#3b82f6;"></span>COPY</span>
+                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#b45309;"></span>SELECT / data</span>
+                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#6b7280;"></span>CALL — external</span>
+                                <span class="legend-item"><span class="legend-edge legend-dotted" style="color:#2563eb;"></span>SQL INCLUDE</span>
+                                <span class="legend-item"><span class="legend-edge" style="background:#7c3aed;color:#7c3aed;"></span>CICS LINK</span>
+                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#7c3aed;"></span>CICS XCTL</span>
+                                <span class="legend-item"><span class="legend-edge legend-dotted" style="color:#7c3aed;"></span>CICS SEND MAP</span>
+                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#0f766e;"></span>IMS DLI</span>
+                                <span class="legend-item"><span class="legend-edge-shape" style="background:#6b7280;transform:rotate(45deg);"></span>missing external</span>
+                                <span class="legend-item"><span class="legend-edge-shape legend-shape-rect" style="background:#7c3aed;"></span>BMS map</span>
+                                <span class="legend-item"><span class="legend-edge-shape legend-shape-hex" style="background:#0f766e;"></span>IMS PCB</span>
+                            </div>
+                        </details>
                     </div>
                     <div class="graph-canvas-wrap">
                         <div id="graphCanvas" class="graph-canvas empty"></div>

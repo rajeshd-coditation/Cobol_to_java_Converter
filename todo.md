@@ -191,7 +191,7 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [x] **Diff highlighting** between pre-fix and post-fix Java. _Done as part of §13's View fix diff modal (paired with Undo fix); side-by-side presentation reuses code-comparison styles._
 - [x] **Keyboard shortcut cheatsheet.** _Done 2026-04-21. `?` toggles a modal listing the active shortcuts (`?`, Esc, Cmd/Ctrl+Enter, Enter). Skips while typing in input/textarea/contenteditable so typing "?" in the repo URL field doesn't open it._
 - [ ] **Accuracy histogram** in the KPI bar — a tiny distribution of per-file scores to spot bimodal repos (mostly 100% + a few <50%).
-- [ ] **Graph edge legend.** A small key showing what each edge kind means (`call` solid purple, `copy` dashed blue, `data` dashed amber, `cics-link` TBD, etc.).
+- [x] **Graph edge legend.** _Done 2026-04-21. Expandable `<details>` panel under the existing state legend shows swatches for every edge kind (CALL, COPY, SELECT/data, CALL-external, SQL INCLUDE, CICS LINK/XCTL/SEND MAP, IMS DLI) + node shapes (missing-external, BMS map, IMS PCB). Collapsed by default to keep the canvas the focus._
 - [ ] **Fullscreen-single-pane.** Max button is repo-wide; add a per-pane "Expand this pane" icon so the user can focus on just COBOL or just Java.
 - [ ] **Stdin display in Run panel.** Show exactly what got fed to each program (including our padding) so the user understands why a program looped.
 - [ ] **Empty state improvements.** "Select a file to view COBOL and Java side by side" is clear; similar treatment for empty graph / empty tree / no AI configured.
@@ -203,7 +203,7 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [ ] **Prompt regression tests.** Golden outputs for `compareRunOutputs` across the N scenarios we've seen (match / partial / diverge / compile-fail / missing-data) — re-run on prompt changes to catch regressions.
 
 ## 21. Nice ideas, not urgent
-- [ ] **Dark-mode toggle remembers preference** in localStorage.
+- [x] **Dark-mode toggle remembers preference** in localStorage. _Already done. `applyTheme()` in public/js/helpers.js writes to `localStorage.setItem('theme', …)` on every toggle; boot reads back via `localStorage.getItem('theme')` and replays `applyTheme()` so the preference survives reloads._
 - [ ] **Per-run cost readout.** We already track tokens; convert to USD via a hardcoded price table and show "This run cost ~$0.42".
 - [ ] **Bookmark a conversion.** Pretty URL `/c/<conversionId>` that deep-links into the Results browser.
 - [ ] **Compare two conversions** side-by-side (same repo, different AI / prompt versions) to A/B-test prompt changes.

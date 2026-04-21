@@ -806,6 +806,26 @@ body {
 .legend-dot.skipped  { background: rgba(7, 6, 31, 0.8); border-color: var(--c-text-mute); border-style: dashed; }
 .legend-dot.awaiting { background: var(--c-warning); border-color: var(--c-warning-light); box-shadow: 0 0 8px var(--c-warning); animation: awaitingPulse 1.4s ease-in-out infinite; }
 
+/* Edge-kind + node-shape swatches for the expandable graph legend (§19). */
+.legend-edge { width: 24px; height: 2px; display: inline-block; vertical-align: middle; margin-right: 4px; }
+.legend-edge.legend-dashed {
+    background: transparent !important;
+    border-top: 2px dashed currentColor;
+    height: 0;
+}
+.legend-edge.legend-dotted {
+    background: transparent !important;
+    border-top: 2px dotted currentColor;
+    height: 0;
+}
+.legend-edge-shape {
+    width: 12px; height: 12px; display: inline-block;
+    margin-right: 4px; vertical-align: middle;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.legend-edge-shape.legend-shape-rect { border-radius: 2px; }
+.legend-edge-shape.legend-shape-hex  { clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+
 .graph-canvas {
     width: 100%;
     height: 580px;
