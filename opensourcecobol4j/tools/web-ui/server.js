@@ -1752,6 +1752,15 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
         javaExit:    result.java  ? result.java.exitCode  : null
     };
 
+    // Echo back the effective stdin we fed both programs (§19). Gives the
+    // UI an honest view of why a program looped or hit an "unexpected
+    // input" path — especially valuable when the user's input was padded
+    // with our default exit-ish values.
+    result.effectiveStdin = {
+        user: (req.body && typeof req.body.input === 'string') ? req.body.input : '',
+        padded: userInput
+    };
+
     log('run', 'complete', {
         file: fileId,
         cobolExit: result.cobol ? result.cobol.exitCode : null,

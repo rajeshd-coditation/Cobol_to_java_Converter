@@ -3429,11 +3429,18 @@ async function runSelectedFile() {
     if (javaMeta) javaMeta.textContent = '';
     if (runBtn) { runBtn.disabled = true; runBtn.querySelector('.btn-text') ? runBtn.querySelector('.btn-text').textContent = 'Running…' : runBtn.textContent = 'Running…'; }
 
+    // Grab the stdin the user typed (if any). The server accepts commas +
+    // literal "\n" as line separators and always pads with exit-ish values
+    // (4 / q / 0 / n) to keep stuck programs from looping forever; we just
+    // forward whatever the user typed verbatim.
+    const stdinField = document.getElementById('runInputField');
+    const userStdin = stdinField ? stdinField.value : '';
+
     try {
         const r = await fetch(`/api/run/${currentConversionId}/${encodeURIComponent(file.cobolPath)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: '{}'
+            body: JSON.stringify({ input: userStdin })
         });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
@@ -3472,6 +3479,11 @@ async function runSelectedFile() {
         // sits in the work dir. Showing these here is how users see the
         // real business output of both sides side-by-side.
         renderRunOutputFiles(data);
+        // Show the effective stdin so the user can diagnose unexpected
+        // loops / wrong menu paths (§19). Server sends { user, padded }
+        // — user is what the user typed, padded is what we actually fed
+        // to both programs (user + default exit values).
+        renderEffectiveStdin(data.effectiveStdin);
 
         // Surface obvious divergence between COBOL and Java outputs so the user
         // knows when the Java is fabricating behavior (simulated CALLs, invented
@@ -3494,6 +3506,43 @@ async function runSelectedFile() {
 // stdout panes. Many COBOL programs write to files via WRITE rather than
 // DISPLAY to stdout; without this panel the Run view looks empty when the
 // program actually produced a real report.
+/**
+ * Surface the effective stdin the server fed to both programs. The user
+ * typed "1,4" and the server turned it into "1\n4\n4\n4\n4\nq\n0\nn\n"
+ * (user + the exit-value padding) — showing both sides explains why a
+ * COBOL menu program walked through several extra prompts after the
+ * intended answer. §19.
+ *
+ * Renders as a <details> so it doesn't compete for screen real estate
+ * with the actual output. No-op when both fields are empty.
+ */
+function renderEffectiveStdin(eff) {
+    const panel = document.getElementById('runOutputPanel');
+    if (!panel) return;
+    panel.querySelectorAll('.run-effective-stdin').forEach(n => n.remove());
+    if (!eff) return;
+    const user = eff.user || '';
+    const padded = eff.padded || '';
+    if (!padded) return;
+
+    const wrap = document.createElement('details');
+    wrap.className = 'run-effective-stdin';
+    wrap.style.cssText = 'margin: .5rem .75rem 0; font-size: .8rem; color: var(--text-muted, #888);';
+    const summary = document.createElement('summary');
+    summary.textContent = user
+        ? `stdin fed (your "${user.replace(/\n/g, '\\n').slice(0, 40)}" + default exit values)`
+        : 'stdin fed (default exit values only — type above for custom input)';
+    summary.style.cssText = 'cursor: pointer;';
+    wrap.appendChild(summary);
+
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'margin: .4rem 0 0; padding: .5rem .7rem; background: var(--c-bg-elevated, rgba(0,0,0,.15)); border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-size: .75rem;';
+    // Show explicit newlines so the user can see exactly where line breaks land.
+    pre.textContent = padded.replace(/\n/g, '↵\n');
+    wrap.appendChild(pre);
+    panel.appendChild(wrap);
+}
+
 function renderRunOutputFiles(data) {
     const panel = document.getElementById('runOutputPanel');
     if (!panel) return;

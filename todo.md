@@ -193,7 +193,7 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [ ] **Accuracy histogram** in the KPI bar — a tiny distribution of per-file scores to spot bimodal repos (mostly 100% + a few <50%).
 - [x] **Graph edge legend.** _Done 2026-04-21. Expandable `<details>` panel under the existing state legend shows swatches for every edge kind (CALL, COPY, SELECT/data, CALL-external, SQL INCLUDE, CICS LINK/XCTL/SEND MAP, IMS DLI) + node shapes (missing-external, BMS map, IMS PCB). Collapsed by default to keep the canvas the focus._
 - [ ] **Fullscreen-single-pane.** Max button is repo-wide; add a per-pane "Expand this pane" icon so the user can focus on just COBOL or just Java.
-- [ ] **Stdin display in Run panel.** Show exactly what got fed to each program (including our padding) so the user understands why a program looped.
+- [x] **Stdin display in Run panel.** _Done 2026-04-21. Also fixed a real bug found during this work — the stdin input field existed but `runSelectedFile` was sending `body: '{}'`, so custom stdin was silently ignored. Now sends `{ input: userStdin }`. Server echoes back `effectiveStdin: { user, padded }` so the UI can show a `<details>` panel with "stdin fed" including the default exit-value padding (4/q/0/n) rendered with explicit ↵ markers._
 - [ ] **Empty state improvements.** "Select a file to view COBOL and Java side by side" is clear; similar treatment for empty graph / empty tree / no AI configured.
 
 ## 20. Testing (none exist today)
@@ -319,9 +319,8 @@ Direct endpoint at `server.js:3115` calls `azureAgent.convertCobolToJava(source)
 - [x] Trace confirmed dead: grep across frontend + docs found zero callers. Removed (along with sibling dead endpoints `/api/azure/status`, `/api/azure/scan`, `/api/azure/convert-directory`, `/api/azure/analyze` — none referenced). `/api/ai/provider` already covers the availability query the frontend makes.
 - Result: one conversion path instead of two, half the prompt surface to keep in sync.
 
-#### 23.2.8 Duplicate failure-analysis endpoints
-`/api/ai/analyze` (legacy `aiAgent.js`) and `/api/azure/analyze` (`azureAgent.js`) both call `analyzeConversionFailure` on their respective helpers with different context completeness. Same UX surface, different quality.
-- [ ] Consolidate on one. Related to §22.4 (kill or document `aiAgent.js`).
+#### 23.2.8 Duplicate failure-analysis endpoints — DONE
+`/api/azure/analyze` was deleted in the §23.2.7 cleanup (no frontend caller). `/api/ai/analyze` is now the only failure-analysis entry point; it prefers `azureAgent.analyzeConversionFailure` when Azure is available and falls back to `aiAgent.analyzeConversionFailure` — same context plumbing on both sides. Confirmed by grep: no remaining `/api/azure/` route handlers; only the NOTE comment at server.js:1826 documents the removal.
 
 ### 23.3 Consistency / correctness issues found while auditing
 Miscellaneous problems surfaced during this audit that aren't purely about context or truncation.
