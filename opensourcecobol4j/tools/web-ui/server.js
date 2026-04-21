@@ -136,6 +136,7 @@ const { resolveDataAssignments, stageDataFilesInto } = require('./src/core/run/d
 const { buildConversionGraph } = require('./src/core/conversion-graph');
 const { parseJcl } = require('./src/scan/jcl-parser');
 const { validateRepoUrl } = require('./src/util/validate-repo-url');
+const { isLikelyTruncated } = require('./src/core/source-integrity');
 const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
 require('./src/routes/convert-local').mount(app, {
     activeConversions,
@@ -452,6 +453,24 @@ app.post('/api/convert-azure', async (req, res) => {
                             path: relativePath,
                             source_path: cobolPath,
                             java_status: 'SKIPPED_NO_ID'
+                        };
+                        return fileResult;
+                    }
+
+                    // Pre-check for truncated / incomplete sources (§13).
+                    // Flag + skip BEFORE sending to the AI — otherwise the
+                    // model helpfully invents a plausible-looking ending
+                    // and we get Java that doesn't match the user's intent.
+                    const integrity = isLikelyTruncated(cobolSource);
+                    if (integrity.truncated) {
+                        fileResult.status = 'skipped_incomplete';
+                        fileResult.error = integrity.reason;
+                        fileResult.reportEntry = {
+                            path: relativePath,
+                            source_path: cobolPath,
+                            java_status: 'SKIPPED_INCOMPLETE_SOURCE',
+                            error: integrity.reason,
+                            sourceBytes: cobolSource.length
                         };
                         return fileResult;
                     }

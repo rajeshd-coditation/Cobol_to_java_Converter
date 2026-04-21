@@ -482,6 +482,62 @@ test('sweepOnce evicts old completed conversions but never running ones', () => 
     assert.ok(map.has('fresh'),          'fresh completed must survive');
 });
 
+// ─── 20a. isLikelyTruncated: flags obviously-cut-off COBOL ──────────────
+test('isLikelyTruncated flags sources with no exit marker and no trailing period', () => {
+    const { isLikelyTruncated } = require('../src/core/source-integrity');
+
+    // Mid-statement cutoff: no END PROGRAM / STOP RUN / GOBACK, last line has no period.
+    const truncated = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TRUNC.
+       PROCEDURE DIVISION.
+           MOVE WS-A TO
+    `;
+    assert.equal(isLikelyTruncated(truncated).truncated, true);
+
+    // Complete: has STOP RUN.
+    const ok1 = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OK1.
+       PROCEDURE DIVISION.
+           DISPLAY "hi".
+           STOP RUN.
+    `;
+    assert.equal(isLikelyTruncated(ok1).truncated, false);
+
+    // Complete: has GOBACK in a subroutine (no STOP RUN).
+    const ok2 = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OK2.
+       PROCEDURE DIVISION.
+           DISPLAY "sub".
+           GOBACK.
+    `;
+    assert.equal(isLikelyTruncated(ok2).truncated, false);
+
+    // Complete: END PROGRAM as the final sentinel.
+    const ok3 = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OK3.
+       PROCEDURE DIVISION.
+           PERFORM WORK.
+           STOP RUN.
+       END PROGRAM OK3.
+    `;
+    assert.equal(isLikelyTruncated(ok3).truncated, false);
+
+    // Comment-only tail is NOT a truncation (period check walks past comments).
+    const okWithTrailingComment = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OK4.
+       PROCEDURE DIVISION.
+           DISPLAY "hi".
+           STOP RUN.
+      * Final note.
+    `;
+    assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
+});
+
 // ─── 20. cleanupOldCheckpoints: deletes old JSON files ──────────────────
 test('cleanupOldCheckpoints deletes checkpoints older than maxAgeMs', () => {
     const os = require('node:os');

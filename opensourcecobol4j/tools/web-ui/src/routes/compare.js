@@ -33,6 +33,10 @@ const REASON_MAP = {
     SKIPPED_JCL: { reason: 'This is a JCL job, not COBOL source.', suggestion: 'JCL is not translated — schedule/trigger equivalents must be built separately in your Java runtime.' },
     SKIPPED_DATA: { reason: 'This is a data file, not COBOL source.', suggestion: null },
     SKIPPED_OTHER: { reason: 'Skipped — file type is not supported for conversion.', suggestion: null },
+    SKIPPED_INCOMPLETE_SOURCE: {
+        reason: 'Source looks truncated — no STOP RUN / END PROGRAM / GOBACK near the end, and the last statement has no terminating period.',
+        suggestion: 'The file may have been cut off during download, upload, or export. Verify against the original and re-import. Running a conversion on a truncated source would produce Java that matches the AI\'s invented ending, not what the real program does.'
+    },
     REJECTED_BY_REVIEW: { reason: 'Rejected during human review.', suggestion: 'Open the reviewer notes (history tab) to see why, then re-run or edit.' },
     CONVERT_FAIL: {
         reason: 'AI conversion step failed.',

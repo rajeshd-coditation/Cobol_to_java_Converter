@@ -141,7 +141,7 @@ The converter currently marks a file `SUCCESS` as soon as the AI returns what lo
   - Delete calls to methods that aren't defined in the same class (replace with `// TODO: call X not implemented`)
   - Cast `String` → right type when added to a typed `List<T>` (or change the list to `List<String>`)
   - Remove stray `package …;` lines
-- [ ] **Source integrity pre-check.** Detect truncated/incomplete COBOL source (e.g. no `END PROGRAM` and no `STOP RUN`/`GOBACK`, or final line is mid-statement). Surface as `SKIPPED_INCOMPLETE_SOURCE` rather than letting the AI invent the rest.
+- [x] **Source integrity pre-check.** _Done 2026-04-21. `src/core/source-integrity.js` runs in processFile before the AI call. Flags `SKIPPED_INCOMPLETE_SOURCE` when (a) the tail 400 bytes contain NONE of END PROGRAM / STOP RUN / GOBACK / EXIT PROGRAM, AND (b) the last non-blank, non-comment content line doesn't end with a period. Both conditions must fire — conservative to avoid false positives. Frontend SKIPPED_STATUSES set + status switch + getDetailedReason + REASON_MAP updated. Tested on truncated + 3 complete-source variants (STOP RUN / GOBACK / END PROGRAM endings + trailing comment)._
 - [ ] **"Before / after" diff view** for the Fix-with-AI flow. We back up to `*.java.before-fix`; the UI should expose a diff so reviewers can see exactly what the repair agent changed.
 - [ ] **Undo Fix-with-AI.** Endpoint `/api/unfix-java/:id/:fileId` that restores the `.before-fix` backup. Add a small button that appears only after a fix.
 - [ ] **Fix-with-AI for COBOL** — parallel to the Java repair. When `cobc` reports `'X' is not defined` with a typo-hint match, offer a one-click "apply suggested fix" that rewrites the source file (with backup).

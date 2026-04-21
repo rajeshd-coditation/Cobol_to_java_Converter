@@ -845,7 +845,7 @@ async function fetchResults() {
             const SKIPPED_STATUSES = new Set([
                 'SKIPPED_COPYBOOK', 'SKIPPED_NO_ID', 'SKIPPED_JCL',
                 'SKIPPED_DATA', 'SKIPPED_OTHER', 'SKIPPED_TOO_LARGE',
-                'SKIPPED_BUDGET'
+                'SKIPPED_BUDGET', 'SKIPPED_INCOMPLETE_SOURCE'
             ]);
             const converted = reportFiles.filter(f => !SKIPPED_STATUSES.has(f.java_status));
 
@@ -1192,6 +1192,10 @@ function updateSkippedList(files) {
                     reason = 'Budget Hit';
                     icon = '';
                     break;
+                case 'SKIPPED_INCOMPLETE_SOURCE':
+                    reason = 'Truncated Source';
+                    icon = '';
+                    break;
                 default:
                     reason = 'Skipped';
                     icon = 'skipped';
@@ -1247,6 +1251,7 @@ function updateErrorList(items) {
             'FAIL': { text: 'Failed', detail: 'Unknown error during processing', icon: '?' },
             'SKIPPED_TOO_LARGE': { text: 'Too Large', detail: 'Source exceeds single-pass size cap (~80KB)', icon: '' },
             'SKIPPED_BUDGET':    { text: 'Budget Hit', detail: 'Conversion stopped — token ceiling reached', icon: '' },
+            'SKIPPED_INCOMPLETE_SOURCE': { text: 'Truncated Source', detail: 'Source looks incomplete — no STOP RUN / END PROGRAM / GOBACK near the end, and the last statement has no terminating period', icon: '' },
             'CICS_DEPENDENCY': { text: 'CICS Dependency', detail: 'Requires CICS/MQ mainframe calls', icon: '' },
             'DB2_DEPENDENCY': { text: 'DB2 Dependency', detail: 'Requires DB2 database integration', icon: '' },
             'VSAM_DEPENDENCY': { text: 'VSAM Dependency', detail: 'Requires VSAM file handling', icon: '' }
