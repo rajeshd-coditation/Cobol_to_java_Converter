@@ -103,6 +103,94 @@
                     'width': 1.5
                 }
             },
+            /* §14 — extended dependency types. Each edge/node gets a
+               distinct style so the orchestration/DB/CICS/IMS layers are
+               visually separable on a real enterprise repo. */
+            {
+                selector: 'node[type="missing-external"]',
+                style: {
+                    'shape': 'diamond',
+                    'width': 24, 'height': 24,
+                    'background-color': '#6b7280',
+                    'border-color': '#94a3b8',
+                    'border-width': 1.5,
+                    'border-style': 'dashed'
+                }
+            },
+            {
+                selector: 'edge[kind="call-external"]',
+                style: {
+                    'line-color': '#6b7280',
+                    'target-arrow-color': '#6b7280',
+                    'line-style': 'dashed',
+                    'width': 1.2,
+                    'opacity': 0.7
+                }
+            },
+            {
+                selector: 'edge[kind="sql-include"]',
+                style: {
+                    'line-color': '#2563eb',
+                    'target-arrow-color': '#2563eb',
+                    'line-style': 'dotted',
+                    'width': 1.5
+                }
+            },
+            {
+                selector: 'edge[kind="cics-link"], edge[kind="cics-xctl"]',
+                style: {
+                    'line-color': '#7c3aed',
+                    'target-arrow-color': '#7c3aed',
+                    'width': 2
+                }
+            },
+            {
+                selector: 'edge[kind="cics-xctl"]',
+                style: {
+                    /* XCTL = transfer of control, no return — draw thicker + taper to
+                       signal "fire and forget". */
+                    'line-style': 'dashed',
+                    'arrow-scale': 1.3
+                }
+            },
+            {
+                selector: 'node[type="bms-map"]',
+                style: {
+                    'shape': 'rectangle',
+                    'width': 30, 'height': 22,
+                    'background-color': '#7c3aed',
+                    'border-color': '#c4b5fd',
+                    'border-width': 2
+                }
+            },
+            {
+                selector: 'edge[kind="cics-map"]',
+                style: {
+                    'line-color': '#7c3aed',
+                    'target-arrow-color': '#7c3aed',
+                    'line-style': 'dotted',
+                    'width': 1.2
+                }
+            },
+            {
+                selector: 'node[type="ims-pcb"]',
+                style: {
+                    'shape': 'hexagon',
+                    'width': 26, 'height': 26,
+                    'background-color': '#0f766e',
+                    'border-color': '#5eead4',
+                    'border-width': 2
+                }
+            },
+            {
+                selector: 'edge[kind="ims"]',
+                style: {
+                    'line-color': '#0f766e',
+                    'target-arrow-color': '#0f766e',
+                    'line-style': 'dashed',
+                    'width': 1.5
+                }
+            },
             {
                 selector: 'node.pending',
                 style: {

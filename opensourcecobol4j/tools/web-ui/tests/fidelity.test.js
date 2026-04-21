@@ -538,6 +538,60 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 19b. buildConversionGraph: extended dependency types (§14) ─────────
+test('buildConversionGraph detects EXEC SQL INCLUDE / CICS LINK+XCTL / SEND MAP / IMS DLI', async () => {
+    const { buildConversionGraph } = require('../src/core/conversion-graph');
+    const { parseJcl } = require('../src/scan/jcl-parser');
+    const os = require('node:os');
+
+    // Build a scratch input dir with one COBOL file that exercises every
+    // new edge kind. Using the real scan contract so this test also
+    // guards against regressions in the graph-build plumbing.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-ext-'));
+    const prog = path.join(tmp, 'MAIN.cbl');
+    const copybook = path.join(tmp, 'SQLCA.cpy');
+    fs.writeFileSync(copybook, '* sql ca copybook\n');
+    fs.writeFileSync(prog, `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MAIN.
+       PROCEDURE DIVISION.
+           EXEC SQL INCLUDE SQLCA END-EXEC.
+           EXEC CICS LINK PROGRAM('CHILDA') END-EXEC.
+           EXEC CICS XCTL PROGRAM('CHILDB') END-EXEC.
+           EXEC CICS SEND MAP('M1') MAPSET('MSET1') END-EXEC.
+           CALL 'CBLTDLI' USING GN, IO-AREA, PCB-CUST.
+           CALL 'UTILITY-Z'.
+           STOP RUN.
+    `);
+
+    const allFiles = {
+        cobolFiles: [prog],
+        copybookFiles: [copybook],
+        jclFiles: [],
+        dataFiles: [],
+        otherFiles: []
+    };
+    const result = buildConversionGraph({ inputPath: tmp, cobolFiles: [prog], allFiles, parseJcl });
+    const edges = result.graph.edges;
+    const nodes = result.graph.nodes;
+
+    const kinds = edges.map(e => e.kind);
+    assert.ok(kinds.includes('sql-include'), `expected sql-include in ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.includes('cics-link'), `expected cics-link in ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.includes('cics-xctl'), `expected cics-xctl in ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.includes('cics-map'), `expected cics-map in ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.includes('ims'), `expected ims in ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.includes('call-external'), `expected call-external for UTILITY-Z in ${JSON.stringify(kinds)}`);
+
+    const types = nodes.map(n => n.type);
+    assert.ok(types.includes('bms-map'), `expected bms-map node, got types: ${JSON.stringify(types)}`);
+    assert.ok(types.includes('ims-pcb'), `expected ims-pcb node, got types: ${JSON.stringify(types)}`);
+    assert.ok(types.includes('missing-external'), `expected missing-external node for UTILITY-Z`);
+
+    // Cleanup
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+});
+
 // ─── 20. cleanupOldCheckpoints: deletes old JSON files ──────────────────
 test('cleanupOldCheckpoints deletes checkpoints older than maxAgeMs', () => {
     const os = require('node:os');
