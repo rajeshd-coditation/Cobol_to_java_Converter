@@ -2446,6 +2446,30 @@ window.onConversionComplete = function () {
 };
 
 // Maximize/restore the Results browser section (full-viewport mode).
+/**
+ * Per-pane expand toggle for the Results Browser (§19).
+ *
+ * `which` = 'cobol' | 'java'. Toggles `pane-expanded-<which>` on
+ * document.body — CSS collapses the other pane and the tree sidebar so
+ * the chosen pane fills the row. Clicking the same pane's button again
+ * (or the other pane's button) restores the normal layout.
+ *
+ * Different from the existing `browser-maximized` (which maximizes the
+ * WHOLE three-pane grid against the rest of the page); this is about
+ * focusing on ONE of the two code panes.
+ */
+function togglePaneExpand(which) {
+    const body = document.body;
+    const classes = ['pane-expanded-cobol', 'pane-expanded-java'];
+    const target = 'pane-expanded-' + which;
+    const alreadyOn = body.classList.contains(target);
+    // Always clear both before toggling so switching from one pane's
+    // expand to the other's is a clean swap, not a stacked state.
+    classes.forEach(c => body.classList.remove(c));
+    if (!alreadyOn) body.classList.add(target);
+}
+window.togglePaneExpand = togglePaneExpand;
+
 function toggleBrowserMaximize(force) {
     const body = document.body;
     const btn  = document.getElementById('browserMaximizeBtn');

@@ -398,15 +398,17 @@
                         <div class="browser-tree" id="browserTree">
                             <div class="empty-state">Loading…</div>
                         </div>
-                        <div class="browser-pane">
+                        <div class="browser-pane" data-pane="cobol">
                             <div class="pane-header cobol-header">
                                 <span class="pane-title" id="browserCobolTitle">Original COBOL</span>
+                                <button type="button" class="pane-expand-btn" onclick="togglePaneExpand('cobol')" title="Expand this pane (hide Java)" aria-label="Expand COBOL pane">⤢</button>
                             </div>
                             <pre id="browserCobolCode" class="browser-code"><code>Select a file from the tree to preview…</code></pre>
                         </div>
-                        <div class="browser-pane">
+                        <div class="browser-pane" data-pane="java">
                             <div class="pane-header java-header">
                                 <span class="pane-title" id="browserJavaTitle">Generated Java</span>
+                                <button type="button" class="pane-expand-btn" onclick="togglePaneExpand('java')" title="Expand this pane (hide COBOL)" aria-label="Expand Java pane">⤢</button>
                                 <button type="button" id="fixJavaBtn" class="btn-pill btn-sm fix-java-btn hidden"
                                         title="Use AI to repair this Java file using the COBOL source, compile errors, run output, and known dependencies as context"
                                         aria-label="Fix this Java file with AI">

@@ -991,6 +991,44 @@ body.theme-light .kpi-histogram .h-bar { background: rgba(0, 0, 0, 0.05); }
 }
 @media (max-width: 1280px) { .browser-grid { grid-template-columns: 220px 1fr 1fr; } }
 
+/* Per-pane expand: clicking a pane's ⤢ button collapses the other pane
+   so the chosen one fills the row. Tree stays narrow so the user can
+   still switch files. Toggling again (or clicking the other pane's
+   button) restores the default 3-column layout. */
+body.pane-expanded-cobol .browser-grid { grid-template-columns: 240px 1fr 0; }
+body.pane-expanded-java  .browser-grid { grid-template-columns: 240px 0   1fr; }
+body.pane-expanded-cobol .browser-pane[data-pane="java"],
+body.pane-expanded-java  .browser-pane[data-pane="cobol"] {
+    visibility: hidden;
+    width: 0;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+
+.pane-expand-btn {
+    background: transparent;
+    border: 1px solid var(--c-border);
+    color: var(--c-text-mute);
+    border-radius: var(--r-sm);
+    padding: 2px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: auto;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 150ms;
+}
+.pane-expand-btn:hover { opacity: 1; color: var(--c-text); border-color: var(--c-accent-light); }
+/* When a pane is expanded, flip its button glyph + tooltip meaning so
+   clicking again is obviously the "restore" action. */
+body.pane-expanded-cobol .browser-pane[data-pane="cobol"] .pane-expand-btn,
+body.pane-expanded-java  .browser-pane[data-pane="java"]  .pane-expand-btn {
+    color: var(--c-accent-light);
+    border-color: var(--c-accent-light);
+    opacity: 1;
+}
+
 /* ── Maximize mode: Results browser fills the viewport ─────────────── */
 .browser-header-actions { display: flex; gap: 8px; align-items: center; }
 .browser-maximize-btn {
