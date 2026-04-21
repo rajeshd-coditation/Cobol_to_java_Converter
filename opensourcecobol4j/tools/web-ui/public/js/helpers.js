@@ -117,7 +117,17 @@ function whiteLabel(text) {
 function applyTheme(theme) {
     document.body.classList.toggle('theme-light', theme === 'light');
     const icon = document.getElementById('themeIcon');
-    if (icon) icon.textContent = theme === 'light' ? '' : '';
+    if (icon) {
+        // Show the ACTIVE theme's glyph (sun for light, moon for dark) so
+        // the user reads the button as "the theme currently in effect".
+        // Both glyphs are text-class Unicode, not emoji, so they stay
+        // monochrome and respect the button's color.
+        icon.textContent = theme === 'light' ? '☀' : '☾';
+    }
+    // Update tooltip so the hover hint matches behavior (button switches
+    // to the OTHER theme when clicked).
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.title = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
     localStorage.setItem('theme', theme);
 }
 

@@ -120,11 +120,13 @@
             {
                 selector: 'edge[kind="call-external"]',
                 style: {
-                    'line-color': '#6b7280',
-                    'target-arrow-color': '#6b7280',
+                    /* Slightly lighter than the default so it still reads
+                       against the dark canvas after 0.7 opacity. */
+                    'line-color': '#94a3b8',
+                    'target-arrow-color': '#94a3b8',
                     'line-style': 'dashed',
-                    'width': 1.2,
-                    'opacity': 0.7
+                    'width': 1.3,
+                    'opacity': 0.8
                 }
             },
             {
@@ -185,8 +187,10 @@
             {
                 selector: 'edge[kind="ims"]',
                 style: {
-                    'line-color': '#0f766e',
-                    'target-arrow-color': '#0f766e',
+                    /* Brightened from #0f766e (teal-700) which was too dark
+                       on the dark canvas. Teal-500 reads on both themes. */
+                    'line-color': '#14b8a6',
+                    'target-arrow-color': '#14b8a6',
                     'line-style': 'dashed',
                     'width': 1.5
                 }
@@ -260,12 +264,17 @@
                 selector: 'edge',
                 style: {
                     'curve-style': 'bezier',
-                    'width': 1.5,
-                    'line-color': '#3a3270',
-                    'target-arrow-color': '#3a3270',
+                    'width': 1.8,
+                    // Baseline edge color picked so it reads on BOTH themes:
+                    // light-purple gray stays visible on the dark #0a0828 canvas
+                    // AND against the near-white light-theme canvas. The
+                    // previous `#3a3270 @ 0.55 opacity` was effectively
+                    // invisible on dark — user-reported 2026-04-21.
+                    'line-color': '#8077c7',
+                    'target-arrow-color': '#8077c7',
                     'target-arrow-shape': 'triangle',
-                    'arrow-scale': 0.8,
-                    'opacity': 0.55,
+                    'arrow-scale': 0.9,
+                    'opacity': 0.75,
                     'transition-property': 'line-color, target-arrow-color, opacity, width',
                     'transition-duration': '300ms'
                 }

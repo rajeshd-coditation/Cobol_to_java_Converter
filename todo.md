@@ -14,7 +14,6 @@ chosen), it lives in **[Decisions log](#decisions-log)** at the bottom.
 
 Tractable wins. Pick any one and ship.
 
-- [ ] **Bookmark URL.** Pretty URL `/c/<conversionId>` that deep-links into the Results browser (rehydrate from checkpoint if the in-memory entry was evicted by §17.3 TTL).
 - [ ] **AI toggle → settings cog.** Currently a compact pill in the header; move into a real settings menu where it belongs alongside future knobs (concurrency, budget cap, theme).
 
 ## Next — medium, clear value (2–5 hrs each)

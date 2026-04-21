@@ -345,6 +345,12 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
 
         currentConversionId = data.conversionId;
         conversionStartedAt = Date.now();
+        // Bookmark URL — update the path to /c/<id> so a browser refresh
+        // preserves this conversion. history.replaceState avoids cluttering
+        // the back-button history with a new entry per conversion.
+        try {
+            window.history.replaceState({}, '', '/c/' + encodeURIComponent(data.conversionId));
+        } catch {}
 
         // Mark Convert busy / enable Stop
         convertBtn.dataset.busy = '1';
@@ -4563,10 +4569,12 @@ window.hideReviewDiff = hideReviewDiff;
 
 // applyTheme, toggleTheme → public/js/helpers.js
 window.toggleTheme = toggleTheme;
-// Restore saved theme on load
+// Restore saved theme on load. Always call applyTheme so the icon gets
+// painted — without the saved-theme branch, the button would render
+// empty because helpers.js only touches #themeIcon from applyTheme.
 (function () {
-    const saved = localStorage.getItem('theme');
-    if (saved) applyTheme(saved);
+    const saved = localStorage.getItem('theme') || 'dark';
+    applyTheme(saved);
 })();
 
 // =======================================================================
@@ -5350,8 +5358,13 @@ window.setPhase = setPhase;
 
 // Restore session on page load
 async function restoreSession() {
-    const savedId = localStorage.getItem('lastConversionId');
-    const savedPhase = localStorage.getItem('lastConversionPhase');
+    // Bookmark URL: if the user landed on /c/<conversionId>, that wins
+    // over whatever localStorage remembers. The server serves index.html
+    // for any /c/* path; we parse it here so the SPA drives into the
+    // right conversion.
+    const bookmarkMatch = window.location.pathname.match(/^\/c\/([^/]+)\/?$/);
+    const savedId = bookmarkMatch ? bookmarkMatch[1] : localStorage.getItem('lastConversionId');
+    const savedPhase = bookmarkMatch ? 'results' : localStorage.getItem('lastConversionPhase');
     if (!savedId) return;
 
     try {

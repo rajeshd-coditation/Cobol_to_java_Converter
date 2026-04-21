@@ -75,6 +75,15 @@ const { lookupCobolTypo } = require('./src/core/cobol-typo-dictionary');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Bookmark URL — serve index.html for /c/<conversionId> so users can
+// deep-link into a previous run. The frontend inspects window.location
+// on boot and drives the results view into that conversion (loading
+// from memory or rehydrating via the existing checkpoint path in
+// loadCheckpoints). No server-side state transition needed.
+app.get('/c/:id', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // Per-IP rate limiters for the AI-burning endpoints (§18.4). Applied as
 // route-specific middleware just before each handler mounts — avoids
 // rate-limiting GETs / static assets / non-AI routes.
