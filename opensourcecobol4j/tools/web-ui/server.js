@@ -1892,10 +1892,22 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                         } catch {}
                     }
 
-                    // Surface the preprocessor periods fix-count if it was
-                    // non-trivial, so the user sees we touched the source.
-                    const modsNote = preprocessMods.periodsAdded
-                        ? `\n\nPreprocessor mods applied: ${preprocessMods.periodsAdded} header-period fix(es).`
+                    // Surface the preprocessor mods if anything touched the
+                    // source. Two classes:
+                    //   - header-period fixes (cobc requires trailing periods
+                    //     on AUTHOR/DATE-WRITTEN/etc.)
+                    //   - typo-dictionary auto-rewrites (upstream bugs in
+                    //     public COBOL repos — e.g. PRINT-REX→PRINT-REC).
+                    const modsParts = [];
+                    if (preprocessMods.periodsAdded) {
+                        modsParts.push(`${preprocessMods.periodsAdded} header-period fix(es)`);
+                    }
+                    if (preprocessMods.typosFixed && preprocessMods.typosFixed.length) {
+                        const uniq = [...new Set(preprocessMods.typosFixed.map(t => `${t.bad}→${t.suggestion}`))];
+                        modsParts.push(`typo fix(es): ${uniq.join(', ')}`);
+                    }
+                    const modsNote = modsParts.length
+                        ? `\n\nPreprocessor mods applied: ${modsParts.join('; ')}.`
                         : '';
                     result.cobol = {
                         ok: false,

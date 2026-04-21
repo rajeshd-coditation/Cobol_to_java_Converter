@@ -1261,6 +1261,101 @@ public class Echo {
     }
 });
 
+// ─── Preprocessor auto-applies curated typo-dictionary (AUTO_APPLY tier) ──
+//
+// Three upstream-documented COBOL bugs need to auto-rewrite at preprocess
+// time so the user doesn't have to click "Apply typo fix" before every
+// run. Pin the behavior so a future dictionary edit can't silently drop
+// the rewrite or (more dangerously) promote a HINT_ONLY entry into
+// AUTO_APPLY where it might overwrite legitimate identifiers.
+test('preprocessCobolSource auto-rewrites PRINT-REX, TLIMIT, CURRENT-DATA', () => {
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'typo-preprocess-'));
+    try {
+        const src = path.join(tmp, 'bugged.cobol');
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. BUGGED.',
+            '       PROCEDURE DIVISION.',
+            '           WRITE PRINT-REX FROM HEADER-1.',
+            '           COMPUTE TLIMIT = TLIMIT + 1 END-COMPUTE.',
+            '           MOVE FUNCTION CURRENT-DATA TO WS-TODAY.',
+            '           STOP RUN.'
+        ].join('\n'));
+        const mods = { periodsAdded: 0, typosFixed: [] };
+        const outPath = preprocessCobolSource(src, tmp, mods);
+        const patched = fs.readFileSync(outPath, 'utf-8');
+        assert.ok(patched.includes('PRINT-REC'), 'PRINT-REX should be rewritten to PRINT-REC');
+        assert.ok(!patched.includes('PRINT-REX'), 'original PRINT-REX must be gone');
+        assert.ok(patched.includes('TLIMITED'), 'TLIMIT should be rewritten to TLIMITED');
+        assert.ok(patched.includes('CURRENT-DATE'), 'CURRENT-DATA should be rewritten to CURRENT-DATE');
+        assert.ok(mods.typosFixed.length >= 3, `expected ≥3 typo fixes reported; got ${mods.typosFixed.length}`);
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('preprocessCobolSource does NOT auto-rewrite HINT_ONLY entries (ACCTREC)', () => {
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'typo-hintonly-'));
+    try {
+        const src = path.join(tmp, 'file-assign.cobol');
+        // ACCTREC is the external file name here (ASSIGN TO ACCTREC) —
+        // legal COBOL, common in COBOL Programming Course. Rewriting it
+        // to ACCT-REC would silently break the JCL linkage.
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. FILEPROG.',
+            '       ENVIRONMENT DIVISION.',
+            '       INPUT-OUTPUT SECTION.',
+            '       FILE-CONTROL.',
+            '           SELECT ACCT-REC ASSIGN TO ACCTREC.',
+            '       PROCEDURE DIVISION.',
+            '           OPEN INPUT ACCT-REC.',
+            '           CLOSE ACCT-REC.',
+            '           STOP RUN.'
+        ].join('\n'));
+        const mods = { periodsAdded: 0, typosFixed: [] };
+        const outPath = preprocessCobolSource(src, tmp, mods);
+        const patched = fs.readFileSync(outPath === src ? src : outPath, 'utf-8');
+        // ACCTREC must survive — it's the external DD name.
+        assert.ok(/ASSIGN\s+TO\s+ACCTREC/.test(patched),
+            'ACCTREC must be preserved in ASSIGN TO clause — it is the file DD name, not a typo');
+        // And no typo fix should be reported for ACCTREC (it's HINT_ONLY).
+        const badRewrite = (mods.typosFixed || []).find(t => t.bad.toUpperCase() === 'ACCTREC');
+        assert.ok(!badRewrite, 'ACCTREC is HINT_ONLY and must not auto-rewrite');
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('preprocessCobolSource leaves typo tokens inside comments alone', () => {
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'typo-comment-'));
+    try {
+        const src = path.join(tmp, 'commented.cobol');
+        // PRINT-REX here is inside a fixed-format comment (col 7 = '*').
+        // Rewriting text inside comments would be invisible noise and
+        // risks breaking historical notes referring to the old name.
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. COMMENTTEST.',
+            '      * Old name was PRINT-REX — renamed to PRINT-REC',
+            '       PROCEDURE DIVISION.',
+            '           DISPLAY "hello".',
+            '           STOP RUN.'
+        ].join('\n'));
+        const mods = { periodsAdded: 0, typosFixed: [] };
+        preprocessCobolSource(src, tmp, mods);
+        // The only occurrence of PRINT-REX is inside a comment so
+        // nothing should be rewritten.
+        assert.ok(!(mods.typosFixed && mods.typosFixed.length),
+            `comment-only occurrences must not trigger rewrites; got ${JSON.stringify(mods.typosFixed)}`);
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 test('interactive run WS — rejects unknown conversion id', async () => {
     const http = require('http');
     const express = require('express');
