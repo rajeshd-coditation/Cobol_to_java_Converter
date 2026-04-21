@@ -3336,10 +3336,16 @@ async function downloadConversionOutput(format) {
         return;
     }
     try {
-        // Optional ?format=maven emits a Maven project layout (src/main/java
-        // + pom.xml). Default stays flat for back-compat — existing callers
-        // don't pass the arg.
-        const qs = format === 'maven' ? '?format=maven' : '';
+        // Format matrix:
+        //   undefined           → flat java/ layout
+        //   'maven'             → Maven project (src/main/java + pom.xml)
+        //   'maven-springbatch' → Maven + jobs/*.spring-batch.xml from JCL
+        let qs = '';
+        if (format === 'maven') {
+            qs = '?format=maven';
+        } else if (format === 'maven-springbatch') {
+            qs = '?format=maven&orchestration=spring-batch';
+        }
         // Pre-flight: HEAD the endpoint to surface errors (not-complete, missing)
         // nicely as a toast instead of a broken download.
         const head = await fetch(`/api/download/${currentConversionId}${qs}`, { method: 'GET' });

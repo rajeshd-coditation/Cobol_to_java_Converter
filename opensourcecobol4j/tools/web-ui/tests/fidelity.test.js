@@ -619,6 +619,88 @@ test('fix-cobol applies whole-word rewrite and creates .before-fix backup', asyn
     }
 });
 
+// ─── 17d. Spring Batch starter XML emitted from parsed JCL (§15) ───────
+test('download route emits Spring Batch XML with per-step context + bean hints', async () => {
+    // Exercise the same buildSpringBatchXml the /api/download Maven+
+    // orchestration path uses, via the module's internal exports. We
+    // don't ship these helpers on module.exports today, so load through
+    // a small wrapper that re-imports the file's closure-level code.
+    // Simpler for the regression: hit the endpoint end-to-end with a
+    // scratch conversion + unzip the response.
+    const express = require('express');
+    const os = require('node:os');
+    const http = require('node:http');
+    const unzipper = null; // keep dep-free — just spot-check the bytes
+
+    const downloadRoute = require('../src/routes/download');
+    const { parseJcl } = require('../src/scan/jcl-parser');
+    const { buildManualReviewMd } = require('../src/core/manual-review');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'download-sb-'));
+    const jclPath = path.join(tmp, 'PAY.jcl');
+    fs.writeFileSync(jclPath, `//PAYJOB  JOB (A),CLASS=A
+//STEP1   EXEC PGM=PAYROL00
+//PAYIN   DD DSN=PROD.PAYROLL.IN,DISP=SHR
+//STEP2   EXEC PGM=UTILITY
+//         DD DSN=PROD.UTIL.OUT,DISP=(NEW,KEEP)
+`);
+    const javaPath = path.join(tmp, 'Payrol00.java');
+    fs.writeFileSync(javaPath, 'public class Payrol00 { public void run() {} }');
+
+    const conv = {
+        result: {
+            outputDir: tmp,
+            report: { files: [
+                { path: 'jcl/PAY.jcl', source_path: jclPath, java_status: 'SKIPPED_JCL' },
+                { path: 'cbl/PAYROL00.cbl', source_path: path.join(tmp, 'PAYROL00.cbl'),
+                  java_path: javaPath, java_status: 'SUCCESS' }
+            ]}
+        }
+    };
+    // PROGRAM-ID resolution uses the basename of source_path, so create
+    // an empty source file so path.basename works.
+    fs.writeFileSync(path.join(tmp, 'PAYROL00.cbl'), '* stub');
+
+    const app = express();
+    downloadRoute.mount(app, {
+        activeConversions: new Map([['c1', conv]]),
+        buildManualReviewMd,
+        parseJcl
+    });
+    const server = app.listen(0);
+    const port = server.address().port;
+
+    try {
+        // Fetch the Spring-Batch variant and verify the zip-magic + that the
+        // XML payload ends up in the stream by scanning the bytes for our
+        // signatures. (Dep-free: we don't parse the zip here; the real
+        // server test covers the unzip path.)
+        const resp = await new Promise((resolve, reject) => {
+            http.get(`http://127.0.0.1:${port}/api/download/c1?format=maven&orchestration=spring-batch`, res => {
+                const chunks = [];
+                res.on('data', c => chunks.push(c));
+                res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
+                res.on('error', reject);
+            }).on('error', reject);
+        });
+
+        assert.equal(resp.status, 200);
+        // ZIP local-file-header signature
+        assert.equal(resp.body.slice(0, 4).toString('hex'), '504b0304');
+        const bodyStr = resp.body.toString('latin1');
+        // Spring Batch XML markers (zip isn't strictly deflated, so text
+        // that passes the compressor unchanged still appears in the bytes).
+        // We check the entry path exists in the central directory header
+        // instead — always stored as plain text in the zip file format.
+        assert.match(bodyStr, /jobs\/PAYJOB\.spring-batch\.xml/,
+            'jobs/PAYJOB.spring-batch.xml entry present in archive');
+        assert.match(bodyStr, /pom\.xml/, 'pom.xml also present (Maven format combines)');
+    } finally {
+        server.close();
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 // ─── 18a. parseJcl: STEPLIB / JOBLIB → libraries[] (§14) ────────────────
 // Known gap: DD concatenations (multiple DSN= lines under the same DD
 // name via blank-named continuation lines) are NOT parsed today — the

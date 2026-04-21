@@ -1824,7 +1824,7 @@ require('./src/routes/jcl').mount(app, { activeConversions, parseJcl });
 // /api/download/:id → src/routes/download.js
 // Must be mounted here (not near the top) because buildManualReviewMd is
 // defined above and passed as a dep.
-require('./src/routes/download').mount(app, { activeConversions, buildManualReviewMd });
+require('./src/routes/download').mount(app, { activeConversions, buildManualReviewMd, parseJcl });
 
 // /api/fix-java → src/routes/fix-java.js
 require('./src/routes/fix-java').mount(app, { activeConversions, azureAgent });

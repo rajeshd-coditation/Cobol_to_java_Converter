@@ -410,6 +410,10 @@
                                         <strong>Maven project</strong>
                                         <span class="download-menu-hint">src/main/java + pom.xml — <code>mvn compile</code> works against the unzipped tree</span>
                                     </button>
+                                    <button type="button" class="download-menu-item" onclick="downloadConversionOutput('maven-springbatch'); toggleDownloadMenu(false)">
+                                        <strong>Maven + Spring Batch scaffolding</strong>
+                                        <span class="download-menu-hint">Everything in Maven project, plus <code>jobs/*.spring-batch.xml</code> starter templates built from the repo's JCL</span>
+                                    </button>
                                 </div>
                             </div>
                             <button type="button" id="browserMaximizeBtn" class="btn-pill btn-sm browser-maximize-btn"
