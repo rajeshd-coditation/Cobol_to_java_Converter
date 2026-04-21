@@ -14,10 +14,6 @@ chosen), it lives in **[Decisions log](#decisions-log)** at the bottom.
 
 Tractable wins. Pick any one and ship.
 
-- [ ] **Root `LICENSE` file.** Pick MIT or note that licensing inherits from `opensourcecobol4j/COPYING` (vendored GPLv3). Either way it belongs at repo root.
-- [ ] **`package.json` engines field.** Add `"engines": { "node": ">=18" }` to `opensourcecobol4j/tools/web-ui/package.json`. Current code uses global `fetch` which requires Node 18+.
-- [ ] **README project-structure section.** Out of date — doesn't mention `src/ai/`, `src/core/`, `src/routes/`, etc. Regenerate from the actual tree.
-- [ ] **Accuracy histogram** in the KPI bar. Tiny distribution of per-file scores to spot bimodal repos (mostly 100% + a few <50%). Reuses data already in `/api/stats`.
 - [ ] **Fullscreen-single-pane.** Per-pane "Expand this pane" icon in the Results Browser so users can focus on just COBOL or just Java. Mirror of the existing repo-wide max button.
 - [ ] **Empty state improvements.** Empty graph / empty tree / "no AI configured" all currently show nothing or raw defaults — add explanatory copy matching the "Select a file to view COBOL and Java side by side" pattern we already have.
 - [ ] **Per-run cost readout.** We already track tokens per conversion; convert to USD via a hardcoded price table and show "This run cost ~$0.42" alongside the token count.

@@ -3220,16 +3220,70 @@ function swapToConvertButton() {
     }
 }
 
+/**
+ * Accuracy distribution histogram in the KPI bar.
+ *
+ * Splits per-file accuracy scores across 5 fixed buckets (0–19, 20–39,
+ * 40–59, 60–79, 80–100) and scales each bar height to `count / max` so
+ * the tallest bar fills the row. Bars are colored by bucket level
+ * (low / medium / high) reusing the same palette as the file-row
+ * accuracy badges.
+ *
+ * No-op when fewer than 2 scored files exist — a single-bucket
+ * histogram is uninformative and just takes space. Hides the kpi-cell
+ * entirely in that case so the flex row doesn't leave a gap.
+ *
+ * Called from paintKpiBar with the file list already fetched from
+ * /api/browser/:id.
+ */
+function paintAccuracyHistogram(files) {
+    const cell = document.getElementById('kpiAccuracyDistCell');
+    if (!cell) return;
+    // Only count files that actually have an accuracy score (SKIPPED_* and
+    // FAIL rows don't). Empty / single-file case isn't worth rendering.
+    const scored = (files || [])
+        .map(f => (typeof f.accuracy === 'number' ? f.accuracy : null))
+        .filter(a => a !== null);
+    if (scored.length < 2) {
+        cell.classList.add('hidden');
+        return;
+    }
+    // 5 buckets of width 20 each; 100 goes into the top bucket.
+    const buckets = [0, 0, 0, 0, 0];
+    for (const a of scored) {
+        const idx = Math.min(4, Math.max(0, Math.floor(a / 20)));
+        buckets[idx]++;
+    }
+    const max = Math.max(...buckets, 1);
+    const bars = cell.querySelectorAll('.h-bar');
+    bars.forEach((bar, i) => {
+        const fill = bar.querySelector('.h-bar-fill');
+        const pct = Math.round((buckets[i] / max) * 100);
+        if (fill) fill.style.height = pct + '%';
+        // Count + range in the tooltip so the user gets concrete numbers.
+        const range = bar.getAttribute('data-range') || '';
+        bar.title = `${buckets[i]} file${buckets[i] === 1 ? '' : 's'} scored ${range}`;
+        // Zero buckets get a minimum height so they read as "empty"
+        // instead of missing — prevents the bars from visually disappearing.
+        if (buckets[i] === 0 && fill) fill.style.height = '2px';
+    });
+    cell.classList.remove('hidden');
+}
+
 // --- KPI bar (post-completion) -------------------------------------------
 async function paintKpiBar() {
     if (!currentConversionId) return;
     try {
-        const [statusResp, graphResp] = await Promise.all([
+        // /api/browser carries per-file accuracy; fetch alongside so we can
+        // render the score-distribution histogram in the same pass.
+        const [statusResp, graphResp, browserResp] = await Promise.all([
             fetch(`/api/status/${currentConversionId}`),
-            fetch(`/api/graph/${currentConversionId}`)
+            fetch(`/api/graph/${currentConversionId}`),
+            fetch(`/api/browser/${currentConversionId}`)
         ]);
         const status = await statusResp.json();
         const graph = await graphResp.json();
+        const browser = await browserResp.json().catch(() => ({}));
         const r = (status.result || {});
         const summary = (r.report && r.report.summary) || {};
         const total = r.totalFiles || 0;
@@ -3253,6 +3307,7 @@ async function paintKpiBar() {
         set('kpiAccuracy', accuracy + '%');
         set('kpiTokens', fmt(tokens));
         set('kpiDuration', duration < 60 ? duration + 's' : Math.floor(duration / 60) + 'm ' + (duration % 60) + 's');
+        paintAccuracyHistogram(browser && browser.files);
         document.getElementById('kpiBar').classList.remove('hidden');
     } catch (err) {
         console.warn('KPI paint failed', err);

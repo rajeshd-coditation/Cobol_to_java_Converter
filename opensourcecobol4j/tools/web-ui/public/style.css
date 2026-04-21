@@ -913,6 +913,36 @@ body {
 }
 .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-mute); font-weight: 500; }
 
+/* Accuracy distribution histogram in the KPI bar — 5 vertical bars, one
+   per 20-point accuracy bucket. Bars read bottom-up (shorter = fewer
+   files in that bucket); bar colour matches the existing accuracy-badge
+   palette (low / medium / high). Container height matches a normal KPI
+   value cell so rows line up. */
+.kpi.kpi-histogram { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.kpi-histogram-bars {
+    display: flex; align-items: flex-end; gap: 3px;
+    height: 32px; min-width: 90px;
+    padding: 0 2px;
+}
+.kpi-histogram .h-bar {
+    width: 14px; height: 100%;
+    display: flex; align-items: flex-end;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 2px;
+    overflow: hidden;
+    cursor: default;
+}
+.kpi-histogram .h-bar-fill {
+    width: 100%;
+    background: var(--c-text-mute);
+    border-radius: 2px 2px 0 0;
+    transition: height 300ms ease;
+}
+.kpi-histogram .h-bar.h-high   .h-bar-fill { background: var(--c-success, #22c55e); }
+.kpi-histogram .h-bar.h-medium .h-bar-fill { background: var(--c-warning, #f59e0b); }
+.kpi-histogram .h-bar.h-low    .h-bar-fill { background: var(--c-error,   #ef4444); }
+body.theme-light .kpi-histogram .h-bar { background: rgba(0, 0, 0, 0.05); }
+
 /* Browser */
 .browser-section {
     padding: 18px;
