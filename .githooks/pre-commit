@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# pre-commit hook — block accidentally committing sensitive or generated
+# files. Matches §8 of todo.md. Install once per clone with:
+#
+#   git config core.hooksPath .githooks
+#
+# (We keep hooks checked in under .githooks/ rather than using the
+# default .git/hooks/ so the hook is versioned with the repo.)
+#
+# Rejects any staged path matching:
+#   - .env / .env.* / *.env  (secrets)
+#   - *.log                  (build/run noise)
+#   - node_modules/*         (should be installed locally)
+#   - graphify-out/*         (large cache, per todo.md §22.*)
+#   - any file >= 5 MB       (usually a wrong add; the user can override)
+#
+# The check walks only the STAGED diff, so uncommitted junk in the
+# working tree doesn't trigger — you only get blocked when you actually
+# try to commit it.
+
+set -euo pipefail
+
+# Collect added / copied / modified / renamed paths from the staged index.
+staged=$(git diff --cached --name-only --diff-filter=ACMR) || staged=""
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+block=0
+reasons=()
+
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+        .env|.env.*|*.env)
+            block=1
+            reasons+=("$f   (secrets — .env family is gitignored for a reason)")
+            ;;
+        *.log)
+            block=1
+            reasons+=("$f   (*.log files shouldn't be committed; add to .gitignore if needed)")
+            ;;
+        node_modules/*|*/node_modules/*)
+            block=1
+            reasons+=("$f   (node_modules/ — install via npm ci, not git)")
+            ;;
+        graphify-out/*|*/graphify-out/*)
+            block=1
+            reasons+=("$f   (graphify-out/ cache — run /graphify locally, don't commit)")
+            ;;
+    esac
+
+    # Size gate: fail on anything >= 5 MB. Large checked-in files are almost
+    # always a wrong add (binary build artifact, accidental core dump).
+    if [ -f "$f" ]; then
+        # BSD vs GNU stat differ; try both.
+        size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+        if [ "${size:-0}" -ge 5242880 ]; then
+            block=1
+            reasons+=("$f   (>=5 MB: $(( size / 1024 / 1024 )) MB — likely a wrong add)")
+        fi
+    fi
+done <<< "$staged"
+
+if [ "$block" -ne 0 ]; then
+    echo ""
+    echo "pre-commit: refusing to commit. Blocked paths:"
+    echo ""
+    for r in "${reasons[@]}"; do
+        echo "  - $r"
+    done
+    echo ""
+    echo "If you really mean to commit this, unstage the path or bypass"
+    echo "with 'git commit --no-verify' (discouraged — make sure it's not"
+    echo "a secret first)."
+    exit 1
+fi
+
+exit 0

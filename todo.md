@@ -127,7 +127,7 @@ Goal: let a human reviewer pause the conversion at each (or selected) file, insp
 
 ## 8. Nice-to-haves (defer)
 - [ ] CI workflow that lints JS + checks README links.
-- [ ] Pre-commit hook to block `*.log`, `node_modules/`, `.env`.
+- [x] Pre-commit hook to block `*.log`, `node_modules/`, `.env`. _Done 2026-04-21. `.githooks/pre-commit` blocks .env family, *.log, node_modules/, graphify-out/, and any file ≥ 5 MB. Enabled per-clone via `git config core.hooksPath .githooks` (documented in README). Tested: rejects staged .env, passes normal files._
 - [ ] Architecture diagram in `docs/`.
 
 ---

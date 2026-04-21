@@ -249,6 +249,22 @@ http://localhost:3000
 
 ---
 
+## Contributor setup
+
+After cloning, enable the repo's pre-commit hook (blocks `.env`, `*.log`,
+`node_modules/`, `graphify-out/`, and files ≥ 5 MB from being committed
+accidentally):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This writes only to `.git/config` in your clone — it's a per-repo setting
+that other contributors configure separately. To bypass the guard on a
+specific commit, use `git commit --no-verify`.
+
+---
+
 ## Azure AI Agent Setup
 
 ### Step 1: Create Azure OpenAI Resource
