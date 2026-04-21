@@ -950,6 +950,24 @@ body {
 .kpi-histogram .h-bar.h-medium .h-bar-fill { background: var(--c-warning, #f59e0b); }
 .kpi-histogram .h-bar.h-low    .h-bar-fill { background: var(--c-error,   #ef4444); }
 body.theme-light .kpi-histogram .h-bar { background: rgba(0, 0, 0, 0.05); }
+/* Small "?" affordance next to the Accuracy-spread label so users notice
+   they can hover for an explanation. The cell's title= carries the real
+   tooltip text; this is just the visual hint. */
+.kpi-help {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--c-text-mute);
+    font-size: 9px;
+    font-weight: 700;
+    margin-left: 4px;
+    vertical-align: 1px;
+    cursor: help;
+}
+body.theme-light .kpi-help { background: rgba(0, 0, 0, 0.08); }
+.kpi-histogram:hover .kpi-help { background: var(--c-accent-light); color: #fff; }
 
 /* Browser */
 .browser-section {

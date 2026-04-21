@@ -326,15 +326,16 @@
                     <div class="kpi"><div class="kpi-value" id="kpiConverted">0</div><div class="kpi-label">Converted</div></div>
                     <div class="kpi"><div class="kpi-value" id="kpiSuccessRate">0%</div><div class="kpi-label">Success rate</div></div>
                     <div class="kpi"><div class="kpi-value" id="kpiAccuracy">0%</div><div class="kpi-label">Avg accuracy</div></div>
-                    <div class="kpi kpi-histogram hidden" id="kpiAccuracyDistCell">
-                        <div class="kpi-histogram-bars" id="kpiAccuracyDist" title="Per-file accuracy distribution">
+                    <div class="kpi kpi-histogram hidden" id="kpiAccuracyDistCell"
+                         title="Per-file accuracy distribution — 5 buckets of 20 points each (0–19, 20–39, 40–59, 60–79, 80–100). Tallest bar = most files in that score range. Hover a bar for its count.">
+                        <div class="kpi-histogram-bars" id="kpiAccuracyDist">
                             <div class="h-bar h-low"    data-range="0–19"   ><span class="h-bar-fill"></span></div>
                             <div class="h-bar h-low"    data-range="20–39"  ><span class="h-bar-fill"></span></div>
                             <div class="h-bar h-medium" data-range="40–59"  ><span class="h-bar-fill"></span></div>
                             <div class="h-bar h-medium" data-range="60–79"  ><span class="h-bar-fill"></span></div>
                             <div class="h-bar h-high"   data-range="80–100" ><span class="h-bar-fill"></span></div>
                         </div>
-                        <div class="kpi-label">Score distribution</div>
+                        <div class="kpi-label">Accuracy spread <span class="kpi-help">?</span></div>
                     </div>
                     <div class="kpi"><div class="kpi-value" id="kpiTokens">0</div><div class="kpi-label">LLM tokens</div></div>
                     <div class="kpi"><div class="kpi-value" id="kpiDuration">--</div><div class="kpi-label">Duration</div></div>
