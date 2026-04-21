@@ -4488,22 +4488,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- Quick win: keyboard shortcuts ---------------------------------------
 document.addEventListener('keydown', (e) => {
-    // Cmd/Ctrl + Enter → Convert (if enabled)
+    // Ignore key events originating from form fields so Cmd+Enter inside the
+    // repo input still triggers Convert (existing behavior) but "?" typed
+    // into a textarea doesn't open the cheatsheet.
+    const target = e.target;
+    const typingInField = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+    );
+
+    // Cmd/Ctrl + Enter → Convert (if enabled) — allowed from within inputs.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         const btn = document.getElementById('convertBtn');
         if (btn && !btn.disabled) btn.click();
+        return;
+    }
+    // "?" → toggle the keyboard-shortcut cheatsheet. Skip while typing.
+    if (e.key === '?' && !typingInField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        toggleShortcutCheatsheet();
+        return;
     }
     // Escape → close any open modal
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
-        // Also close the right drawer
         const drawer = document.getElementById('rightDrawer');
         if (drawer && !drawer.classList.contains('hidden')) {
             toggleRightDrawer();
         }
     }
 });
+
+/**
+ * Keyboard shortcut cheatsheet — "?" toggles. Modal is created lazily.
+ * Keep the list in sync with the actual handlers above and the ones in
+ * other modules (e.g. the Cmd/Ctrl+Enter in convert, Escape dispatch).
+ */
+function toggleShortcutCheatsheet() {
+    let modal = document.getElementById('shortcutCheatsheet');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'shortcutCheatsheet';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 520px;">
+                <div class="modal-header">
+                    <h3>Keyboard shortcuts</h3>
+                    <button class="modal-close" onclick="document.getElementById('shortcutCheatsheet').classList.add('hidden')" aria-label="Close">x</button>
+                </div>
+                <div class="modal-body" style="padding: 1rem 1.25rem;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tbody>
+                            <tr><td style="padding: .4rem 0;"><kbd>?</kbd></td><td>Show / hide this cheatsheet</td></tr>
+                            <tr><td style="padding: .4rem 0;"><kbd>Esc</kbd></td><td>Close modals or the right drawer</td></tr>
+                            <tr><td style="padding: .4rem 0;"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Start conversion (when the Convert button is enabled)</td></tr>
+                            <tr><td style="padding: .4rem 0;"><kbd>Enter</kbd></td><td>Confirm a dialog (when no input is focused)</td></tr>
+                        </tbody>
+                    </table>
+                    <p style="margin-top: 1rem; color: var(--text-muted, #888); font-size: .85rem;">
+                        Shortcuts are disabled while typing in a form field.
+                    </p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        // Backdrop click closes.
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.classList.add('hidden');
+        });
+    }
+    modal.classList.toggle('hidden');
+}
+window.toggleShortcutCheatsheet = toggleShortcutCheatsheet;
 
 // --- Quick win: copy-to-clipboard on code panels -------------------------
 function addCopyButton(preEl, label) {

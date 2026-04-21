@@ -114,9 +114,9 @@ Goal: let a human reviewer pause the conversion at each (or selected) file, insp
 ## 11. UX improvements — medium effort
 - [x] **Syntax highlighting** for COBOL + Java using Prism.js CDN. _Already loaded in `index.html`._
 - [x] **Export report** — done as the "Download" button (zips Java + MANIFEST.md + MANUAL_REVIEW.md + report.json).
-- [ ] **Smooth phase transitions** — fade in/out between workflow steps instead of instant show/hide. CSS `opacity` + `transition`.
-- [ ] **Loading spinner** between clicking Convert and the pre-convert modal appearing (scan/clone can take 5-10s with no feedback).
-- [ ] **Line numbers** in code panels — easier to reference specific lines during review.
+- [x] **Smooth phase transitions** — _Done. CSS `.phase` opacity transitions in public/style.css line 4233+._
+- [x] **Loading spinner** — _Done. `.scan-overlay` with `.scan-spinner` appears on Convert click, stays until the scan response arrives or errors. CSS in public/style.css line 4268+._
+- [x] **Line numbers** — _Done. Prism's `line-numbers` plugin wired via `preEl.classList.add('line-numbers')` in public/app.js line 4588 + CSS overrides in public/style.css line 4204+._
 
 ## 12. UX improvements — bigger lifts
 - [ ] **True interactive terminal** — replace `spawnSync` with `node-pty` + WebSocket for live stdin/stdout. Let users walk through a menu program during the demo.
@@ -187,9 +187,9 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [ ] **`.env` history check** — confirm no accidental commit of real API keys in git history. If found, rotate keys and rewrite history.
 
 ## 19. UX polish (noticed during demo)
-- [ ] **Copy-to-clipboard** button on code panes (COBOL and Java). Tree/pane titles have a "Copy" indicator but the button isn't always wired.
-- [ ] **Diff highlighting** between the original AI output and a Fix-with-AI result. Re-uses #13's diff view.
-- [ ] **Keyboard shortcut cheatsheet.** `?` opens a modal listing Esc/Enter/M (maximize)/D (download)/F (fix)/etc.
+- [x] **Copy-to-clipboard** button on code panes. _Done via `addCopyButton()` in public/app.js:4509 — wraps `selectBrowserFile` so COBOL + Java panes both get a Copy button on render._
+- [x] **Diff highlighting** between pre-fix and post-fix Java. _Done as part of §13's View fix diff modal (paired with Undo fix); side-by-side presentation reuses code-comparison styles._
+- [x] **Keyboard shortcut cheatsheet.** _Done 2026-04-21. `?` toggles a modal listing the active shortcuts (`?`, Esc, Cmd/Ctrl+Enter, Enter). Skips while typing in input/textarea/contenteditable so typing "?" in the repo URL field doesn't open it._
 - [ ] **Accuracy histogram** in the KPI bar — a tiny distribution of per-file scores to spot bimodal repos (mostly 100% + a few <50%).
 - [ ] **Graph edge legend.** A small key showing what each edge kind means (`call` solid purple, `copy` dashed blue, `data` dashed amber, `cics-link` TBD, etc.).
 - [ ] **Fullscreen-single-pane.** Max button is repo-wide; add a per-pane "Expand this pane" icon so the user can focus on just COBOL or just Java.
