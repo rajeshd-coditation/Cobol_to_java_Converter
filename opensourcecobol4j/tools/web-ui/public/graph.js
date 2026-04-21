@@ -394,17 +394,44 @@
             if (onNodeClick) onNodeClick(evt.target.data());
         });
 
-        // Show labels on hover regardless of zoom + rationale tooltip
+        // Compact duration formatter — used only by the hover tooltip,
+        // so it's local rather than imported from helpers.js (graph.js
+        // loads before helpers.js in index.html).
+        const formatDuration = (ms) => {
+            if (!ms || ms < 0) return '';
+            if (ms < 1000) return ms + 'ms';
+            if (ms < 60_000) return (ms / 1000).toFixed(1) + 's';
+            const m = Math.floor(ms / 60_000);
+            const s = Math.round((ms % 60_000) / 1000);
+            return `${m}m ${s}s`;
+        };
+
+        // Show labels on hover regardless of zoom + rationale tooltip.
+        // Tooltip pulls from the richer per-file data when the parent page
+        // has published it on window.cobolGraph.__fileData — that object
+        // carries java_status, conversionAccuracy, timeline[last].ms, etc.
+        // Falls back to the node's own data when the map isn't populated
+        // (early in the conversion, or for non-program nodes).
         cy.on('mouseover', 'node', evt => {
             evt.target.addClass('show-label');
             const d = evt.target.data();
             const tip = document.getElementById('graphTooltip');
             if (tip) {
                 const stateClass = STATE_CLASSES.find(c => evt.target.hasClass(c)) || 'pending';
+                // Pick up file-level detail published by the main app.
+                const extra = (window.cobolGraph && window.cobolGraph.__fileData && window.cobolGraph.__fileData[d.id]) || {};
+                const duration = extra.durationMs ? formatDuration(extra.durationMs) : '';
+                const accuracy = (typeof extra.accuracy === 'number') ? extra.accuracy + '%' : '';
+                const errLine = extra.error
+                    ? `<div class="tip-reason tip-error" style="color:#f87171;">${String(extra.error).slice(0, 180)}</div>`
+                    : '';
                 tip.innerHTML = `
                     <div class="tip-name">${d.label || d.id}</div>
                     <div class="tip-row"><span>Type</span><span>${d.type || ''}</span></div>
                     <div class="tip-row"><span>Status</span><span class="tip-state ${stateClass}">${stateClass.replace('_', ' ')}</span></div>
+                    ${duration ? `<div class="tip-row"><span>Duration</span><span>${duration}</span></div>` : ''}
+                    ${accuracy ? `<div class="tip-row"><span>Accuracy</span><span>${accuracy}</span></div>` : ''}
+                    ${errLine}
                     ${d.reason ? `<div class="tip-reason">${d.reason}</div>` : ''}
                 `;
                 tip.classList.add('visible');

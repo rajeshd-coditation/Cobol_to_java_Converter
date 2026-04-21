@@ -161,6 +161,13 @@ async function checkAIStatus() {
         const response = await fetch('/api/ai/provider');
         const data = await response.json();
 
+        // Cache the deployment name so estimateRunCostUsd can look up
+        // the right price row without another fetch. Keeps the pricing
+        // table lookup honest across custom deployment names.
+        if (data.azure && data.azure.config && data.azure.config.deployment) {
+            window.__aiDeployment = data.azure.config.deployment;
+        }
+
         const aiStatusBadge = document.getElementById('aiStatusBadge');
         const azureToggleSection = document.getElementById('azureToggleSection');
 
@@ -3236,6 +3243,74 @@ function swapToConvertButton() {
  * Called from paintKpiBar with the file list already fetched from
  * /api/browser/:id.
  */
+/**
+ * Rough per-run USD estimate from token counts. Hardcoded price table
+ * keyed off the deployment family — we don't ping Azure's pricing API
+ * (auth + extra latency for a back-of-envelope number isn't worth it).
+ *
+ * Prices are per-1M-tokens as of 2026-04 for the Azure OpenAI regional
+ * pricing, matched to the deployment family we actually use. When the
+ * deployment isn't recognized we fall back to gpt-4.1-mini (current
+ * default in .env.example) — lower-bound estimate is better than
+ * showing nothing.
+ *
+ * Returns a number (USD) or null if token counts are zero.
+ */
+function estimateRunCostUsd({ promptIn, completionOut }) {
+    if (!promptIn && !completionOut) return null;
+    const PRICE = {
+        // $ per 1M tokens (input, output)
+        'gpt-4.1':        [2.00, 8.00],
+        'gpt-4.1-mini':   [0.40, 1.60],
+        'gpt-4.1-nano':   [0.10, 0.40],
+        'gpt-4o':         [2.50, 10.00],
+        'gpt-4o-mini':    [0.15, 0.60],
+        'gpt-35-turbo':   [0.50, 1.50],
+    };
+    // Inspect the deployment advertised by /api/ai/provider. We cached
+    // it in window.__aiDeployment on checkAIStatus; if not set, fall
+    // back to the default.
+    const name = (window.__aiDeployment || 'gpt-4.1-mini').toLowerCase();
+    // Match longest-prefix first so "gpt-4.1-mini-2025" still maps
+    // to "gpt-4.1-mini" rather than "gpt-4.1".
+    const family = Object.keys(PRICE)
+        .sort((a, b) => b.length - a.length)
+        .find(f => name.includes(f)) || 'gpt-4.1-mini';
+    const [inPrice, outPrice] = PRICE[family];
+    return (promptIn / 1_000_000) * inPrice + (completionOut / 1_000_000) * outPrice;
+}
+
+/**
+ * Populates `window.cobolGraph.__fileData` — a {id → {durationMs, accuracy,
+ * error}} map the graph tooltip reads on hover. Keys match what the
+ * graph uses for node ids (relative file paths from conversion.graph).
+ *
+ * Duration comes from the fileTimeline's earliest→latest span so it
+ * reflects actual pipeline time (convert → compile → [repair] → score),
+ * not wall-clock from pending to done which might include HITL pause.
+ */
+function publishFileDataForTooltip(files, status) {
+    if (!window.cobolGraph) return;
+    const timelines = (status && status.fileTimeline) || {};
+    const data = {};
+    for (const f of (files || [])) {
+        const tl = timelines[f.cobolPath] || [];
+        let durationMs = null;
+        if (tl.length >= 2) {
+            const first = tl[0].at;
+            const last = tl[tl.length - 1].at;
+            if (first && last && last > first) durationMs = last - first;
+        }
+        data[f.cobolPath] = {
+            durationMs,
+            accuracy: (typeof f.accuracy === 'number') ? f.accuracy : null,
+            error: f.error || null,
+            status: f.status || null
+        };
+    }
+    window.cobolGraph.__fileData = data;
+}
+
 function paintAccuracyHistogram(files) {
     const cell = document.getElementById('kpiAccuracyDistCell');
     if (!cell) return;
@@ -3306,8 +3381,23 @@ async function paintKpiBar() {
         set('kpiSuccessRate', successRate + '%');
         set('kpiAccuracy', accuracy + '%');
         set('kpiTokens', fmt(tokens));
+        // USD estimate alongside the token count. We don't call the Azure
+        // pricing API (would need an auth cred + adds latency); instead
+        // we carry a small hardcoded price table keyed off deployment
+        // family. When the deployment isn't recognized, fall back to the
+        // cheapest current-gen entry so users see a lower-bound number
+        // rather than nothing. See estimateRunCostUsd() for the table.
+        const usd = estimateRunCostUsd({
+            promptIn: (graph.tokens && graph.tokens.promptIn) || 0,
+            completionOut: (graph.tokens && graph.tokens.completionOut) || 0
+        });
+        if (usd !== null) {
+            const tokensLabel = document.querySelector('#kpiTokens')?.parentElement?.querySelector('.kpi-label');
+            if (tokensLabel) tokensLabel.textContent = `LLM tokens • $${usd.toFixed(2)}`;
+        }
         set('kpiDuration', duration < 60 ? duration + 's' : Math.floor(duration / 60) + 'm ' + (duration % 60) + 's');
         paintAccuracyHistogram(browser && browser.files);
+        publishFileDataForTooltip(browser && browser.files, status);
         document.getElementById('kpiBar').classList.remove('hidden');
     } catch (err) {
         console.warn('KPI paint failed', err);
