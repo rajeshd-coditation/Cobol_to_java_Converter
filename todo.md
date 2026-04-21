@@ -26,7 +26,6 @@ Good single-session work. Each delivers a coherent feature.
 - [ ] **Activity page group-by-file.** Current drawer is a flat stream that goes noisy on 30+ file conversions. Group by `relPath`, show latest phase in collapsed row, expand for full timeline. Filter chips: errors / in-flight / all.
 - [ ] **Audit + retire unnecessary `autoFixJavaCode` patches.** For each of the ~32 regex fixes, document the AI mistake it patches + whether the mistake has recurred recently. Retire patches whose tests pass without them after prompt improvements. **A/B data from §decisions below says patches are net positive — don't delete on aesthetics alone.**
 - [ ] **Compare two conversions side-by-side.** Same repo, different AI / prompt versions. Useful for A/B-testing prompt changes (we've done this ad-hoc via `DISABLE_AUTOFIX=1` already). UI: pick two conversion IDs from a dropdown, render per-file accuracy diff + token diff.
-- [ ] **DB2 DBRMLIB / PLAN references from JCL STEPLIB.** Cross-reference the JCL parser output (we see STEPLIB DSNs) against the conversion graph so DB2-bound programs show their plan dependencies.
 
 ## Later — bigger lifts, need design first
 

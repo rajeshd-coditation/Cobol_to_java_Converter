@@ -538,6 +538,37 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 18a. parseJcl: STEPLIB / JOBLIB → libraries[] (§14) ────────────────
+// Known gap: DD concatenations (multiple DSN= lines under the same DD
+// name via blank-named continuation lines) are NOT parsed today — the
+// continuation-line syntax would need its own handler. Real repos do
+// use this for DBRMLIB stacks; we'll pick it up when we rewrite the
+// parser for procs + include expansion.
+test('parseJcl surfaces STEPLIB / JOBLIB DSNs as step.steplibs + job libraries[]', () => {
+    const { parseJcl } = require('../src/scan/jcl-parser');
+    const jcl = `//PAYJOB   JOB  (ACCT),CLASS=A
+//JOBLIB   DD DSN=PROD.COMMON.LOADLIB,DISP=SHR
+//STEP1    EXEC PGM=PAYROL00
+//STEPLIB  DD DSN=PROD.PAYROLL.LOADLIB,DISP=SHR
+//PAYFILE  DD DSN=PROD.PAYROLL.DATA,DISP=SHR
+//STEP2    EXEC PGM=SORT
+//SORTIN   DD DSN=PROD.PAYROLL.DATA,DISP=SHR
+`;
+    const p = parseJcl(jcl);
+    // Step 1 has STEPLIB with one DSN (direct, not a concatenation)
+    const step1 = p.steps.find(s => s.name === 'STEP1');
+    assert.ok(step1.steplibs.includes('PROD.PAYROLL.LOADLIB'), 'STEPLIB line picked up');
+    // Step 2 has no STEPLIB — steplibs must be empty, not missing
+    const step2 = p.steps.find(s => s.name === 'STEP2');
+    assert.equal(step2.steplibs.length, 0);
+    // Job-wide libraries[] dedupes across steps AND includes JOBLIB
+    assert.ok(p.libraries.includes('PROD.COMMON.LOADLIB'),  'JOBLIB captured at job level');
+    assert.ok(p.libraries.includes('PROD.PAYROLL.LOADLIB'), 'STEPLIB captured at job level');
+    // Non-library DDs (PAYFILE, SORTIN) don't leak in
+    assert.ok(!p.libraries.includes('PROD.PAYROLL.DATA'),
+        'non-STEPLIB DDs must not appear in libraries[]');
+});
+
 // ─── 18b. Prompt regression locks for compareRunOutputs (§20) ──────────
 // The comparator's verdict rules live in the system prompt at
 // src/ai/compare-runs.js. These tests pin each of the five scenarios

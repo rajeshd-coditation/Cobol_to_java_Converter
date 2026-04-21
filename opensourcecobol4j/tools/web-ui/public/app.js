@@ -1451,6 +1451,7 @@ async function loadOrchestrationPanel() {
         for (const c of coverage) covMap[c.program] = c;
         const rec = (data && data.recommendation) || '';
         const jobName = (parsed && parsed.jobName) || '(no JOB card)';
+        const libs = (parsed && parsed.libraries) || [];
 
         const stepsHtml = steps.map(s => {
             const pgm = s.exec && s.exec.pgm;
@@ -1480,6 +1481,16 @@ async function loadOrchestrationPanel() {
                 </div>`;
         }).join('');
 
+        // Libraries (STEPLIB / JOBLIB DSNs) — DB2 plans, bound DBRMs, and
+        // linker-output objects live here. Surfaced so users converting
+        // DB2-bound programs can see what the mainframe runtime expected.
+        const libsHtml = libs.length > 0
+            ? `<div class="orch-libs"><div class="orch-libs-label">Load libraries (STEPLIB / JOBLIB):</div>` +
+              libs.slice(0, 12).map(l => `<span class="orch-lib">${escapeHtml(l)}</span>`).join('') +
+              (libs.length > 12 ? `<span class="orch-lib orch-dd-more">+${libs.length - 12} more</span>` : '') +
+              `</div>`
+            : '';
+
         return `
             <details class="orch-card" open>
                 <summary class="orch-card-head">
@@ -1488,6 +1499,7 @@ async function loadOrchestrationPanel() {
                     <span class="orch-step-count">${steps.length} step${steps.length === 1 ? '' : 's'}</span>
                 </summary>
                 ${stepsHtml || '<p class="empty-state">No EXEC steps parsed.</p>'}
+                ${libsHtml}
                 ${rec ? `<div class="orch-recommendation"><strong>Suggested orchestrator:</strong> ${escapeHtml(rec)}</div>` : ''}
             </details>`;
     }).join('');
