@@ -128,7 +128,10 @@ async function compareRunOutputs(p) {
     // DISPLAY statements / computations. Outputs stay head+tail-snippet because
     // stuck programs can produce megabytes of repetitive text.
     const userPrompt =
-        `File: ${p.fileName || 'unknown'}\n` +
+        `File under review: ${p.fileName || 'unknown'}\n` +
+        `(Use this filename as the anchor for your verdict — do not generalize ` +
+        `from prior comparisons in the same session. Each comparison is a ` +
+        `standalone judgment about THIS file's COBOL vs Java behavior.)\n` +
         `COBOL exit code: ${p.cobolExit ?? 'unknown'} (timedOut=${!!p.cobolTimedOut})\n` +
         `Java  exit code: ${p.javaExit ?? 'unknown'} (timedOut=${!!p.javaTimedOut})\n` +
         (p.cobolSource ? `\n=== ORIGINAL COBOL SOURCE ===\n${p.cobolSource}\n` : '') +

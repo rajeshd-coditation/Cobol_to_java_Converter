@@ -17,9 +17,6 @@ Tractable wins. Pick any one and ship.
 - [ ] **Fullscreen-single-pane.** Per-pane "Expand this pane" icon in the Results Browser so users can focus on just COBOL or just Java. Mirror of the existing repo-wide max button.
 - [ ] **Bookmark URL.** Pretty URL `/c/<conversionId>` that deep-links into the Results browser (rehydrate from checkpoint if the in-memory entry was evicted by §17.3 TTL).
 - [ ] **AI toggle → settings cog.** Currently a compact pill in the header; move into a real settings menu where it belongs alongside future knobs (concurrency, budget cap, theme).
-- [ ] **Dictionary of known COBOL typo fixes.** Expand the `editDistance` hinter with a curated list (`PRINT-REX → PRINT-REC`, etc.) seen in real repos. Small data file + lookup before the edit-distance fuzzy match fires.
-- [ ] **`compareRunOutputs` fileName disambiguation.** Currently accepts `p.fileName` but doesn't use it — two similar outputs in the same session can't be told apart by the agent. Pass into the prompt header. Low risk today; needed when we add per-file verdict caching.
-- [ ] **Document review-mode glob semantics.** The glob matches output paths, not source paths — works correctly but is counter-intuitive. A one-line README note prevents future head-scratching.
 
 ## Next — medium, clear value (2–5 hrs each)
 

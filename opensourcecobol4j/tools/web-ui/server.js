@@ -63,6 +63,9 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Classic Levenshtein edit distance → src/util/edit-distance.js
 const { editDistance } = require('./src/util/edit-distance');
+// Curated known-typo mappings — checked before the edit-distance fuzzy
+// match to produce higher-confidence "Known typo" hints.
+const { lookupCobolTypo } = require('./src/core/cobol-typo-dictionary');
 
 // Middleware
 // 2MB body cap — default is 100KB, which can trip on POST /api/convert-azure
@@ -1617,16 +1620,25 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     if (undefMatch) {
                         try {
                             const bad = undefMatch[1];
-                            const src = fs.readFileSync(reportFile.source_path, 'utf-8');
-                            const idents = new Set();
-                            // Pull every "01 FOO" / "05 FOO" / "FD FOO" name
-                            const idRe = /^\s*(?:\d+\s+)?(?:FD|SD|\d{2})\s+([A-Z][A-Z0-9_-]*)/gim;
-                            let im;
-                            while ((im = idRe.exec(src)) !== null) idents.add(im[1].toUpperCase());
-                            const hit = [...idents].find(i => i !== bad && editDistance(i, bad.toUpperCase()) <= 1);
-                            if (hit) {
-                                typoHint = `\n\nHint: \`${bad}\` is not defined, but \`${hit}\` is — likely a typo in the source file. Edit the COBOL and change \`${bad}\` → \`${hit}\`.`;
-                                log('cobol-compile', 'typo-hint', { bad, suggestion: hit, file: reportFile.path });
+                            // Priority 1: curated known-typo dictionary — higher
+                            // confidence than fuzzy-match because mappings are vetted.
+                            const curated = lookupCobolTypo(bad);
+                            if (curated) {
+                                typoHint = `\n\nKnown typo: \`${bad}\` should be \`${curated}\`. Edit the COBOL to use the canonical name.`;
+                                log('cobol-compile', 'typo-hint', { bad, suggestion: curated, source: 'dictionary', file: reportFile.path });
+                            } else {
+                                // Priority 2: fuzzy match against identifiers actually
+                                // declared in this source file (01 FOO / 05 FOO / FD FOO).
+                                const src = fs.readFileSync(reportFile.source_path, 'utf-8');
+                                const idents = new Set();
+                                const idRe = /^\s*(?:\d+\s+)?(?:FD|SD|\d{2})\s+([A-Z][A-Z0-9_-]*)/gim;
+                                let im;
+                                while ((im = idRe.exec(src)) !== null) idents.add(im[1].toUpperCase());
+                                const hit = [...idents].find(i => i !== bad && editDistance(i, bad.toUpperCase()) <= 1);
+                                if (hit) {
+                                    typoHint = `\n\nHint: \`${bad}\` is not defined, but \`${hit}\` is — likely a typo in the source file. Edit the COBOL and change \`${bad}\` → \`${hit}\`.`;
+                                    log('cobol-compile', 'typo-hint', { bad, suggestion: hit, source: 'edit-distance', file: reportFile.path });
+                                }
                             }
                         } catch {}
                     }

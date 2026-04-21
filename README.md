@@ -100,6 +100,7 @@ Each flag comes with specific "what to check" guidance. *Packed decimal* → ver
 **12. Human-in-the-loop (HITL) review, toggleable mid-run**
 Optional pause-after-each-file workflow — reviewer can approve, reject, or edit the Java before it's written. The toggle works seamlessly mid-conversion: switch it off and the queue drains; switch it on and future files start pausing. No restart, no deadlock.
 *How:* the worker `await`s a per-file `Promise` that's only resolved by a reviewer action (via `/api/review/:id/:fileId`); toggling HITL off hits `/api/review-mode/:id`, which auto-resolves every pending promise with "approve" so the worker continues.
+*Glob filter:* the review-mode glob filters against **output paths** (the generated `.java` path's filename), not the source `.cbl` path. Works correctly for the common case (filename-based filtering) but is worth knowing if you're trying to target files by COBOL-side conventions (PROGRAM-ID, source subdirectory) — those won't match. Use `*Account*.java` or `*.java` rather than `*ACCT*.cbl`.
 
 ### Verification
 
