@@ -27,10 +27,15 @@ function mount(app, deps) {
             return res.status(400).json({ error: 'Conversion not complete — nothing to download yet.' });
         }
 
+        // Optional: ?format=maven emits a pom.xml + src/main/java/ layout
+        // so the zip drops straight into an IDE / CI pipeline. Default
+        // stays the flat `java/` layout for users who just want files.
+        const mavenFormat = req.query.format === 'maven';
+
         const report = conversion.result.report;
         const files = report.files || [];
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const zipName = `cobol-to-java-${req.params.id}-${stamp}.zip`;
+        const zipName = `cobol-to-java-${req.params.id}-${stamp}${mavenFormat ? '-maven' : ''}.zip`;
 
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
@@ -40,11 +45,16 @@ function mount(app, deps) {
         archive.on('error', err => { console.error('zip error', err); try { res.end(); } catch {} });
         archive.pipe(res);
 
-        // 1. All generated Java files — flatten into `java/`.
+        // 1. All generated Java files. Flat layout by default; Maven
+        // format drops them under src/main/java/ so `mvn compile` works
+        // against the unzipped tree immediately. Keeping the default-
+        // package layout here — the AI emits classes without a package
+        // declaration and Maven compiles default-package sources fine.
         let javaCount = 0;
+        const javaDest = mavenFormat ? 'src/main/java' : 'java';
         for (const f of files) {
             if (!f.java_path || !fs.existsSync(f.java_path)) continue;
-            archive.file(f.java_path, { name: `java/${path.basename(f.java_path)}` });
+            archive.file(f.java_path, { name: `${javaDest}/${path.basename(f.java_path)}` });
             javaCount++;
         }
 
@@ -99,9 +109,12 @@ function mount(app, deps) {
             `This archive contains the Java code generated from a COBOL-to-Java`,
             `conversion run, plus guidance on the remaining (non-COBOL) artifacts.`,
             ``,
+            `Layout: **${mavenFormat ? 'Maven project (src/main/java/ + pom.xml)' : 'flat (java/*.java)'}**`,
+            ``,
             `Contents:`,
             ``,
-            `- \`java/\` — generated Java sources (one file per converted program)`,
+            `- \`${javaDest}/\` — generated Java sources (one file per converted program)`,
+            mavenFormat ? `- \`pom.xml\` — minimal Maven build (Java 11, no deps, default package). \`mvn compile\` against this tree just works.` : '',
             `- \`MANIFEST.md\` — converted files: status, accuracy scores, penalties`,
             `- \`MANUAL_REVIEW.md\` — **non-converted** files: JCL, data, HTML, SQL,`,
             `  other languages, etc. Each gets an action label (PORT / KEEP / REVIEW)`,
@@ -114,15 +127,71 @@ function mount(app, deps) {
             `2. Read \`MANUAL_REVIEW.md\` — this is where the remaining modernization`,
             `   work is listed (orchestration, UI, scripts, SQL, etc.). Modernization`,
             `   is not complete until every item in there has a decision.`,
-            `3. To compile: drop \`java/*.java\` into your build (e.g. Maven/Gradle`,
-            `   \`src/main/java\`) and \`javac\` — all generated classes share the`,
-            `   default package.`,
+            mavenFormat
+                ? `3. To compile: \`mvn compile\` from the unzipped tree. All classes share`
+                    + `\n   the default package; add your own package declarations as you refactor.`
+                : `3. To compile: drop \`java/*.java\` into your build (e.g. Maven/Gradle`
+                    + `\n   \`src/main/java\`) and \`javac\` — all generated classes share the`
+                    + `\n   default package. (Or re-download as Maven format: add \`?format=maven\`.)`,
             ``
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         archive.append(readme, { name: 'README.md' });
+
+        // 6. pom.xml — Maven format only. Minimal but runnable: Java 11
+        // source/target, default package (the generated classes don't
+        // declare one), UTF-8 encoding, no external deps. `mvn compile`
+        // against the unzipped tree just works.
+        if (mavenFormat) {
+            const pomXml = buildPomXml(req.params.id, javaCount);
+            archive.append(pomXml, { name: 'pom.xml' });
+        }
 
         archive.finalize();
     });
+}
+
+/**
+ * Minimal pom.xml for the Maven download format. Keeps dependencies
+ * empty — the generated Java uses only JDK classes (BigDecimal,
+ * BufferedReader, etc.) — so users can add their own dependencies
+ * (JDBC driver, logging framework) as they modernize.
+ */
+function buildPomXml(conversionId, javaCount) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.cobol2java.generated</groupId>
+    <artifactId>cobol-to-java-${conversionId}</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <!--
+      Generated by the COBOL-to-Java converter.
+      Contains ${javaCount} converted class${javaCount === 1 ? '' : 'es'}, all in the default package
+      (the AI conversion path doesn't emit package declarations — drop your own
+      if you want to reorganize).
+
+      No dependencies declared — the generated code uses only java.* APIs.
+      Add JDBC driver, logging framework, etc. as you modernize.
+    -->
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <!-- Generated Java is default-package; Maven picks up *.java under
+             src/main/java without requiring a nested package path. -->
+        <sourceDirectory>src/main/java</sourceDirectory>
+    </build>
+</project>
+`;
 }
 
 module.exports = { mount };

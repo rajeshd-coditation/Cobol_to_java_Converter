@@ -1065,6 +1065,38 @@ body.pane-expanded-java  .browser-pane[data-pane="java"]  .pane-expand-btn {
 body.theme-light #retryFailedBtn { color: #b45309; background: rgba(245, 158, 11, 0.10); }
 .retry-count { opacity: 0.85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 
+/* Download split-button: main button runs the default (flat) format; the
+   ▾ button next to it opens a menu with format alternatives (Maven for
+   now; Gradle/Bazel could slot in later). */
+.download-split { position: relative; display: inline-flex; align-items: center; gap: 2px; }
+.download-menu-btn { padding: 4px 8px !important; font-size: 10px; }
+.download-menu {
+    position: absolute;
+    top: calc(100% + 6px); right: 0;
+    min-width: 280px;
+    padding: 6px 0;
+    background: #161030;
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--r-md);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    z-index: 500;
+    display: flex; flex-direction: column;
+}
+body.theme-light .download-menu { background: #fff; border-color: rgba(0, 0, 0, 0.12); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12); }
+.download-menu-item {
+    background: transparent;
+    border: 0;
+    text-align: left;
+    padding: 10px 14px;
+    color: var(--c-text);
+    cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px;
+    font-size: 12.5px;
+}
+.download-menu-item:hover { background: rgba(117, 69, 255, 0.12); }
+.download-menu-hint { color: var(--c-text-mute); font-size: 10.5px; font-weight: 400; }
+.download-menu-hint code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; }
+
 /* Orchestration tab — one card per JCL file, each step showing PGM=
    status (✓ converted / ⚠ status / ✗ not in conversion) + DD list.
    Designed to scan-read; details collapse/expand for focus. §15 */

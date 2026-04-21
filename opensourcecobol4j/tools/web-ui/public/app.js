@@ -3303,15 +3303,46 @@ function updateRetryFailedButton(files) {
     }
 }
 
-async function downloadConversionOutput() {
+/**
+ * Small dropdown toggle for the download-format menu. Matches the
+ * settings-cog pattern: Escape + outside-click both dismiss, re-entrant
+ * so a second click on the ▾ closes.
+ */
+function toggleDownloadMenu(force) {
+    const menu = document.getElementById('downloadMenu');
+    if (!menu) return;
+    const shouldOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !shouldOpen);
+    if (shouldOpen) {
+        const close = (e) => {
+            const wrap = document.querySelector('.download-split');
+            if (wrap && !wrap.contains(e.target)) toggleDownloadMenu(false);
+        };
+        const key = (e) => { if (e.key === 'Escape') toggleDownloadMenu(false); };
+        menu.__close = close; menu.__key = key;
+        setTimeout(() => document.addEventListener('click', close), 0);
+        document.addEventListener('keydown', key);
+    } else {
+        if (menu.__close) document.removeEventListener('click', menu.__close);
+        if (menu.__key) document.removeEventListener('keydown', menu.__key);
+        menu.__close = null; menu.__key = null;
+    }
+}
+window.toggleDownloadMenu = toggleDownloadMenu;
+
+async function downloadConversionOutput(format) {
     if (!currentConversionId) {
         toast('No active conversion to download yet.', 'warning');
         return;
     }
     try {
+        // Optional ?format=maven emits a Maven project layout (src/main/java
+        // + pom.xml). Default stays flat for back-compat — existing callers
+        // don't pass the arg.
+        const qs = format === 'maven' ? '?format=maven' : '';
         // Pre-flight: HEAD the endpoint to surface errors (not-complete, missing)
         // nicely as a toast instead of a broken download.
-        const head = await fetch(`/api/download/${currentConversionId}`, { method: 'GET' });
+        const head = await fetch(`/api/download/${currentConversionId}${qs}`, { method: 'GET' });
         if (!head.ok) {
             const err = await head.json().catch(() => ({}));
             toast(err.error || `Download failed (${head.status})`, 'error');

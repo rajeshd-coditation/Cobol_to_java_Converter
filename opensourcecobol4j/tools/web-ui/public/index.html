@@ -389,12 +389,29 @@
                                     aria-label="Retry failed files">
                                 Retry failed <span id="retryFailedCount" class="retry-count"></span>
                             </button>
-                            <button type="button" id="browserDownloadBtn" class="btn-pill btn-sm browser-download-btn"
-                                    title="Download converted Java + manual-review guide as a zip"
-                                    aria-label="Download conversion output">
-                                <span class="browser-download-icon">down</span>
-                                <span class="browser-download-label">Download</span>
-                            </button>
+                            <div class="download-split">
+                                <button type="button" id="browserDownloadBtn" class="btn-pill btn-sm browser-download-btn"
+                                        title="Download converted Java + manual-review guide as a zip (flat layout)"
+                                        aria-label="Download conversion output">
+                                    <span class="browser-download-icon">down</span>
+                                    <span class="browser-download-label">Download</span>
+                                </button>
+                                <button type="button" id="browserDownloadMenuBtn" class="btn-pill btn-sm download-menu-btn"
+                                        onclick="toggleDownloadMenu()"
+                                        title="Download format options" aria-label="Download format options" aria-haspopup="true">
+                                    <span>▾</span>
+                                </button>
+                                <div id="downloadMenu" class="download-menu hidden" role="menu">
+                                    <button type="button" class="download-menu-item" onclick="downloadConversionOutput(); toggleDownloadMenu(false)">
+                                        <strong>Flat layout</strong>
+                                        <span class="download-menu-hint">java/*.java + MANIFEST + MANUAL_REVIEW</span>
+                                    </button>
+                                    <button type="button" class="download-menu-item" onclick="downloadConversionOutput('maven'); toggleDownloadMenu(false)">
+                                        <strong>Maven project</strong>
+                                        <span class="download-menu-hint">src/main/java + pom.xml — <code>mvn compile</code> works against the unzipped tree</span>
+                                    </button>
+                                </div>
+                            </div>
                             <button type="button" id="browserMaximizeBtn" class="btn-pill btn-sm browser-maximize-btn"
                                     title="Maximize (Esc to exit)" aria-label="Maximize Results browser">
                                 <span class="browser-maximize-icon"></span>
