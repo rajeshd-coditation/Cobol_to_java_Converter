@@ -172,17 +172,17 @@ We already have `/api/jcl-analysis`; wire it into the product.
 
 ## 17. Observability / ops
 - [x] **File-backed logger + `/api/logs` endpoint.** _Done — writes to `webui.log`, JSON-per-line._
-- [ ] **Log rotation.** `webui.log` grows unbounded. Rotate at 10 MB, keep 5 files.
-- [ ] **Memory hygiene for `activeConversions`.** TTL-evict conversions older than N hours; move completed ones to disk-only (already checkpointed) after N minutes of inactivity.
-- [ ] **Checkpoint GC.** `/tmp/cobol_converter_checkpoints/` keeps growing; prune entries older than 7 days on server boot.
+- [x] **Log rotation.** _Done 2026-04-21. `src/util/logger.js` rotates at 10 MB, keeps webui.log.1 .. .5. Checked on every append (cheap stat)._
+- [x] **Memory hygiene for `activeConversions`.** _Done 2026-04-21. `src/persistence/active-conversions-ttl.js` sweeps every 5 min, evicts completed entries older than 2h. Running conversions never evicted. Disk checkpoint survives; deep-linked users rehydrate on request._
+- [x] **Checkpoint GC.** _Done 2026-04-21. `cleanupOldCheckpoints()` runs once at boot, prunes entries older than 7 days based on the checkpoint's own completedAt/startedAt (not filesystem mtime)._
 - [ ] **`run.sh logs`** command — tail the webui.log.
 - [ ] **Token/accuracy telemetry endpoint.** `/api/stats` returning averages across recent conversions (avg tokens per file, avg accuracy, avg duration, fail rate by status).
-- [ ] **Health endpoint.** `/api/health` with AI reachability + disk space + active conversion count.
+- [x] **Health endpoint.** _Done 2026-04-21. `/api/health` returns uptime, activeConversions breakdown, AI availability, tmpdir. Safe to expose for k8s liveness probes._
 
 ## 18. Security / input hygiene
-- [ ] **`/api/file-content` path scoping.** Currently reads any absolute path. Restrict to paths inside a known conversion's `outputDir` or `inputPath`.
-- [ ] **Command-injection review** for `execSync` calls that interpolate paths — paths with spaces/quotes are ok because we quote, but confirm no unquoted interpolation remains.
-- [ ] **Sanitize repo URLs** before `git clone`. Reject non-http(s)/git@ schemes. (Current pattern allows any URL — trivial path-traversal risk.)
+- [x] **`/api/file-content` path scoping.** _Done 2026-04-21. `src/routes/misc.js` now gates on allowed roots (each active conversion's inputPath + outputDir, plus bundled sample paths). Both sides resolved through `fs.realpathSync` so `..` and symlink tricks can't escape. Absolute paths only; relative → 400; outside roots → 403._
+- [x] **Command-injection review** for `execSync` calls. _Done 2026-04-21 audit. All user-controlled input into shell-quoted `execSync`/`spawnSync` either passes through `validateRepoUrl` (rejects shell metachars + non-http schemes) or comes from regex captures restricted to `[A-Za-z0-9_-]+` (COBOL PROGRAM-ID); all other paths are server-built tempdir paths (`os.tmpdir() + Date.now().toString()`). No unquoted interpolations remain._
+- [x] **Sanitize repo URLs** before `git clone`. _Done 2026-04-21. `src/util/validate-repo-url.js` gates both `/api/scan-repo` and `/api/convert-azure`. Rejects shell metachars (\`$;|&<>\\!*?(){}[]"'\n\r\` and control chars), non-http/non-git@ schemes (file://, ftp://, javascript:, data:). Returns structured `{ok, kind, value}`. 3 test cases cover injection + scheme + happy path._
 - [ ] **Rate-limit AI endpoints** (`/api/fix-java`, `/api/compare-runs`, `/api/convert-azure`) per-IP to prevent token-spend abuse if exposed publicly.
 - [ ] **`.env` history check** — confirm no accidental commit of real API keys in git history. If found, rotate keys and rewrite history.
 
@@ -241,14 +241,21 @@ Community 10 has its own `analyzeConversionFailure()` / `autoFixCobolCode()` tha
 - [x] Top-of-file docstring on `aiAgent.js` now explicitly marks it as the OpenAI-direct fallback with a "keep this narrow" directive for future maintainers.
 - Exposed surface dropped from 5 to 4 exports (removed `autoFixCobolCode`).
 
-### 22.5 Split `azureAgent.js` (~2020 lines) — refactor, not functional
-Community 0 is the largest (52 nodes) and loosest (cohesion 0.06). Classic god-file smell. Purely mechanical split; no behavior change.
-- [ ] `convertCobolToJava.js` — chat + agent paths + the five prompts.
-- [ ] `autoFixJavaCode.js` — post-generation regex fixers.
-- [ ] `accuracyAnalyzer.js` — `analyzeConversionAccuracy` + penalty rules.
-- [ ] `compareRunOutputs.js` — run verdict comparator.
-- [ ] `azureAgent.js` re-exports the union so `server.js` imports are unchanged.
-- Unblocks unit tests on each piece (§20) and makes prompt diffs reviewable.
+### 22.5 Split `azureAgent.js` (~2020 lines) — DONE 2026-04-21
+azureAgent.js dropped from 2255 → 53 lines (a pure re-export facade). Full layout now:
+- [x] `src/ai/azure-client.js` — initializeAzure + makeOpenAIRequest (retry + DEBUG_PROMPTS) + isAvailable + getConfig.
+- [x] `src/ai/convert-cobol.js` — convertCobolToJava (primary + retry prompts, fidelity rules).
+- [x] `src/ai/fix-java.js` — repair prompt.
+- [x] `src/ai/analyze-failure.js` — failure analyst (was analyzeConversionFailure).
+- [x] `src/ai/compare-runs.js` — run-verdict comparator.
+- [x] `src/core/auto-fix-java.js` — autoFixJavaCode + detectTruncation.
+- [x] `src/core/accuracy-scorer.js` — analyzeConversionAccuracy + penalty rules.
+- [x] `src/scan/cobol-scanner.js` — scanForCobolFiles + scanForAllMainframeFiles.
+- [x] `src/util/pascal-case.js` — toPascalCase (was triplicated across server.js + azureAgent.js).
+- [x] azureAgent.js is now a 53-line facade that re-imports the surface server.js expects.
+- Dead code deleted in the process: predictProgramOutput (~110 lines, zero callers), convertDirectory (~63 lines, zero callers).
+- Latent bug fixed: 8 `azureConfig` references survived the azure-client extraction and would have thrown ReferenceError on first call; replaced with `isAvailable()` / `getConfig()`.
+- Tests scan azureAgent.js + every file under src/ai/ via `readAllPromptSources()` so prompt-regression assertions stay stable across future splits.
 
 ### 22.6 Move or rename `context.md`
 Two INFERRED `rationale_for` edges cite `context.md` as design rationale for real product decisions (Coditation white-labeling, dialog replacement). If `context.md` is living session notes, that's a stability mismatch — specs shouldn't cite scratchpads.
@@ -413,14 +420,14 @@ Right now the frontend polls `/api/graph/:id` for per-file state updates. Each n
 - [ ] Frontend: clicking a node opens a slide-out panel (reuse `.fix-progress-panel` CSS) showing that file's timeline — updates live while conversion is running.
 - [ ] Optionally switch polling → SSE for the whole conversion once this is stable, so updates don't lag.
 
-### 24.7 Code structure — god-files are unreadable — HIGH
-Current line counts (after all recent work):
-- `server.js` — **3,764 lines** (API routes + scan + graph + processFile + compile-gate + fix-java + file-timeline + compareRunOutputs + run orchestrator + JCL analysis + download/zip + run helpers + crash handlers)
-- `public/app.js` — **5,632 lines** (scan UI + graph integration + results browser + review modal + run panel + timeline panel + fix-with-AI + accuracy rendering + toasts + chat + everything else)
-- `public/style.css` — **4,927 lines** (lots of pre-v2 CSS still around — see §9.6 legacy cleanup)
-- `azureAgent.js` — **2,231 lines** (convertCobolToJava + autoFixJavaCode with 6 regex fixes + compareRunOutputs + fixJavaCode + predictProgramOutput + analyzeConversionAccuracy + scan helpers)
+### 24.7 Code structure — god-files are unreadable — MOSTLY DONE 2026-04-21
+Line counts after the refactor (2026-04-21):
+- `server.js` — **1,820 lines** (was 3,764; −52%). Only two inline routes remain: `/api/convert-azure` worker + `/api/run`. Everything else now lives in `src/routes/`.
+- `public/app.js` — **5,116 lines** (was 5,632; −9%). Four modules extracted to `public/js/` (helpers, dialogs, accuracy-panel, review-chat). Remaining candidates: browser-tree, run-modal, review-modal, AI-analyzer, export, session restore.
+- `public/style.css` — 4,927 lines (untouched; Phase 6 §9.6 still pending).
+- `azureAgent.js` — **53 lines** (was 2,231; −98%). Pure facade over src/ai/ + src/core/ + src/scan/ + src/util/. See §22.5 for the full module layout.
 
-Navigating / changing any of these is painful. Each edit session I'm `grep -n`'ing to find anchors. Impossible to onboard a new contributor without a map.
+Server-side module tree now has 30+ focused modules under `src/`. Each is 30–250 lines with a clear contract. Onboarding map: read server.js (boot + two inline routes) → read `src/routes/*` for HTTP surface → read `src/core/*` and `src/ai/*` for the conversion pipeline.
 
 **Target split — server-side** (`opensourcecobol4j/tools/web-ui/src/` subtree):
 ```
