@@ -120,6 +120,9 @@ require('./src/routes/scan-repo').mount(app, { azureAgent });
 // + runCompileGateOnReport + stripAnsi, which all live in src/.
 const { parseScannerOutput } = require('./src/core/parse-scanner-output');
 const { stripAnsi } = require('./src/util/strip-ansi');
+const { listOutputFiles } = require('./src/core/run/list-output-files');
+const { preprocessCobolSource } = require('./src/core/run/cobol-preprocess');
+const { resolveDataAssignments, stageDataFilesInto } = require('./src/core/run/data-file-staging');
 const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
 require('./src/routes/convert-local').mount(app, {
     activeConversions,
@@ -1380,58 +1383,13 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     // only picks files created/modified during THIS run.
     const runStartMs = Date.now();
 
-    // --- Data-file dependency staging ----------------------------------
-    // The graph-building step already found which `SELECT … ASSIGN TO`
-    // targets resolve to real files in the repo (stored in
-    // `conversion.dataFileLookup`). We use those mappings to stage the
-    // files into both work dirs before either program runs — Java in the
-    // pre-run setup, COBOL in the temp work dir right before exec.
-    // Fallback to live re-parsing if the lookup wasn't built (older
-    // conversions, cancelled runs).
-    const dataAssignments = []; // { expected, matchedPath, variants }
-    try {
-        const buildVariants = (expected) =>
-            [expected, expected + '.txt', expected + '.dat', expected.toUpperCase(), expected.toLowerCase()];
-        const srcText = fs.existsSync(reportFile.source_path) ? fs.readFileSync(reportFile.source_path, 'utf-8') : '';
-        const assignRe = /SELECT\s+[\w-]+\s+ASSIGN\s+TO\s+(?:['"]([^'"]+)['"]|([A-Z0-9_-]+))/gi;
-        const expected = new Set();
-        let am;
-        while ((am = assignRe.exec(srcText)) !== null) {
-            const n = (am[1] || am[2] || '').trim();
-            if (!n || /^(PRINTER|CONSOLE|RANDOM|DISK|TAPE|STDIN|STDOUT|DISPLAY)$/i.test(n)) continue;
-            expected.add(n);
-        }
-        const lookup = conversion.dataFileLookup || {};
-        for (const exp of expected) {
-            const cached = lookup[exp.toUpperCase()];
-            if (cached && fs.existsSync(cached)) {
-                dataAssignments.push({ expected: exp, matchedPath: cached, variants: buildVariants(exp) });
-                continue;
-            }
-            // Fallback: search the full report for a match
-            const pool = (conversion.result.report.files || [])
-                .filter(f => f.source_path && (f.java_status === 'SKIPPED_DATA' || f.java_status === 'SKIPPED_OTHER') && fs.existsSync(f.source_path))
-                .map(f => f.source_path);
-            const hit = pool.find(p => {
-                const base = path.basename(p).toUpperCase();
-                const stem = path.basename(p, path.extname(p)).toUpperCase();
-                const E = exp.toUpperCase();
-                return base === E || stem === E || base === E + '.TXT' || base === E + '.DAT';
-            });
-            if (hit) dataAssignments.push({ expected: exp, matchedPath: hit, variants: buildVariants(exp) });
-        }
-    } catch { /* non-fatal */ }
-    // Stage data into the Java work dir up front
-    if (reportFile.work_dir && fs.existsSync(reportFile.work_dir)) {
-        for (const d of dataAssignments) {
-            for (const v of d.variants) {
-                const dest = path.join(reportFile.work_dir, v);
-                if (!fs.existsSync(dest)) {
-                    try { fs.copyFileSync(d.matchedPath, dest); } catch {}
-                }
-            }
-        }
-    }
+    // Data-file staging: resolve SELECT-ASSIGN targets (via the cached
+    // dataFileLookup from scan, or by re-parsing the source as fallback),
+    // then copy each match into the Java work dir under every plausible
+    // name variant. COBOL side gets staged later, right before cobc runs.
+    // → src/core/run/data-file-staging.js
+    const dataAssignments = resolveDataAssignments(reportFile, conversion);
+    stageDataFilesInto(reportFile.work_dir, dataAssignments);
 
     // --- Run Java ------------------------------------------------------
     // Strategy: try to compile the target with ONLY the siblings it actually
@@ -1672,43 +1630,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                 // errors. The /api/run pre-check now short-circuits with a
                 // clean "requires DB2/CICS/IMS preprocessor" message instead.
                 const preprocessMods = { periodsAdded: 0 };
-                const preprocessSource = (srcPath) => {
-                    try {
-                        const orig = fs.readFileSync(srcPath, 'utf-8');
-                        const lines = orig.split(/\r?\n/);
-
-                        const COMMENTARY_HEADERS = /^(\s*)(AUTHOR|DATE-WRITTEN|DATE-COMPILED|INSTALLATION|SECURITY|REMARKS)\s*\.(.*)$/i;
-                        for (let i = 0; i < lines.length; i++) {
-                            const l = lines[i];
-                            const m = l.match(COMMENTARY_HEADERS);
-                            if (m) {
-                                const indent = m[1];
-                                const kw = m[2].toUpperCase();
-                                const rest = m[3];
-                                if (rest.trim().length > 0) {
-                                    lines[i] = indent + kw + '.';
-                                    preprocessMods.periodsAdded++;
-                                }
-                                continue;
-                            }
-                            const progRe = /^(\s*)PROGRAM-ID\s*\.\s*([A-Za-z0-9_-]+)/i;
-                            const pm = l.match(progRe);
-                            if (pm) {
-                                const contentInAreaB = l.slice(0, 72);
-                                if (!/\.\s*$/.test(contentInAreaB.trimEnd())) {
-                                    lines[i] = pm[1] + 'PROGRAM-ID. ' + pm[2] + '.';
-                                    preprocessMods.periodsAdded++;
-                                }
-                            }
-                        }
-
-                        const patched = lines.join('\n');
-                        if (patched === orig) return srcPath;
-                        const outName = path.join(cobolWork, 'patched_' + path.basename(srcPath));
-                        fs.writeFileSync(outName, patched, 'utf-8');
-                        return outName;
-                    } catch { return srcPath; }
-                };
+                const preprocessSource = (srcPath) => preprocessCobolSource(srcPath, cobolWork, preprocessMods);
 
                 // GnuCOBOL flags that accept more real-world COBOL dialects:
                 //   -std=mf            → Micro Focus dialect (accepts AUTHOR, DATE-WRITTEN, etc.)
@@ -1851,17 +1773,10 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     });
                 }
                 if (!result.cobol && compiled) {
-                    // Stage the same data files into the COBOL work dir that we
-                    // staged into the Java work dir earlier. libcob looks for
-                    // SELECT-ASSIGN targets relative to cwd, so each expected
-                    // name is copied in multiple variants (raw, .txt, .dat,
-                    // upper, lower).
-                    for (const d of dataAssignments) {
-                        for (const v of d.variants) {
-                            const dest = path.join(cobolWork, v);
-                            try { fs.copyFileSync(d.matchedPath, dest); } catch {}
-                        }
-                    }
+                    // Stage the same data files into the COBOL work dir that
+                    // were staged into the Java work dir earlier — libcob
+                    // resolves SELECT-ASSIGN relative to cwd.
+                    stageDataFilesInto(cobolWork, dataAssignments);
 
                     // Lower timeout so the UI gets quick feedback when a program
                     // is stuck in an input loop. 5 seconds is still plenty for
@@ -1924,67 +1839,9 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     if (result.java  && result.java.output)  result.java.output  = stripAnsi(result.java.output);
     if (result.java  && result.java.error)   result.java.error   = stripAnsi(result.java.error);
 
-    // --- Surface output files (PRTLINE, REPORT, OUT*, etc.) -----------
-    // Many COBOL programs write their real output to a FILE via WRITE,
-    // not to SYSOUT. The stdout panel alone makes this look like "COBOL
-    // produced nothing" when the program actually wrote a report file.
-    // For each side, list files in its work_dir that were created or
-    // modified during the run (mtime >= runStart), skipping source/class
-    // files and the staged inputs so only NEW program-written files show.
-    // Each entry: { name, bytes, contentPreview }. Preview capped at 8KB.
-    const listOutputFiles = (workDir, runStartMs, excludeNames) => {
-        const out = [];
-        if (!workDir || !fs.existsSync(workDir)) return out;
-        try {
-            const OUT_PREVIEW_MAX = 8000;
-            // Skip source files, class files, and every common compiler
-            // binary output (.dylib/.so/.dll/.o/.exe). Also skip any file
-            // whose first bytes look binary — real COBOL program outputs
-            // are textual reports (PRTLINE, REPOUT, etc.).
-            const SKIP_EXT = /\.(java|class|cbl|cob|cobol|cpy|copy|dylib|so|dll|o|obj|exe|jar)$/i;
-            const KNOWN_COMPILE_BINARY_NAMES = new Set(['cobprog', 'a.out']);
-            for (const name of fs.readdirSync(workDir)) {
-                if (excludeNames && excludeNames.has(name)) continue;
-                if (SKIP_EXT.test(name)) continue;
-                if (KNOWN_COMPILE_BINARY_NAMES.has(name)) continue;
-                // Hidden / lockfiles — uninteresting.
-                if (name.startsWith('.')) continue;
-                const fp = path.join(workDir, name);
-                let stat;
-                try { stat = fs.statSync(fp); } catch { continue; }
-                if (!stat.isFile()) continue;
-                // Only files touched during this run.
-                if (runStartMs && stat.mtimeMs < runStartMs - 100) continue;
-                // Binary sniff — first 512 bytes should be mostly printable.
-                // Skips native binaries that slip past the extension filter.
-                let contentPreview = null;
-                try {
-                    const buf = fs.readFileSync(fp);
-                    const head = buf.slice(0, Math.min(512, buf.length));
-                    let nonText = 0;
-                    for (const b of head) {
-                        if (b === 9 || b === 10 || b === 13) continue;      // tab, LF, CR
-                        if (b >= 32 && b < 127) continue;                   // printable ASCII
-                        nonText++;
-                    }
-                    // Real COBOL output files frequently contain UTF-8 replacement
-                    // chars (?) when writing high-bit bytes through
-                    // default encoding. 30% threshold keeps these text-like
-                    // reports visible while still rejecting native binaries
-                    // (which are typically >60% non-printable).
-                    if (nonText / (head.length || 1) > 0.30) continue;
-                    const text = buf.toString('utf-8');
-                    contentPreview = buf.length > OUT_PREVIEW_MAX
-                        ? text.slice(0, OUT_PREVIEW_MAX) + `\n\n[…truncated — file is ${buf.length} bytes total]`
-                        : text;
-                } catch { continue; }
-                out.push({ name, bytes: stat.size, contentPreview });
-            }
-        } catch {}
-        // Stable order: by name
-        out.sort((a, b) => a.name.localeCompare(b.name));
-        return out;
-    };
+    // listOutputFiles → src/core/run/list-output-files.js. Surfaces files
+    // the program wrote during the run (PRTLINE, REPORT, OUT*, etc.) that
+    // stdout alone doesn't show.
     try {
         // Exclude the input data files we staged for each side (they were
         // copied in from the scan's data-file lookup) so the list shows
@@ -2035,205 +1892,8 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
 // /api/post-review/:id/:fileId, /api/post-review/:id → src/routes/post-review.js
 require('./src/routes/post-review').mount(app, { activeConversions });
 
-// ----------------------------------------------------------------------
-// File classification for MANUAL_REVIEW.md
-//
-// For every non-COBOL artifact shipped in the repo we need to tell the user
-// one of three things: (a) port it to the target stack, (b) carry it forward
-// as-is, (c) discard / ignore. The map below pairs extensions with a category
-// + short recommendation. Unknown types fall through to a "review manually"
-// catch-all.
-// ----------------------------------------------------------------------
-function classifyArtifact(filePath) {
-    const ext = path.extname(filePath).toLowerCase();
-    const base = path.basename(filePath).toLowerCase();
-
-    // Mainframe orchestration / data
-    if (/\.(jcl|proc)$/i.test(ext)) return {
-        category: 'Mainframe orchestration (JCL)',
-        action: 'PORT',
-        recommendation: 'JCL is not COBOL — parse each step (EXEC PGM=…) and map it to Spring Batch, Airflow, Kubernetes CronJob, or a shell script. DD statements → input/output paths. See the JCL analyzer in the UI for per-file step breakdown.'
-    };
-    if (/\.(cpy|copy)$/i.test(ext)) return {
-        category: 'COBOL copybook',
-        action: 'EMBEDDED',
-        recommendation: 'Copybooks are shared data definitions. They get embedded into the Java model classes for programs that COPY them — no standalone Java file. If a copybook is not referenced by any converted program, verify the reference was resolvable.'
-    };
-    if (/\.(dat|csv|txt)$/i.test(ext)) return {
-        category: 'Data file',
-        action: 'KEEP',
-        recommendation: 'Ship alongside the Java as runtime input. Update file paths in Java (BufferedReader/Writer) to point at wherever these will live in production — typically `src/main/resources/` for test data, or a configured external path for real data.'
-    };
-    if (/\.(bms|mps)$/i.test(ext)) return {
-        category: 'BMS screen map (CICS)',
-        action: 'PORT',
-        recommendation: 'BMS defines terminal screens. Port to a web UI (React / Thymeleaf / JSF) or a Swing/JavaFX form. The converted Java uses console output as a placeholder — replace with a real UI layer.'
-    };
-
-    // Other languages / tech — likely part of the repo but orthogonal to COBOL
-    if (/\.(py|python)$/i.test(ext)) return {
-        category: 'Python source',
-        action: 'REVIEW',
-        recommendation: 'Python is a separate concern from the COBOL conversion. Either port to Java (if it\'s support tooling) or keep as an out-of-process service called from Java via REST / subprocess.'
-    };
-    if (/\.(html?|htm)$/i.test(ext)) return {
-        category: 'HTML',
-        action: 'KEEP',
-        recommendation: 'Keep as-is for the web layer. If it\'s static markup, move into `src/main/resources/static/`. If it\'s a template (JSP/Thymeleaf/Mustache), align with your Java framework\'s template directory.'
-    };
-    if (/\.(css|scss|sass|less)$/i.test(ext)) return {
-        category: 'Stylesheet',
-        action: 'KEEP',
-        recommendation: 'Keep as-is in `src/main/resources/static/` or your frontend build system.'
-    };
-    if (/\.(js|mjs|ts|tsx|jsx)$/i.test(ext)) return {
-        category: 'JavaScript / TypeScript',
-        action: 'KEEP',
-        recommendation: 'Keep as-is — separate from COBOL. If this is front-end code, move into your frontend build (Vite/Webpack); if it\'s Node tooling, keep as a separate service.'
-    };
-    if (/\.(sh|bash|zsh)$/i.test(ext)) return {
-        category: 'Shell script',
-        action: 'REVIEW',
-        recommendation: 'If the script invokes COBOL binaries, update to invoke `java -jar` with equivalent arguments. If it\'s general tooling, keep as-is or rewrite in Java if cross-platform is a concern.'
-    };
-    if (/\.(sql|ddl|db2)$/i.test(ext)) return {
-        category: 'SQL / DDL',
-        action: 'KEEP',
-        recommendation: 'Keep as-is and run via JDBC or a migration tool (Flyway / Liquibase). DB2 DDL may need minor tweaks to land on PostgreSQL/Oracle/MySQL.'
-    };
-    if (/\.(xml|xsd|wsdl)$/i.test(ext)) return {
-        category: 'XML artifact',
-        action: 'KEEP',
-        recommendation: 'Keep as-is. Parse in Java via JAXB, DOM, or Jackson XML as appropriate.'
-    };
-    if (/\.(yaml|yml|toml|ini|properties|conf)$/i.test(ext)) return {
-        category: 'Config',
-        action: 'KEEP',
-        recommendation: 'Keep as-is. Load in Java via Spring @ConfigurationProperties or a config library.'
-    };
-    if (/\.(json)$/i.test(ext)) return {
-        category: 'JSON',
-        action: 'KEEP',
-        recommendation: 'Keep as-is. Parse in Java via Jackson or Gson.'
-    };
-    if (/\.(md|rst|adoc|txt)$/i.test(ext)) return {
-        category: 'Documentation',
-        action: 'KEEP',
-        recommendation: 'Keep in repo — valuable context for maintainers.'
-    };
-    if (/\.(png|jpe?g|gif|svg|ico|webp|pdf)$/i.test(ext)) return {
-        category: 'Binary asset',
-        action: 'KEEP',
-        recommendation: 'Keep in repo — serve as static content if needed.'
-    };
-    if (/\.(class|jar|war|ear)$/i.test(ext)) return {
-        category: 'Pre-compiled Java',
-        action: 'REVIEW',
-        recommendation: 'Existing Java binaries — confirm these don\'t conflict with the newly generated Java classes.'
-    };
-    if (/\.(c|cc|cpp|h|hpp|go|rs|rb|php|kt|scala|swift)$/i.test(ext)) return {
-        category: 'Other source language',
-        action: 'REVIEW',
-        recommendation: 'Not COBOL and not the target language. Decide whether to port to Java or keep as a separate service/module.'
-    };
-    if (base === 'makefile' || base.endsWith('.mk')) return {
-        category: 'Makefile',
-        action: 'REVIEW',
-        recommendation: 'Replace with Maven/Gradle build for the Java output. If the Makefile builds native COBOL, those steps become obsolete once migration is complete.'
-    };
-    if (base.endsWith('.gitignore') || base === 'license' || base === 'license.md' || base === 'copying') {
-        return {
-            category: 'VCS / license',
-            action: 'KEEP',
-            recommendation: 'Keep in repo.'
-        };
-    }
-
-    // Unknown — default to "look at this"
-    return {
-        category: 'Unknown / other',
-        action: 'REVIEW',
-        recommendation: 'File type not auto-recognized. Manually inspect and decide: port logic to Java, keep as-is, or discard.'
-    };
-}
-
-/**
- * Build a comprehensive MANUAL_REVIEW.md that the user can open after
- * unzipping the download. Lists EVERY non-converted file with a category,
- * a recommended action, and specific guidance.
- */
-function buildManualReviewMd(files, conversionId) {
-    const lines = [];
-    lines.push(`# Manual review checklist`);
-    lines.push('');
-    lines.push(`Conversion ID: \`${conversionId}\``);
-    lines.push(`Generated: ${new Date().toISOString()}`);
-    lines.push('');
-    lines.push(`This checklist covers every artifact in the source repository that was`);
-    lines.push(`**not** converted to Java. The COBOL conversion handles business logic`);
-    lines.push(`only — everything else (JCL jobs, data files, web assets, shell scripts,`);
-    lines.push(`SQL, documentation, other languages, etc.) needs a decision from you.`);
-    lines.push('');
-    lines.push(`## Actions at a glance`);
-    lines.push('');
-    lines.push(`- **PORT** — rewrite / re-implement in the target stack`);
-    lines.push(`- **EMBEDDED** — already handled by the conversion output`);
-    lines.push(`- **KEEP** — ship as-is alongside the Java`);
-    lines.push(`- **REVIEW** — needs a human decision before moving forward`);
-    lines.push('');
-
-    // Partition non-converted artifacts by category
-    const nonJava = files.filter(f => f.java_status !== 'SUCCESS');
-    const grouped = new Map();   // category → [{ file, classification }]
-    const countByAction = { PORT: 0, EMBEDDED: 0, KEEP: 0, REVIEW: 0 };
-
-    for (const f of nonJava) {
-        const cls = classifyArtifact(f.source_path || f.path || '');
-        countByAction[cls.action] = (countByAction[cls.action] || 0) + 1;
-        if (!grouped.has(cls.category)) grouped.set(cls.category, { cls, items: [] });
-        grouped.get(cls.category).items.push(f);
-    }
-
-    // Summary table
-    lines.push(`## Summary`);
-    lines.push('');
-    lines.push(`| Action | Count |`);
-    lines.push(`|--------|-------|`);
-    for (const [action, count] of Object.entries(countByAction)) {
-        if (count > 0) lines.push(`| ${action} | ${count} |`);
-    }
-    lines.push('');
-
-    if (grouped.size === 0) {
-        lines.push(`_Nothing to review — every file in the repo was successfully converted._`);
-        return lines.join('\n');
-    }
-
-    // Per-category sections, ordered so PORT/REVIEW show first (highest effort)
-    const categoryOrder = [...grouped.entries()].sort(([, a], [, b]) => {
-        const weight = { PORT: 0, REVIEW: 1, EMBEDDED: 2, KEEP: 3 };
-        return (weight[a.cls.action] ?? 9) - (weight[b.cls.action] ?? 9);
-    });
-
-    for (const [category, { cls, items }] of categoryOrder) {
-        lines.push(`## ${category} — ${cls.action} (${items.length} file${items.length === 1 ? '' : 's'})`);
-        lines.push('');
-        lines.push(cls.recommendation);
-        lines.push('');
-        lines.push(`**Files:**`);
-        lines.push('');
-        for (const f of items.slice(0, 200)) {
-            const status = f.java_status ? ` — \`${f.java_status}\`` : '';
-            lines.push(`- \`${f.path}\`${status}`);
-        }
-        if (items.length > 200) lines.push(`- _…and ${items.length - 200} more_`);
-        lines.push('');
-    }
-
-    lines.push(`---`);
-    lines.push(`_End of checklist._`);
-    return lines.join('\n');
-}
+// classifyArtifact + buildManualReviewMd → src/core/manual-review.js
+const { buildManualReviewMd } = require('./src/core/manual-review');
 
 // ----------------------------------------------------------------------
 // JCL analysis — JCL is not COBOL and isn't converted, but if the repo
