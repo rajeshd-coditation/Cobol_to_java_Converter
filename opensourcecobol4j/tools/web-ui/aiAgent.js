@@ -32,13 +32,13 @@ let openai = null;
 function initializeOpenAI() {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey || apiKey === 'your-api-key-here') {
-        console.warn('⚠️  OpenAI API key not configured. AI features will be disabled.');
+        console.warn('[warn]  OpenAI API key not configured. AI features will be disabled.');
         console.warn('   To enable AI features, add your API key to .env file');
         return false;
     }
 
     openai = new OpenAI({ apiKey });
-    console.log('✅ OpenAI AI Agent initialized successfully');
+    console.log('[ok] OpenAI AI Agent initialized successfully');
     return true;
 }
 
@@ -188,7 +188,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'MISSING_COPYBOOK',
             title: 'Missing Copybook',
             description: 'The program references a COPY file that was not found. Either provide the copybook or remove/inline the COPY statement.',
-            icon: '📁'
+            icon: ''
         });
     }
 
@@ -197,7 +197,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'CICS_DEPENDENCY',
             title: 'CICS Dependency',
             description: 'This program uses CICS calls which require a mainframe environment. Consider removing or stubbing CICS sections.',
-            icon: '🖥️'
+            icon: ''
         });
     }
 
@@ -206,7 +206,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'DB2_DEPENDENCY',
             title: 'DB2/SQL Dependency',
             description: 'This program uses embedded SQL. Consider using JDBC in the Java output or removing SQL sections.',
-            icon: '🗄️'
+            icon: ''
         });
     }
 
@@ -215,7 +215,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'JAVA_COMPILE_ERROR',
             title: 'Java Compilation Error',
             description: 'The generated Java code has syntax errors. This may indicate unsupported COBOL features or complex data structures.',
-            icon: '⚙️'
+            icon: ''
         });
     }
 
@@ -224,7 +224,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'RUNTIME_ERROR',
             title: 'Runtime Error',
             description: 'The Java program compiled but failed during execution. Check for missing runtime dependencies or data issues.',
-            icon: '🔥'
+            icon: ''
         });
     }
 
@@ -233,7 +233,7 @@ function getQuickSuggestions(errorType, errorLog) {
             type: 'UNKNOWN',
             title: 'Conversion Issue',
             description: 'Use the AI analysis feature for a detailed examination of this failure.',
-            icon: '🔍'
+            icon: ''
         });
     }
 

@@ -19,7 +19,7 @@ function initializeAzure() {
     const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
 
     if (!endpoint || !apiKey) {
-        console.warn('⚠️  Azure AI not configured. Azure AI features disabled.');
+        console.warn('[warn]  Azure AI not configured. Azure AI features disabled.');
         console.warn('   Required: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY');
         return false;
     }
@@ -35,7 +35,7 @@ function initializeAzure() {
         isAIFoundry
     };
 
-    console.log('✅ Azure AI Agent initialized successfully');
+    console.log('[ok] Azure AI Agent initialized successfully');
     console.log(`   Endpoint: ${endpoint}`);
     console.log(`   Platform: ${isAIFoundry ? 'Azure AI Foundry' : 'Azure OpenAI'}`);
     return true;
@@ -109,7 +109,7 @@ async function makeOpenAIRequest(messages, options = {}) {
                 messages
             }, null, 2));
         } catch (dumpErr) {
-            console.warn('   ⚠️  Prompt dump failed (non-fatal):', dumpErr.message);
+            console.warn('   [warn]  Prompt dump failed (non-fatal):', dumpErr.message);
         }
     }
 
@@ -144,7 +144,7 @@ async function makeOpenAIRequest(messages, options = {}) {
                 } else {
                     waitTime = Math.pow(2, attempt + 2) * 1000; // 4s, 8s, 16s
                 }
-                console.log(`   ⏳ Rate limited. Waiting ${waitTime / 1000}s before retry ${attempt + 1}/${maxRetries}...`);
+                console.log(`    Rate limited. Waiting ${waitTime / 1000}s before retry ${attempt + 1}/${maxRetries}...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 continue;
             }
@@ -154,7 +154,7 @@ async function makeOpenAIRequest(messages, options = {}) {
             lastError = error;
             if (attempt < maxRetries && error.message.includes('429')) {
                 const waitTime = Math.pow(2, attempt + 2) * 1000;
-                console.log(`   ⏳ Rate limited (catch). Waiting ${waitTime / 1000}s before retry ${attempt + 1}/${maxRetries}...`);
+                console.log(`    Rate limited (catch). Waiting ${waitTime / 1000}s before retry ${attempt + 1}/${maxRetries}...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 continue;
             }
@@ -733,7 +733,7 @@ function autoFixJavaCode(javaCode) {
  *   2. Heuristic brace balance — `{` count vs `}` count, and whether the last
  *      non-whitespace char is `}`. Catches cases where a provider doesn't set
  *      finish_reason but the output is clearly cut off.
- * Comments and strings can throw off a naïve brace count, but for the purpose of
+ * Comments and strings can throw off a naive brace count, but for the purpose of
  * "is the file obviously incomplete" this is accurate enough in practice.
  */
 function detectTruncation(javaCode, finishReason) {
@@ -1074,11 +1074,11 @@ MUST:
 
             // Check if response is valid
             if (!response || !response.choices || !response.choices[0]) {
-                console.error('   ❌ Invalid Azure AI response:', JSON.stringify(response).substring(0, 200));
+                console.error('   [error] Invalid Azure AI response:', JSON.stringify(response).substring(0, 200));
 
                 // Retry if we haven't exceeded max retries
                 if (retryCount < MAX_RETRIES) {
-                    console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+                    console.log(`    Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     return convertCobolToJava(cobolSource, retryCount + 1, context);
                 }
@@ -1098,7 +1098,7 @@ MUST:
             javaCode = javaCode.replace(/^```\n?/, '').replace(/\n?```$/i, '');
             javaCode = javaCode.trim();
 
-            // ─── Truncation detection ────────────────────────────────────
+            // --- Truncation detection ------------------------------------
             // Two signals that the model ran out of output tokens mid-class:
             //   1. Azure/OpenAI reports finish_reason === 'length'
             //   2. Heuristic: unbalanced braces, or the file doesn't end with '}'
@@ -1107,9 +1107,9 @@ MUST:
             // of showing half-broken Java.
             const isTruncated = detectTruncation(javaCode, finishReason);
             if (isTruncated) {
-                console.warn(`   ⚠️  Response appears truncated (finish_reason=${finishReason}, length=${javaCode.length})`);
+                console.warn(`   [warn]  Response appears truncated (finish_reason=${finishReason}, length=${javaCode.length})`);
                 if (retryCount < MAX_RETRIES) {
-                    console.log(`   🔄 Retrying with fresh prompt (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+                    console.log(`    Retrying with fresh prompt (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     return convertCobolToJava(cobolSource, retryCount + 1, context);
                 }
@@ -1123,11 +1123,11 @@ MUST:
 
         // Validate that we got actual Java code
         if (!javaCode || javaCode.length < 50) {
-            console.error('   ❌ Azure AI returned empty or too short response');
+            console.error('   [error] Azure AI returned empty or too short response');
 
             // Retry if we haven't exceeded max retries
             if (retryCount < MAX_RETRIES) {
-                console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+                console.log(`    Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 return convertCobolToJava(cobolSource, retryCount + 1, context);
             }
@@ -1147,12 +1147,12 @@ MUST:
             javaCode.includes('String ');
 
         if (!hasJavaPattern) {
-            console.error('   ❌ Azure AI response does not look like Java code');
+            console.error('   [error] Azure AI response does not look like Java code');
             console.error('   Response preview:', javaCode.substring(0, 200));
 
             // Retry if we haven't exceeded max retries
             if (retryCount < MAX_RETRIES) {
-                console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+                console.log(`    Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 return convertCobolToJava(cobolSource, retryCount + 1, context);
             }
@@ -1166,7 +1166,7 @@ MUST:
         // Apply auto-fixes to improve compilation success
         javaCode = autoFixJavaCode(javaCode);
 
-        console.log('   ✅ Got Java code:', javaCode.length, 'characters');
+        console.log('   [ok] Got Java code:', javaCode.length, 'characters');
 
         return {
             success: true,
@@ -1180,7 +1180,7 @@ MUST:
 
         // Retry on transient errors
         if (retryCount < MAX_RETRIES && (error.message.includes('fetch failed') || error.message.includes('timeout'))) {
-            console.log(`   🔄 Retrying after error (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+            console.log(`    Retrying after error (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
             await new Promise(resolve => setTimeout(resolve, 3000));
             return convertCobolToJava(cobolSource, retryCount + 1, context);
         }
@@ -1205,7 +1205,7 @@ async function predictProgramOutput(cobolSource, javaCode) {
     }
 
     try {
-        console.log('   🔮 Predicting program output with AI (analyzing both COBOL & Java)...');
+        console.log('    Predicting program output with AI (analyzing both COBOL & Java)...');
 
         const systemPrompt = `You are an expert COBOL/Java code execution simulator. You will analyze BOTH the original COBOL program AND its converted Java equivalent to produce accurate execution output.
 
@@ -1289,7 +1289,7 @@ Your output: Total: 250`;
         });
         predictedOutput = filteredLines.join('\n').trim();
 
-        console.log('   ✅ AI predicted output (cross-referenced):', predictedOutput.substring(0, 100));
+        console.log('   [ok] AI predicted output (cross-referenced):', predictedOutput.substring(0, 100));
 
         return {
             success: true,
@@ -1935,7 +1935,7 @@ function analyzeConversionAccuracy(cobolSource, javaCode) {
         result.details.push(`COBOL: ${result.cobolMetrics.codeLines} lines`);
         result.details.push(`Java: ${result.javaMetrics.codeLines} lines`);
         if (result.semanticPenalties && result.semanticPenalties.length > 0) {
-            result.details.push(`⚠️ ${result.semanticPenalties.join(', ')}`);
+            result.details.push(`[warn] ${result.semanticPenalties.join(', ')}`);
         }
 
     } catch (err) {
@@ -2023,22 +2023,22 @@ async function compareRunOutputs(p) {
         'Similarly if Java fails to compile while COBOL runs — source issue, not' +
         ' divergence.\n\n' +
         'Be pragmatic about the actual behavior comparison:\n' +
-        '• Different amounts of padded whitespace, minor formatting, or extra' +
+        '- Different amounts of padded whitespace, minor formatting, or extra' +
         '  debug lines on one side are NOT divergence if the business outcome' +
         '  matches.\n' +
-        '• Both programs getting stuck in the same input-waiting loop (truncated' +
+        '- Both programs getting stuck in the same input-waiting loop (truncated' +
         '  output, killed by timeout) is a *matched* failure mode — NOT divergence.\n' +
-        '• COBOL "file does not exist (status = 35)" paired with Java "using' +
+        '- COBOL "file does not exist (status = 35)" paired with Java "using' +
         '  sample data for demonstration" is DIVERGENT: the Java is fabricating' +
         '  input the COBOL did not have. Verdict="diverge" severity="error"' +
         '  with a reason that the Java conversion must be regenerated to fail' +
         '  on missing input (print error + non-zero exit), not substitute data.\n' +
-        '• COBOL status 35 paired with a Java FileNotFoundException /' +
+        '- COBOL status 35 paired with a Java FileNotFoundException /' +
         '  non-zero exit on the same file is a MATCHED failure mode — both' +
         '  programs correctly refused to run without the input. Label "match"' +
         '  (or "partial" if output formatting differs) with a hint to stage' +
         '  the data file before re-running.\n' +
-        '• COBOL output "unavailable" + "requires DB2/CICS/IMS preprocessor"' +
+        '- COBOL output "unavailable" + "requires DB2/CICS/IMS preprocessor"' +
         '  means COBOL could not compile or run in this local environment —' +
         '  NOT a behavioral difference with Java. If the Java side exits' +
         '  correctly on missing input (status = 35, FileNotFoundException,' +
@@ -2049,7 +2049,7 @@ async function compareRunOutputs(p) {
         '  "COBOL unrunnable locally — Java behavior acceptable" with a' +
         '  reason that a DB2/CICS/IMS-capable environment is needed for a' +
         '  true runtime comparison.\n' +
-        '• Treat as DIVERGENT: different numeric results, different control flow' +
+        '- Treat as DIVERGENT: different numeric results, different control flow' +
         '  where BOTH actually ran, one side simulating (mock/sample/stub) while' +
         '  the other is real business logic, one side loading an external module' +
         '  that the other does not, or the Java inventing behavior (HTTP, JSON,' +

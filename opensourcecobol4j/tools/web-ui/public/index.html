@@ -61,7 +61,7 @@
                 <div class="sample-wrap">
                     <button id="sampleBtn" class="btn-pill btn-ghost" type="button"
                         title="Pick a bundled sample repo">
-                        Try sample ▾
+                        Try sample 
                     </button>
                     <div id="sampleMenu" class="sample-menu hidden"></div>
                 </div>
@@ -90,7 +90,7 @@
                     <span id="drawerBadge" class="drawer-badge hidden">0</span>
                 </button>
                 <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark theme" id="themeToggleBtn">
-                    <span id="themeIcon">☀</span>
+                    <span id="themeIcon"></span>
                 </button>
             </div>
 
@@ -297,7 +297,7 @@
                         <div id="graphCanvas" class="graph-canvas empty"></div>
                         <div class="graph-controls">
                             <button class="graph-ctrl" onclick="graphZoom(1.3)" title="Zoom in">+</button>
-                            <button class="graph-ctrl" onclick="graphZoom(0.7)" title="Zoom out">−</button>
+                            <button class="graph-ctrl" onclick="graphZoom(0.7)" title="Zoom out">-</button>
                             <button class="graph-ctrl fit" onclick="graphFit()" title="Fit all nodes">Fit</button>
                         </div>
                     </div>
@@ -326,12 +326,12 @@
                             <button type="button" id="browserDownloadBtn" class="btn-pill btn-sm browser-download-btn"
                                     title="Download converted Java + manual-review guide as a zip"
                                     aria-label="Download conversion output">
-                                <span class="browser-download-icon">↓</span>
+                                <span class="browser-download-icon">down</span>
                                 <span class="browser-download-label">Download</span>
                             </button>
                             <button type="button" id="browserMaximizeBtn" class="btn-pill btn-sm browser-maximize-btn"
                                     title="Maximize (Esc to exit)" aria-label="Maximize Results browser">
-                                <span class="browser-maximize-icon">⛶</span>
+                                <span class="browser-maximize-icon"></span>
                                 <span class="browser-maximize-label">Maximize</span>
                             </button>
                         </div>
@@ -347,7 +347,7 @@
                                     onkeydown="if(event.key==='Enter'){runSelectedFile()}">
                                 <button id="runBtn" class="btn-pill btn-primary btn-sm" onclick="runSelectedFile()">Run</button>
                             </div>
-                            <button class="run-close-btn" onclick="closeRunOutput()" title="Close">×</button>
+                            <button class="run-close-btn" onclick="closeRunOutput()" title="Close">x</button>
                         </div>
                         <div class="run-output-grid">
                             <div class="run-output-pane cobol">
@@ -383,7 +383,7 @@
                                 <button type="button" id="fixJavaBtn" class="btn-pill btn-sm fix-java-btn hidden"
                                         title="Use AI to repair this Java file using the COBOL source, compile errors, run output, and known dependencies as context"
                                         aria-label="Fix this Java file with AI">
-                                    <span class="fix-java-icon">✨</span>
+                                    <span class="fix-java-icon"></span>
                                     <span class="fix-java-label">Fix with AI</span>
                                 </button>
                             </div>
@@ -418,7 +418,7 @@
                         <div class="stat-sublabel">See reasons below</div>
                     </div>
                     <div class="stat-card glass-card">
-                        <div class="stat-icon rate">📈</div>
+                        <div class="stat-icon rate"></div>
                         <div class="stat-value" id="successRate">0%</div>
                         <div class="stat-label">Success Rate</div>
                         <div class="stat-sublabel">Fully converted / Total</div>
@@ -472,10 +472,10 @@
 
         <footer>
             <div class="footer-content">
-                <p class="footer-brand">© 2026 <strong>Coditation</strong>. All rights reserved.</p>
+                <p class="footer-brand">(c) 2026 <strong>Coditation</strong>. All rights reserved.</p>
                 <p class="footer-links">
                     <a href="https://coditation.com" target="_blank">Website</a>
-                    <span class="separator">•</span>
+                    <span class="separator">-</span>
                     <a href="https://coditation.com/contact" target="_blank">Contact</a>
                 </p>
             </div>
@@ -568,7 +568,7 @@
 
     <!-- Right slide-out drawer: unified Details timeline -->
     <aside id="rightDrawer" class="right-drawer hidden">
-        <div class="drawer-handle" onclick="toggleRightDrawer()" title="Hide drawer">›</div>
+        <div class="drawer-handle" onclick="toggleRightDrawer()" title="Hide drawer">></div>
         <div class="drawer-inner">
             <div class="drawer-title-bar">
                 <span class="drawer-title">Details</span>

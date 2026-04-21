@@ -25,14 +25,14 @@ const { log, mountLogRoute } = createLogger(__dirname);
 mountLogRoute(app);
 log('server', 'startup');
 
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 // Crash handlers. Without these, an uncaught exception or unhandled
 // promise rejection in a background worker (e.g. inside a conversion's
 // processFile) silently kills the Node process — the structured log
 // captures nothing and the UI sees ERR_CONNECTION_REFUSED. With these,
 // the stack trace lands in webui.log and (for rejections) the process
 // keeps running so in-flight work isn't lost.
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 process.on('uncaughtException', (err, origin) => {
     try {
         log('crash', 'uncaughtException', {
@@ -68,7 +68,7 @@ const { editDistance } = require('./src/util/edit-distance');
 // Middleware
 // 2MB body cap — default is 100KB, which can trip on POST /api/convert-azure
 // when a user selects a few thousand files (the body is a selectedFiles path
-// list, not file contents, but long paths × large selections can exceed 100KB
+// list, not file contents, but long paths x large selections can exceed 100KB
 // and Express returns a silent 413 that looks like a network failure in the UI).
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -291,7 +291,7 @@ app.post('/api/convert-azure', async (req, res) => {
     activeConversions.set(conversionId, {
         status: 'running',
         cancelled: false,
-        logs: ['🤖 Starting AI-powered conversion...\n'],
+        logs: [' Starting AI-powered conversion...\n'],
         result: null,
         useAzureAI: true,
         reviewMode: !!reviewMode,
@@ -334,15 +334,15 @@ app.post('/api/convert-azure', async (req, res) => {
 
             // If it's a git URL, clone it first
             if (inputPath.startsWith('http') || inputPath.startsWith('git@')) {
-                conversion.logs.push('📥 Cloning repository...\n');
+                conversion.logs.push(' Cloning repository...\n');
                 const cloneDir = path.join(os.tmpdir(), `repo_${conversionId}`);
                 const { execSync } = require('child_process');
                 try {
                     execSync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });
                     inputPath = cloneDir;
-                    conversion.logs.push('✅ Repository cloned successfully\n');
+                    conversion.logs.push('[ok] Repository cloned successfully\n');
                 } catch (cloneErr) {
-                    conversion.logs.push(`❌ Failed to clone repository: ${cloneErr.message}\n`);
+                    conversion.logs.push(`[error] Failed to clone repository: ${cloneErr.message}\n`);
                     conversion.status = 'completed';
                     conversion.result = results;
                     return;
@@ -350,14 +350,14 @@ app.post('/api/convert-azure', async (req, res) => {
             }
 
             if (!fs.existsSync(inputPath)) {
-                conversion.logs.push(`❌ Path not found: ${inputPath}\n`);
+                conversion.logs.push(`[error] Path not found: ${inputPath}\n`);
                 conversion.status = 'completed';
                 conversion.result = results;
                 return;
             }
 
             // Scan for ALL mainframe files (COBOL, Copybooks, JCL, data, etc.)
-            conversion.logs.push('🔍 Scanning for mainframe files...\n');
+            conversion.logs.push(' Scanning for mainframe files...\n');
             const allFiles = azureAgent.scanForAllMainframeFiles(inputPath);
             let cobolFiles = allFiles.cobolFiles;
 
@@ -369,7 +369,7 @@ app.post('/api/convert-azure', async (req, res) => {
                     const rel = path.relative(inputPath, p);
                     return selectedSet.has(rel) || selectedSet.has(p);
                 });
-                conversion.logs.push(`🎯 User selection: converting ${cobolFiles.length} of ${beforeCount} COBOL files\n`);
+                conversion.logs.push(` User selection: converting ${cobolFiles.length} of ${beforeCount} COBOL files\n`);
             }
 
             // Calculate totals
@@ -382,19 +382,19 @@ app.post('/api/convert-azure', async (req, res) => {
             results.totalFiles = cobolFiles.length;
 
             // Log file breakdown
-            conversion.logs.push(`📁 Found ${totalMainframeFiles} mainframe-related files:\n`);
-            conversion.logs.push(`   • COBOL programs: ${cobolFiles.length} (will be converted)\n`);
+            conversion.logs.push(` Found ${totalMainframeFiles} mainframe-related files:\n`);
+            conversion.logs.push(`   - COBOL programs: ${cobolFiles.length} (will be converted)\n`);
             if (allFiles.copybookFiles.length > 0) {
-                conversion.logs.push(`   • Copybooks (.cpy): ${allFiles.copybookFiles.length} (skipped)\n`);
+                conversion.logs.push(`   - Copybooks (.cpy): ${allFiles.copybookFiles.length} (skipped)\n`);
             }
             if (allFiles.jclFiles.length > 0) {
-                conversion.logs.push(`   • JCL files: ${allFiles.jclFiles.length} (skipped)\n`);
+                conversion.logs.push(`   - JCL files: ${allFiles.jclFiles.length} (skipped)\n`);
             }
             if (allFiles.dataFiles.length > 0) {
-                conversion.logs.push(`   • Data files: ${allFiles.dataFiles.length} (skipped)\n`);
+                conversion.logs.push(`   - Data files: ${allFiles.dataFiles.length} (skipped)\n`);
             }
             if (allFiles.otherFiles.length > 0) {
-                conversion.logs.push(`   • Other files: ${allFiles.otherFiles.length} (skipped)\n`);
+                conversion.logs.push(`   - Other files: ${allFiles.otherFiles.length} (skipped)\n`);
             }
             conversion.logs.push('\n');
 
@@ -449,13 +449,13 @@ app.post('/api/convert-azure', async (req, res) => {
             results.otherFilesCount += allFiles.otherFiles.length;
 
             if (cobolFiles.length === 0) {
-                conversion.logs.push('⚠️ No COBOL files found in the repository\n');
+                conversion.logs.push('[warn] No COBOL files found in the repository\n');
                 conversion.status = 'completed';
                 conversion.result = results;
                 return;
             }
 
-            // ─── Build dependency graph for live visualization ───────────────
+            // --- Build dependency graph for live visualization ---------------
             // Nodes: every COBOL program + copybook. Edges: COPY / CALL refs.
             const idOf = (p) => path.relative(inputPath, p);
             const graphNodes = [];
@@ -501,7 +501,7 @@ app.post('/api/convert-azure', async (req, res) => {
 
             const copyRe = /COPY\s+['"]?([A-Z0-9_-]+)['"]?/gi;
             const callRe = /CALL\s+['"]([A-Z0-9_-]+)['"]/gi;
-            // ─── Data-file dependency detection ──────────────────────────
+            // --- Data-file dependency detection --------------------------
             // Parse `SELECT … ASSIGN TO '<name>'` in each COBOL program and
             // match against scanned data files. These data dependencies become
             // first-class graph nodes (type 'data') with edges from the program
@@ -576,7 +576,7 @@ app.post('/api/convert-azure', async (req, res) => {
                 }
             }
 
-            // ─── JCL-derived data-file mapping ───────────────────────────
+            // --- JCL-derived data-file mapping ---------------------------
             // Real enterprise COBOL doesn't encode filesystem paths in
             // SELECT/ASSIGN. It uses DD names, and the JCL job maps each DD
             // to a real dataset (e.g. //ACCTREC DD DSN=&SYSUID..DATA). Parse
@@ -650,7 +650,7 @@ app.post('/api/convert-azure', async (req, res) => {
             conversion.fileStates = fileStates;
             conversion.currentFiles = [];
             conversion.inputPath = inputPath;
-            // ─────────────────────────────────────────────────────────────────
+            // -----------------------------------------------------------------
 
 
             // Parallel processing configuration
@@ -760,7 +760,7 @@ app.post('/api/convert-azure', async (req, res) => {
 
                     // Skip if file is too large for a single conversion pass.
                     // The primary convert prompt sends the FULL COBOL source, so
-                    // a 200KB file ≈ 65k input tokens. Past ~80k chars we're at
+                    // a 200KB file ~ 65k input tokens. Past ~80k chars we're at
                     // serious risk of blowing the deployment's context window —
                     // three retries later we'd fail with a cryptic "AI response
                     // truncated" error. Fail fast with a clear status instead.
@@ -778,7 +778,7 @@ app.post('/api/convert-azure', async (req, res) => {
                         return fileResult;
                     }
 
-                    // ─── Build conversion context so the AI can emit REAL Java calls
+                    // --- Build conversion context so the AI can emit REAL Java calls
                     // to sibling classes instead of fabricating/simulating CALL targets.
                     // Uses the same regexes the graph builder used earlier.
                     const _callRe = /CALL\s+['"]([A-Z0-9_-]+)['"]/gi;
@@ -907,7 +907,7 @@ app.post('/api/convert-azure', async (req, res) => {
                         conversion.tokens.calls += 1;
                     }
 
-                    // ─── HITL pause point ─────────────────────────────────
+                    // --- HITL pause point ---------------------------------
                     // If review mode is on and conversion succeeded, pause until
                     // a human approves/rejects/edits via /api/review/:id/:fileId.
                     // Optional glob filter: only pause for matching paths.
@@ -981,7 +981,7 @@ app.post('/api/convert-azure', async (req, res) => {
                         // Copy original COBOL source to work dir
                         fs.copyFileSync(cobolPath, path.join(workDir, path.basename(cobolPath)));
 
-                        // ─── Compile + run helper ─────────────────────────────
+                        // --- Compile + run helper -----------------------------
                         // Called up to twice per file: once on the initial AI
                         // output, and (if a repair pass runs) once on the fixed
                         // Java. Returns { javaOutput, compareStatus, compilationError }.
@@ -1073,7 +1073,7 @@ app.post('/api/convert-azure', async (req, res) => {
                             penalties: (accuracyResult.semanticPenalties || []).length
                         });
 
-                        // ─── Quality gates: compile-fail OR fabricated-fallback ─
+                        // --- Quality gates: compile-fail OR fabricated-fallback -
                         // Either condition triggers a single repair pass via
                         // fixJavaCode. Its system prompt already covers:
                         //   - "COMPILES cleanly with plain javac"
@@ -1092,7 +1092,7 @@ app.post('/api/convert-azure', async (req, res) => {
                             repairApplied = compilationError && hasFabricatedFallback
                                 ? 'compile+fallback'
                                 : (compilationError ? 'compile' : 'fallback');
-                            console.log(`   🔧 Auto-repair pass for ${relativePath} (${repairApplied})`);
+                            console.log(`    Auto-repair pass for ${relativePath} (${repairApplied})`);
                             pushTimeline(relativePath, 'repair', 'Auto-repair triggered: ' + repairApplied);
                             // Re-use a prior /api/run capture of COBOL's output if the user
                             // already ran this file once — gives the repair agent real target
@@ -1135,13 +1135,13 @@ app.post('/api/convert-azure', async (req, res) => {
                                         accuracy: accuracyResult.accuracy
                                     });
                                 } else {
-                                    console.warn(`   ⚠️  Repair pass failed: ${repair && repair.error}`);
+                                    console.warn(`   [warn]  Repair pass failed: ${repair && repair.error}`);
                                     pushTimeline(relativePath, 'repair_failed', 'Repair call did not return usable Java', {
                                         error: (repair && repair.error) || 'unknown'
                                     });
                                 }
                             } catch (repairErr) {
-                                console.warn(`   ⚠️  Repair pass errored: ${repairErr.message}`);
+                                console.warn(`   [warn]  Repair pass errored: ${repairErr.message}`);
                                 pushTimeline(relativePath, 'repair_errored', 'Repair call errored', { error: repairErr.message });
                             }
                         }
@@ -1149,7 +1149,7 @@ app.post('/api/convert-azure', async (req, res) => {
                             totalMs: Date.now() - _t0
                         });
 
-                        // ─── Sibling signature cache ────────────────────────
+                        // --- Sibling signature cache ------------------------
                         // Pull the PRIMARY public method signature out of the
                         // final Java source and cache it on the conversion so
                         // the NEXT wave's callers can emit `new Foo().run(...)`
@@ -1251,7 +1251,7 @@ app.post('/api/convert-azure', async (req, res) => {
                 return fileResult;
             }
 
-            // ─── Dependency stratification ─────────────────────────────────
+            // --- Dependency stratification ---------------------------------
             // Group files into LEVELS where each level can run in parallel,
             // but levels run sequentially. Level 0 = files with no COBOL deps,
             // Level 1 = files whose deps are all in level 0, etc.
@@ -1296,22 +1296,22 @@ app.post('/api/convert-azure', async (req, res) => {
                 }
             }
 
-            conversion.logs.push(`📐 Dependency stratification: ${levels.length} level(s)\n`);
+            conversion.logs.push(` Dependency stratification: ${levels.length} level(s)\n`);
             levels.forEach((lvl, i) => {
                 const labels = lvl.map(r => path.basename(r)).join(', ');
                 conversion.logs.push(`   Level ${i + 1}: ${lvl.length} file(s) — ${labels}\n`);
             });
-            conversion.logs.push(`\n🚀 Processing ${cobolFiles.length} files (deps first, parallel within level)...\n\n`);
+            conversion.logs.push(`\n Processing ${cobolFiles.length} files (deps first, parallel within level)...\n\n`);
 
             let completedCount = 0;
             for (let lvlIdx = 0; lvlIdx < levels.length; lvlIdx++) {
                 if (conversion.cancelled) {
-                    conversion.logs.push(`\n🛑 Conversion cancelled by user at level ${lvlIdx + 1}\n`);
+                    conversion.logs.push(`\n Conversion cancelled by user at level ${lvlIdx + 1}\n`);
                     break;
                 }
                 const levelRel = levels[lvlIdx];
                 const levelAbs = levelRel.map(r => absOfId.get(r));
-                conversion.logs.push(`📦 Level ${lvlIdx + 1}/${levels.length}: ${levelAbs.length} file(s)\n`);
+                conversion.logs.push(` Level ${lvlIdx + 1}/${levels.length}: ${levelAbs.length} file(s)\n`);
 
                 // Within a level, files have no inter-deps so we can fully parallelize.
                 // Still cap concurrency at BATCH_SIZE to avoid rate limits.
@@ -1332,17 +1332,17 @@ app.post('/api/convert-azure', async (req, res) => {
                             conversion.fileStates[relPath] = 'done';
                             results.converted++;
                             results.convertedFiles.push(`${fileResult.relativePath} [AZURE_AI]`);
-                            conversion.logs.push(`   ✅ ${fileResult.relativePath}\n`);
+                            conversion.logs.push(`   [ok] ${fileResult.relativePath}\n`);
                         } else if (fileResult.status === 'skipped_noid' || fileResult.status === 'skipped_small') {
                             conversion.fileStates[relPath] = 'skipped';
                             results.skippedNoId++;
                             results.skippedFiles.push(`${fileResult.relativePath} - No PROGRAM-ID`);
-                            conversion.logs.push(`   ⏭️ ${fileResult.relativePath} (skipped)\n`);
+                            conversion.logs.push(`   skipped ${fileResult.relativePath} (skipped)\n`);
                         } else if (fileResult.status === 'error') {
                             conversion.fileStates[relPath] = 'failed';
                             results.skippedError++;
                             results.errorFiles.push(`${fileResult.relativePath} - ${fileResult.error}`);
-                            conversion.logs.push(`   ❌ ${fileResult.relativePath}: ${fileResult.error?.substring(0, 50) || 'Error'}\n`);
+                            conversion.logs.push(`   [error] ${fileResult.relativePath}: ${fileResult.error?.substring(0, 50) || 'Error'}\n`);
                         }
 
                         if (fileResult.reportEntry) {
@@ -1355,7 +1355,7 @@ app.post('/api/convert-azure', async (req, res) => {
                     }
                 }
 
-                conversion.logs.push(`   📊 Progress: ${completedCount}/${cobolFiles.length} files (${Math.round(completedCount / cobolFiles.length * 100)}%)\n\n`);
+                conversion.logs.push(`    Progress: ${completedCount}/${cobolFiles.length} files (${Math.round(completedCount / cobolFiles.length * 100)}%)\n\n`);
 
                 // Small pause between levels so the UI clearly shows the wave
                 if (lvlIdx + 1 < levels.length) {
@@ -1388,22 +1388,22 @@ app.post('/api/convert-azure', async (req, res) => {
             };
 
             conversion.logs.push(`\n${'='.repeat(50)}\n`);
-            conversion.logs.push(`📊 Conversion Summary (Azure AI)\n`);
+            conversion.logs.push(` Conversion Summary (Azure AI)\n`);
             conversion.logs.push(`${'='.repeat(50)}\n`);
             conversion.logs.push(`Total files scanned: ${results.totalFiles}\n`);
-            conversion.logs.push(`✅ Successfully converted: ${results.converted}\n`);
-            conversion.logs.push(`📈 Average Conversion Accuracy: ${averageAccuracy}%\n`);
+            conversion.logs.push(`[ok] Successfully converted: ${results.converted}\n`);
+            conversion.logs.push(` Average Conversion Accuracy: ${averageAccuracy}%\n`);
             conversion.logs.push(`Skipped (no PROGRAM-ID): ${results.skippedNoId}\n`);
             if (results.skippedError > 0) {
-                conversion.logs.push(`❌ Errors: ${results.skippedError}\n`);
+                conversion.logs.push(`[error] Errors: ${results.skippedError}\n`);
             }
-            conversion.logs.push(`\n🤖 Powered by Azure AI Agent\n`);
+            conversion.logs.push(`\n Powered by Azure AI Agent\n`);
 
         } catch (err) {
-            conversion.logs.push(`\n❌ Conversion error: ${err.message}\n`);
+            conversion.logs.push(`\n[error] Conversion error: ${err.message}\n`);
         }
 
-        // ─── Aggregate conversion risks for the UI ─────────────────────
+        // --- Aggregate conversion risks for the UI ---------------------
         const risks = [];
         const reportFiles = (results.report && results.report.files) || [];
         const summaryAcc = ((results.report && results.report.summary) || {}).averageAccuracy || 0;
@@ -1673,7 +1673,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     // only picks files created/modified during THIS run.
     const runStartMs = Date.now();
 
-    // ─── Data-file dependency staging ──────────────────────────────────
+    // --- Data-file dependency staging ----------------------------------
     // The graph-building step already found which `SELECT … ASSIGN TO`
     // targets resolve to real files in the repo (stored in
     // `conversion.dataFileLookup`). We use those mappings to stage the
@@ -1726,7 +1726,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
         }
     }
 
-    // ─── Run Java ──────────────────────────────────────────────────────
+    // --- Run Java ------------------------------------------------------
     // Strategy: try to compile the target with ONLY the siblings it actually
     // references (via `new ClassName(...)` or `ClassName.` patterns).
     // Falls back to target-only compilation if the reference-aware compile
@@ -1851,7 +1851,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
         result.java = { ok: false, output: '', error: 'No Java output for this file' };
     }
 
-    // ─── Run COBOL (best-effort, requires cobc/GnuCOBOL) ───────────────
+    // --- Run COBOL (best-effort, requires cobc/GnuCOBOL) ---------------
     if (reportFile.source_path && fs.existsSync(reportFile.source_path)) {
         try {
             // Check if cobc is available
@@ -2217,7 +2217,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     if (result.java  && result.java.output)  result.java.output  = stripAnsi(result.java.output);
     if (result.java  && result.java.error)   result.java.error   = stripAnsi(result.java.error);
 
-    // ─── Surface output files (PRTLINE, REPORT, OUT*, etc.) ───────────
+    // --- Surface output files (PRTLINE, REPORT, OUT*, etc.) -----------
     // Many COBOL programs write their real output to a FILE via WRITE,
     // not to SYSOUT. The stdout panel alone makes this look like "COBOL
     // produced nothing" when the program actually wrote a report file.
@@ -2261,7 +2261,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                         nonText++;
                     }
                     // Real COBOL output files frequently contain UTF-8 replacement
-                    // chars (�) when writing high-bit bytes through
+                    // chars (?) when writing high-bit bytes through
                     // default encoding. 30% threshold keeps these text-like
                     // reports visible while still rejecting native binaries
                     // (which are typically >60% non-printable).
@@ -2346,7 +2346,7 @@ app.get('/api/post-review/:id', (req, res) => {
     res.json({ postReview: conversion.postReview || {} });
 });
 
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 // File classification for MANUAL_REVIEW.md
 //
 // For every non-COBOL artifact shipped in the repo we need to tell the user
@@ -2354,7 +2354,7 @@ app.get('/api/post-review/:id', (req, res) => {
 // as-is, (c) discard / ignore. The map below pairs extensions with a category
 // + short recommendation. Unknown types fall through to a "review manually"
 // catch-all.
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 function classifyArtifact(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     const base = path.basename(filePath).toLowerCase();
@@ -2546,12 +2546,12 @@ function buildManualReviewMd(files, conversionId) {
     return lines.join('\n');
 }
 
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 // JCL analysis — JCL is not COBOL and isn't converted, but if the repo
 // ships JCL it carries crucial orchestration info (what program runs,
 // against which datasets, in what order). We parse it here and surface
 // the findings so the user sees more than just "SKIPPED_JCL".
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 
 /**
  * Parse a single JCL file into a structured analysis.
@@ -2631,10 +2631,10 @@ app.get('/api/jcl-analysis', (req, res) => {
     res.json(result);
 });
 
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 // Download — zip of the generated Java + a MANIFEST + (if present)
 // report.json and JCL analysis summary. Streams to the browser.
-// ──────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------
 app.get('/api/download/:id', (req, res) => {
     const conversion = activeConversions.get(req.params.id);
     if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
@@ -3298,9 +3298,9 @@ function parseOutput(output, outputDir) {
             // Status mapping
             if (file.java_status === 'SUCCESS' || file.java_status === 'COMPARE_FAIL' || file.compare === 'MATCH' || file.compare === 'MISMATCH') {
                 // It was converted and ran (or at least converted)
-                let statusIcon = '✅';
-                if (file.compare === 'MISMATCH') statusIcon = '⚠️';
-                if (file.compare === 'FAIL') statusIcon = '❌';
+                let statusIcon = '[ok]';
+                if (file.compare === 'MISMATCH') statusIcon = '[warn]';
+                if (file.compare === 'FAIL') statusIcon = '[error]';
 
                 result.convertedFiles.push(`${file.path} [${file.compare}]`);
             } else if (file.java_status === 'SKIPPED_COPYBOOK') {
@@ -3528,7 +3528,7 @@ app.get('/api/dependencies', (req, res) => {
 // Start server
 app.listen(PORT, () => {
     console.log('\n' + '='.repeat(50));
-    console.log('🚀 COBOL Converter UI starting...');
+    console.log(' COBOL Converter UI starting...');
     console.log('='.repeat(50));
 
     // Initialize AI agents based on provider
@@ -3548,7 +3548,7 @@ app.listen(PORT, () => {
     }
 
     console.log('='.repeat(50));
-    console.log(`🌐 Server running at http://localhost:${PORT}`);
-    console.log(`📁 AI Provider: ${AI_PROVIDER.toUpperCase()}`);
+    console.log(` Server running at http://localhost:${PORT}`);
+    console.log(` AI Provider: ${AI_PROVIDER.toUpperCase()}`);
     console.log('='.repeat(50) + '\n');
 });

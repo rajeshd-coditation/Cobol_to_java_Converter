@@ -1,10 +1,10 @@
 // COBOL to Java Converter - Frontend Application
 
-// ══════════════════════════════════════════════════════════════════
+// ==================================================================
 // Platform dialogs & toasts — replacement for native alert/confirm/prompt.
 // Why: browser-native dialogs say "localhost:3000 says…" and look jarring.
 // These match the app's visual language and live inside the page.
-// ══════════════════════════════════════════════════════════════════
+// ==================================================================
 
 /**
  * Show an ephemeral toast notification.
@@ -15,14 +15,14 @@
 function toast(message, type = 'info', duration = 4500) {
     const container = document.getElementById('toastContainer');
     if (!container) return;
-    const icons = { info: 'i', success: '✓', warning: '!', error: '×' };
+    const icons = { info: 'i', success: 'OK', warning: '!', error: 'x' };
     const el = document.createElement('div');
     el.className = `toast toast-${type}`;
     el.setAttribute('role', type === 'error' ? 'alert' : 'status');
     el.innerHTML = `
         <span class="toast-icon">${icons[type] || 'i'}</span>
         <span class="toast-message"></span>
-        <button class="toast-close" aria-label="Dismiss">×</button>
+        <button class="toast-close" aria-label="Dismiss">x</button>
     `;
     el.querySelector('.toast-message').textContent = String(message);
     const dismiss = () => {
@@ -280,7 +280,7 @@ async function checkAIStatus() {
             aiStatusBadge.querySelector('.ai-status-text').textContent = 'Powered by Coditation AI';
             aiStatusBadge.querySelector('.ai-status-dot').classList.add('connected');
             aiStatusBadge.querySelector('.ai-status-dot').classList.remove('disconnected');
-            console.log('✅ Azure AI Agent connected:', data.azure.config);
+            console.log('[ok] Azure AI Agent connected:', data.azure.config);
 
             // Show Azure toggle
             if (azureToggleSection) {
@@ -294,7 +294,7 @@ async function checkAIStatus() {
             aiStatusBadge.style.background = 'linear-gradient(135deg, rgba(16, 163, 127, 0.15) 0%, rgba(34, 197, 94, 0.15) 100%)';
             aiStatusBadge.style.borderColor = 'rgba(16, 163, 127, 0.3)';
             aiStatusBadge.style.color = '#10b981';
-            console.log('✅ OpenAI connected');
+            console.log('[ok] OpenAI connected');
 
             // Hide Azure toggle for OpenAI
             if (azureToggleSection) {
@@ -381,11 +381,11 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
     if (repoData && repoData.baseline !== undefined) {
         baselineConverted = repoData.baseline;
         currentRunCount = (repoData.runCount || 0) + 1;
-        console.log('📊 Found existing baseline for this repo:', baselineConverted, 'Run #' + currentRunCount);
+        console.log(' Found existing baseline for this repo:', baselineConverted, 'Run #' + currentRunCount);
     } else {
         baselineConverted = 0;
         currentRunCount = 1;
-        console.log('📊 New repo - will set baseline on first conversion');
+        console.log(' New repo - will set baseline on first conversion');
     }
 
     // Disable button and show loader
@@ -413,7 +413,7 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
         const apiEndpoint = useAzureAI ? '/api/convert-azure' : '/api/convert';
 
         if (useAzureAI) {
-            logsOutput.textContent = '🤖 Starting AI-powered conversion...\n';
+            logsOutput.textContent = ' Starting AI-powered conversion...\n';
         }
 
         // HITL: read review-mode toggle + optional glob
@@ -685,7 +685,7 @@ function populateConversionBreakdown(data) {
     if (successCount > 0) {
         breakdownItems.push(`
             <div class="breakdown-item success-item">
-                <div class="breakdown-icon">✅</div>
+                <div class="breakdown-icon">[ok]</div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Successfully Converted</span>
                     <span class="breakdown-desc">Working Java code generated</span>
@@ -698,7 +698,7 @@ function populateConversionBreakdown(data) {
     if (copybooks > 0) {
         breakdownItems.push(`
             <div class="breakdown-item info-item">
-                <div class="breakdown-icon">📁</div>
+                <div class="breakdown-icon"></div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Copybook Files</span>
                     <span class="breakdown-desc">Shared code snippets, not standalone programs</span>
@@ -711,7 +711,7 @@ function populateConversionBreakdown(data) {
     if (noId > 0) {
         breakdownItems.push(`
             <div class="breakdown-item info-item">
-                <div class="breakdown-icon">🔖</div>
+                <div class="breakdown-icon"></div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Non-Program Files</span>
                     <span class="breakdown-desc">Files without PROGRAM-ID (not convertible)</span>
@@ -724,7 +724,7 @@ function populateConversionBreakdown(data) {
     if (failConv > 0) {
         breakdownItems.push(`
             <div class="breakdown-item error-item">
-                <div class="breakdown-icon">🔗</div>
+                <div class="breakdown-icon"></div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Missing Dependencies</span>
                     <span class="breakdown-desc">Needs external files not included in repo</span>
@@ -737,7 +737,7 @@ function populateConversionBreakdown(data) {
     if (failCompile > 0) {
         breakdownItems.push(`
             <div class="breakdown-item error-item">
-                <div class="breakdown-icon">⚠️</div>
+                <div class="breakdown-icon">[warn]</div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Compile Errors</span>
                     <span class="breakdown-desc">Java code generated but has syntax issues</span>
@@ -750,7 +750,7 @@ function populateConversionBreakdown(data) {
     if (failExec > 0) {
         breakdownItems.push(`
             <div class="breakdown-item error-item">
-                <div class="breakdown-icon">🖥️</div>
+                <div class="breakdown-icon"></div>
                 <div class="breakdown-details">
                     <span class="breakdown-label">Runtime Errors</span>
                     <span class="breakdown-desc">Compiles but fails during execution</span>
@@ -764,7 +764,7 @@ function populateConversionBreakdown(data) {
     if (breakdownItems.length > 0) {
         conversionBreakdown.innerHTML = `
             <div class="breakdown-summary">
-                <span>📊 ${totalFiles} files analyzed</span>
+                <span> ${totalFiles} files analyzed</span>
             </div>
             <div class="breakdown-list">
                 ${breakdownItems.join('')}
@@ -803,7 +803,7 @@ async function fetchResults() {
                 runCount: 1
             };
             localStorage.setItem(AI_BASELINES_KEY, JSON.stringify(repoBaselines));
-            console.log('📊 Baseline saved for repo:', baselineConverted, 'files (Run #1)');
+            console.log(' Baseline saved for repo:', baselineConverted, 'files (Run #1)');
         } else {
             // Subsequent conversion - update run count
             repoBaselines[currentRepoUrl] = {
@@ -817,7 +817,7 @@ async function fetchResults() {
         const withoutAI = baselineConverted;
         const withAI = fullyConverted;
 
-        console.log('📊 Display: Without AI =', withoutAI, '→ With AI =', withAI, '(Run #' + currentRunCount + ')');
+        console.log(' Display: Without AI =', withoutAI, '→ With AI =', withAI, '(Run #' + currentRunCount + ')');
 
         // Update AI comparison display with run number
         updateAIComparison(withoutAI, withAI, currentRunCount);
@@ -876,27 +876,27 @@ async function fetchResults() {
 
                 // Build failure summary badge as chip list
                 let failBadgeHtml = '';
-                if (failConversion > 0) failBadgeHtml += `<span class="fail-chip dep-chip" data-tooltip="Missing dependencies or copybooks">🔗 ${failConversion} Missing Deps</span>`;
-                if (failCompile > 0) failBadgeHtml += `<span class="fail-chip compile-chip" data-tooltip="Java compilation errors">⚙️ ${failCompile} Compile Errors</span>`;
-                if (failExecution > 0) failBadgeHtml += `<span class="fail-chip runtime-chip" data-tooltip="Errors during test execution">💥 ${failExecution} Runtime Errors</span>`;
+                if (failConversion > 0) failBadgeHtml += `<span class="fail-chip dep-chip" data-tooltip="Missing dependencies or copybooks"> ${failConversion} Missing Deps</span>`;
+                if (failCompile > 0) failBadgeHtml += `<span class="fail-chip compile-chip" data-tooltip="Java compilation errors"> ${failCompile} Compile Errors</span>`;
+                if (failExecution > 0) failBadgeHtml += `<span class="fail-chip runtime-chip" data-tooltip="Errors during test execution"> ${failExecution} Runtime Errors</span>`;
 
                 const html = `
                 <div class="report-grid">
                     <!-- Summary Card -->
                     <div class="summary-card">
                         <div class="summary-header">
-                            <span class="header-icon">📊</span>
+                            <span class="header-icon"></span>
                             <span class="header-text">Conversion Summary</span>
                         </div>
                         <div class="summary-stats">
                             <div class="summary-stat" data-tooltip="Total COBOL files detected in the repository">
-                                <div class="stat-icon-small">📁</div>
+                                <div class="stat-icon-small"></div>
                                 <span class="stat-num">${total}</span>
                                 <span class="stat-text">Total Files</span>
                             </div>
                             <div class="summary-divider"></div>
                             <div class="summary-stat success-highlight" data-tooltip="Files converted and verified successfully">
-                                <div class="stat-icon-small">✅</div>
+                                <div class="stat-icon-small">[ok]</div>
                                 <span class="stat-num">${successfullyConverted}</span>
                                 <span class="stat-text">Converted</span>
                             </div>
@@ -906,21 +906,21 @@ async function fetchResults() {
                     <!-- Results Breakdown -->
                     <div class="results-card">
                         <div class="results-header">
-                            <span class="header-icon">📋</span>
+                            <span class="header-icon"></span>
                             <span class="header-text">Results Breakdown</span>
                         </div>
                         <div class="result-row success-row" data-tooltip="Successfully converted programs">
-                            <span class="result-icon">🟢</span>
+                            <span class="result-icon"></span>
                             <span class="result-label">Success</span>
                             <span class="result-value">${successfullyConverted}</span>
                         </div>
                         <div class="result-row warning-row" data-tooltip="Copybooks and shared snippets (not standalone programs)">
-                            <span class="result-icon">🟡</span>
+                            <span class="result-icon"></span>
                             <span class="result-label">Copybooks</span>
                             <span class="result-value">${copybooks}</span>
                         </div>
                         <div class="result-row error-row" data-tooltip="Files that failed conversion or execution">
-                            <span class="result-icon">🔴</span>
+                            <span class="result-icon"></span>
                             <span class="result-label">Failed</span>
                             <span class="result-value">${fails}</span>
                         </div>
@@ -1021,32 +1021,32 @@ function updateConvertedList(items) {
 
             // Status logic
             if (item.compare === 'MATCH') {
-                status = '✅ MATCH';
+                status = '[ok] MATCH';
                 statusClass = 'success';
                 showCompare = true;
             }
             else if (item.compare === 'MISMATCH') {
-                status = '⚠️ DIFF';
+                status = '[warn] DIFF';
                 statusClass = 'warning';
                 showCompare = true;
             }
             else if (item.compare === 'JAVA_ONLY') {
-                status = '☕ JAVA ONLY';
+                status = ' JAVA ONLY';
                 statusClass = 'info';
                 showCompare = true;
             }
             else if (item.java_status === 'EXEC_FAIL') {
-                status = '❌ JAVA FAIL';
+                status = '[error] JAVA FAIL';
                 statusClass = 'error';
                 showCompare = false;
             }
             else if (item.native_status === 'EXEC_FAIL') {
-                status = '❌ NATIVE FAIL';
+                status = '[error] NATIVE FAIL';
                 statusClass = 'error';
                 showCompare = false;
             }
             else {
-                status = '☕ JAVA ONLY';
+                status = ' JAVA ONLY';
                 statusClass = 'info';
                 showCompare = true;
             }
@@ -1068,13 +1068,13 @@ function updateConvertedList(items) {
             <div class="file-card-header">
                 <div class="file-info">
                     <div class="file-name">
-                        <span class="icon">☕</span>
+                        <span class="icon"></span>
                         <span>${displayName}</span>
                         ${status ? `<span class="status-tag ${statusClass}">${status}</span>` : ''}
                         ${(isRich && item.conversionAccuracy !== undefined) ? `
                             <span class="accuracy-badge ${getAccuracyClass(item.conversionAccuracy)}" 
                                   title="${item.accuracyDetails ? item.accuracyDetails.join(' | ') : 'Code coverage analysis'}">
-                                🎯 ${item.conversionAccuracy}%
+                                 ${item.conversionAccuracy}%
                             </span>
                         ` : ''}
                     </div>
@@ -1082,13 +1082,13 @@ function updateConvertedList(items) {
                 <div class="file-actions">
                     ${(path || workDir) ? `
                         <button class="code-mapping-toggle" onclick="toggleCodeMapping('${cardId}', '${escapedPath}', '${escapedWorkDir}')" title="View Input → Output Code Mapping">
-                            <span>📝 View Code</span>
-                            <span class="toggle-arrow">▼</span>
+                            <span> View Code</span>
+                            <span class="toggle-arrow"></span>
                         </button>
                     ` : ''}
                     ${showCompare && workDir ? `
                         <button class="icon-btn compare" title="Compare COBOL vs Java Output" onclick="viewComparison('${escapedWorkDir}', '${displayName}')">
-                            ⚖️ Compare Output
+                             Compare Output
                         </button>
                     ` : ''}
                 </div>
@@ -1110,7 +1110,7 @@ function updateConvertedList(items) {
                     <div class="code-panel cobol">
                         <div class="code-panel-header">
                             <div class="header-left">
-                                <span class="header-icon">📝</span>
+                                <span class="header-icon"></span>
                                 <span>COBOL Input</span>
                             </div>
                             ${path ? `<button class="view-full-btn" onclick="viewFile('${escapedPath}', '${displayName}')">Full View</button>` : ''}
@@ -1128,7 +1128,7 @@ function updateConvertedList(items) {
                     <div class="code-panel java">
                         <div class="code-panel-header">
                             <div class="header-left">
-                                <span class="header-icon">☕</span>
+                                <span class="header-icon"></span>
                                 <span>Java Code</span>
                             </div>
                             ${escapedJavaPath ? `
@@ -1222,7 +1222,7 @@ async function toggleCodeMapping(cardId, cobolPath, workDir) {
                     if (deps.copybooks && deps.copybooks.length > 0) {
                         depsHtml += `
                             <div class="dep-group">
-                                <span class="dep-label">📋 Uses Copybooks:</span>
+                                <span class="dep-label"> Uses Copybooks:</span>
                                 <div class="dep-items">
                                     ${deps.copybooks.map(c => `<span class="dep-chip copybook">${c}</span>`).join('')}
                                 </div>
@@ -1233,7 +1233,7 @@ async function toggleCodeMapping(cardId, cobolPath, workDir) {
                     if (deps.programCalls && deps.programCalls.length > 0) {
                         depsHtml += `
                             <div class="dep-group">
-                                <span class="dep-label">📞 Calls Programs:</span>
+                                <span class="dep-label"> Calls Programs:</span>
                                 <div class="dep-items">
                                     ${deps.programCalls.map(p => `<span class="dep-chip program">${p}</span>`).join('')}
                                 </div>
@@ -1276,35 +1276,35 @@ function updateSkippedList(files) {
             switch (item.java_status) {
                 case 'SKIPPED_COPYBOOK':
                     reason = 'Copybook';
-                    icon = '📋';
+                    icon = '';
                     break;
                 case 'SKIPPED_NO_ID':
                     reason = 'No PROGRAM-ID';
-                    icon = '🔖';
+                    icon = '';
                     break;
                 case 'SKIPPED_JCL':
                     reason = 'JCL File';
-                    icon = '📜';
+                    icon = '';
                     break;
                 case 'SKIPPED_DATA':
                     reason = 'Data File';
-                    icon = '📊';
+                    icon = '';
                     break;
                 case 'SKIPPED_OTHER':
                     reason = 'Other';
-                    icon = '📄';
+                    icon = '';
                     break;
                 case 'SKIPPED_TOO_LARGE':
                     reason = 'Too Large';
-                    icon = '📏';
+                    icon = '';
                     break;
                 case 'SKIPPED_BUDGET':
                     reason = 'Budget Hit';
-                    icon = '💰';
+                    icon = '';
                     break;
                 default:
                     reason = 'Skipped';
-                    icon = '⏭️';
+                    icon = 'skipped';
             }
         } else {
             // Legacy string format: "filename - reason"
@@ -1312,7 +1312,7 @@ function updateSkippedList(files) {
             filename = parts[0] || item;
             reason = parts[1] || 'Skipped';
             sourcePath = null;
-            icon = '⏭️';
+            icon = 'skipped';
         }
 
         const escapedPath = sourcePath ? sourcePath.replace(/'/g, "\\'") : '';
@@ -1329,7 +1329,7 @@ function updateSkippedList(files) {
                 <div class="file-actions">
                     ${sourcePath ? `
                         <button class="icon-btn" title="View Source Code" onclick="viewFile('${escapedPath}', '${filename}')" style="background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.3); color: #818cf8;">
-                            📄 View Code
+                             View Code
                         </button>
                     ` : ''}
                 </div>
@@ -1341,7 +1341,7 @@ function updateSkippedList(files) {
 // Update error files list
 function updateErrorList(items) {
     if (!items || items.length === 0) {
-        errorPanel.innerHTML = '<p class="empty-state">No error files - all files converted successfully! 🎉</p>';
+        errorPanel.innerHTML = '<p class="empty-state">No error files - all files converted successfully! </p>';
         return;
     }
 
@@ -1351,17 +1351,17 @@ function updateErrorList(items) {
     // Helper to get descriptive reason
     function getDetailedReason(status) {
         const reasons = {
-            'CONVERT_FAIL': { text: 'Conversion Failed', detail: 'Missing COPYBOOK or unsupported syntax', icon: '📝' },
-            'COMPILE_FAIL': { text: 'Compilation Failed', detail: 'Java compilation error', icon: '⚙️' },
-            'EXEC_FAIL': { text: 'Execution Failed', detail: 'Runtime error in generated Java', icon: '🔥' },
-            'FAIL': { text: 'Failed', detail: 'Unknown error during processing', icon: '❓' },
-            'SKIPPED_TOO_LARGE': { text: 'Too Large', detail: 'Source exceeds single-pass size cap (~80KB)', icon: '📏' },
-            'SKIPPED_BUDGET':    { text: 'Budget Hit', detail: 'Conversion stopped — token ceiling reached', icon: '💰' },
-            'CICS_DEPENDENCY': { text: 'CICS Dependency', detail: 'Requires CICS/MQ mainframe calls', icon: '🖥️' },
-            'DB2_DEPENDENCY': { text: 'DB2 Dependency', detail: 'Requires DB2 database integration', icon: '🗄️' },
-            'VSAM_DEPENDENCY': { text: 'VSAM Dependency', detail: 'Requires VSAM file handling', icon: '📁' }
+            'CONVERT_FAIL': { text: 'Conversion Failed', detail: 'Missing COPYBOOK or unsupported syntax', icon: '' },
+            'COMPILE_FAIL': { text: 'Compilation Failed', detail: 'Java compilation error', icon: '' },
+            'EXEC_FAIL': { text: 'Execution Failed', detail: 'Runtime error in generated Java', icon: '' },
+            'FAIL': { text: 'Failed', detail: 'Unknown error during processing', icon: '?' },
+            'SKIPPED_TOO_LARGE': { text: 'Too Large', detail: 'Source exceeds single-pass size cap (~80KB)', icon: '' },
+            'SKIPPED_BUDGET':    { text: 'Budget Hit', detail: 'Conversion stopped — token ceiling reached', icon: '' },
+            'CICS_DEPENDENCY': { text: 'CICS Dependency', detail: 'Requires CICS/MQ mainframe calls', icon: '' },
+            'DB2_DEPENDENCY': { text: 'DB2 Dependency', detail: 'Requires DB2 database integration', icon: '' },
+            'VSAM_DEPENDENCY': { text: 'VSAM Dependency', detail: 'Requires VSAM file handling', icon: '' }
         };
-        return reasons[status] || { text: status, detail: 'Conversion issue', icon: '❌' };
+        return reasons[status] || { text: status, detail: 'Conversion issue', icon: '[error]' };
     }
 
     errorPanel.innerHTML = items.map(item => {
@@ -1377,7 +1377,7 @@ function updateErrorList(items) {
             // Legacy string parsing
             const parts = item.split(' - ');
             displayName = parts[0] || item;
-            reasonInfo = { text: parts[1] || 'Error', detail: '', icon: '❌' };
+            reasonInfo = { text: parts[1] || 'Error', detail: '', icon: '[error]' };
         }
 
         const escapedPath = path ? path.replace(/'/g, "\\'") : '';
@@ -1388,7 +1388,7 @@ function updateErrorList(items) {
             <div class="file-item">
                 <div class="file-info">
                     <div class="file-name">
-                        <span class="icon">❌</span>
+                        <span class="icon">[error]</span>
                         <span>${displayName}</span>
                         <span class="status-tag error">${reasonInfo.text}</span>
                     </div>
@@ -1401,17 +1401,17 @@ function updateErrorList(items) {
                 <div class="file-actions">
                 ${path ? `
                     <button class="icon-btn ai-btn" title="Analyze with AI" onclick="analyzeWithAI('${escapedPath}', '${escapedWorkDir}', '${escapedErrorType}', '${displayName}')">
-                        🤖 Fix with AI
+                         Fix with AI
                     </button>
                 ` : ''}
                 ${workDir ? `
                     <button class="icon-btn" title="View Conversion Log" onclick="viewLog('${escapedWorkDir}/cobj.log', 'Conversion Log')">
-                        📜 Log
+                         Log
                     </button>
                 ` : ''}
                 ${path ? `
                     <button class="icon-btn code-view" title="View COBOL Source & Java Code" onclick="viewCodeComparison('${escapedPath}', '${escapedWorkDir}', '${displayName}')">
-                        📝 View Code
+                         View Code
                     </button>
                 ` : ''}
                 </div>
@@ -1477,7 +1477,7 @@ async function viewJavaFromWorkDir(workDir, fileName) {
             codeModal.classList.remove('hidden');
         } else {
             modalTitle.textContent = fileName + '.java';
-            codePreview.querySelector('code').textContent = '⚠️ Java code not found in work directory';
+            codePreview.querySelector('code').textContent = '[warn] Java code not found in work directory';
             codeModal.classList.remove('hidden');
         }
     } catch (error) {
@@ -1511,14 +1511,14 @@ async function viewComparison(workDir, fileName) {
         if (data.nativeExists && data.nativeOutput) {
             nativeOutput.querySelector('code').textContent = data.nativeOutput || '(empty output)';
         } else {
-            nativeOutput.querySelector('code').textContent = '⚠️ No native COBOL output available\n(Native execution may have failed or timed out)';
+            nativeOutput.querySelector('code').textContent = '[warn] No native COBOL output available\n(Native execution may have failed or timed out)';
         }
 
         // Update java output
         if (data.javaExists && data.javaOutput) {
             javaOutput.querySelector('code').textContent = data.javaOutput || '(empty output)';
         } else {
-            javaOutput.querySelector('code').textContent = '⚠️ No Java output available';
+            javaOutput.querySelector('code').textContent = '[warn] No Java output available';
         }
 
         // Show diff if available
@@ -1598,8 +1598,8 @@ function renderAccuracyPanel(paneEl, data) {
         const metrics = document.createElement('div');
         metrics.className = 'accuracy-panel-metrics';
         metrics.innerHTML = `
-            <span>COBOL: <strong>${cm.codeLines || 0}</strong> lines · <strong>${cm.dataItems || 0}</strong> PIC · <strong>${cm.procedures || 0}</strong> procedures</span>
-            <span>Java: <strong>${jm.codeLines || 0}</strong> lines · <strong>${jm.fields || 0}</strong> fields · <strong>${jm.methods || 0}</strong> methods</span>
+            <span>COBOL: <strong>${cm.codeLines || 0}</strong> lines - <strong>${cm.dataItems || 0}</strong> PIC - <strong>${cm.procedures || 0}</strong> procedures</span>
+            <span>Java: <strong>${jm.codeLines || 0}</strong> lines - <strong>${jm.fields || 0}</strong> fields - <strong>${jm.methods || 0}</strong> methods</span>
         `;
         panel.appendChild(metrics);
     }
@@ -1668,9 +1668,9 @@ function buildAccuracyBanner(data) {
     const jm = br.javaMetrics || {};
     const penalties = Array.isArray(br.semanticPenalties) ? br.semanticPenalties : [];
 
-    let banner = '// ═══════════════════════════════════════════════════════════════\n';
+    let banner = '// ===============================================================\n';
     banner += `// Conversion confidence: ${acc}%   —   review the items below\n`;
-    banner += '// ═══════════════════════════════════════════════════════════════\n';
+    banner += '// ===============================================================\n';
 
     // Metrics comparison
     if (cm.codeLines || jm.codeLines) {
@@ -1683,7 +1683,7 @@ function buildAccuracyBanner(data) {
         banner += '//\n// What lowered the score — please verify manually:\n';
         for (const p of penalties) {
             const guidance = PENALTY_GUIDANCE[p] || 'Manual inspection recommended.';
-            banner += `//   • ${p}\n`;
+            banner += `//   - ${p}\n`;
             // Word-wrap the guidance at ~90 chars for readability
             const words = guidance.split(' ');
             let line = '//       ';
@@ -1705,7 +1705,7 @@ function buildAccuracyBanner(data) {
         banner += '// source side-by-side to confirm all paragraphs/data items are represented.\n';
     }
 
-    banner += '// ═══════════════════════════════════════════════════════════════\n\n';
+    banner += '// ===============================================================\n\n';
     return banner;
 }
 
@@ -1918,7 +1918,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
     const aiModalContent = document.getElementById('aiModalContent');
 
     // Show modal with loading state
-    aiModalTitle.textContent = `🤖 AI Analysis: ${fileName}`;
+    aiModalTitle.textContent = ` AI Analysis: ${fileName}`;
     aiModalContent.innerHTML = `
         <div class="ai-loading">
             <div class="ai-spinner"></div>
@@ -1940,7 +1940,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
         if (!response.ok) {
             // Show error with quick suggestions if available
             let html = `<div class="ai-error">
-                <div class="ai-error-icon">⚠️</div>
+                <div class="ai-error-icon">[warn]</div>
                 <div class="ai-error-message">${data.error || 'AI analysis failed'}</div>
             </div>`;
 
@@ -1969,7 +1969,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
         // Quick suggestions section
         if (data.quickSuggestions && data.quickSuggestions.length > 0) {
             html += `<div class="quick-suggestions">
-                <h4>🎯 Quick Insights</h4>
+                <h4> Quick Insights</h4>
                 <div class="suggestions-grid">
                     ${data.quickSuggestions.map(s => `
                         <div class="suggestion-chip">
@@ -1984,7 +1984,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
         // AI Analysis
         if (data.analysis) {
             html += `<div class="ai-analysis">
-                <h4>🤖 AI Analysis</h4>
+                <h4> AI Analysis</h4>
                 <div class="analysis-content">${renderMarkdown(data.analysis)}</div>
             </div>`;
         }
@@ -2001,7 +2001,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
     } catch (error) {
         aiModalContent.innerHTML = `
             <div class="ai-error">
-                <div class="ai-error-icon">❌</div>
+                <div class="ai-error-icon">[error]</div>
                 <div class="ai-error-message">Failed to connect to AI service: ${error.message}</div>
             </div>
         `;
@@ -2099,7 +2099,7 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
             improvementText.textContent = `+${improvement} files`;
             improvementBadge.classList.remove('no-change');
             improvementBadge.classList.add('improved');
-            if (improvementIcon) improvementIcon.textContent = '📈';
+            if (improvementIcon) improvementIcon.textContent = '';
             if (improvementPercent) {
                 improvementPercent.textContent = `${percentImprovement}% increase`;
                 improvementPercent.classList.add('positive');
@@ -2109,7 +2109,7 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
             improvementText.textContent = 'No change';
             improvementBadge.classList.add('no-change');
             improvementBadge.classList.remove('improved');
-            if (improvementIcon) improvementIcon.textContent = '➡️';
+            if (improvementIcon) improvementIcon.textContent = '->';
             if (improvementPercent) {
                 improvementPercent.textContent = 'Same result';
                 improvementPercent.classList.remove('positive');
@@ -2119,7 +2119,7 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
             improvementText.textContent = `${improvement} files`;
             improvementBadge.classList.add('no-change');
             improvementBadge.classList.remove('improved');
-            if (improvementIcon) improvementIcon.textContent = '📉';
+            if (improvementIcon) improvementIcon.textContent = '';
             if (improvementPercent) {
                 improvementPercent.textContent = `${Math.abs(percentImprovement)}% decrease`;
                 improvementPercent.classList.remove('positive');
@@ -2134,15 +2134,15 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
 
         if (runNumber === 1) {
             statusMessage.className = 'ai-status-message waiting';
-            if (statusIcon) statusIcon.textContent = '⏳';
+            if (statusIcon) statusIcon.textContent = '';
             if (statusText) statusText.textContent = 'Baseline captured! Use AI to fix errors, then run conversion again to see improvement.';
         } else if (improvement > 0) {
             statusMessage.className = 'ai-status-message success';
-            if (statusIcon) statusIcon.textContent = '✅';
+            if (statusIcon) statusIcon.textContent = '[ok]';
             if (statusText) statusText.textContent = `AI helped convert ${improvement} additional file${improvement > 1 ? 's' : ''}! ${percentImprovement}% improvement.`;
         } else {
             statusMessage.className = 'ai-status-message';
-            if (statusIcon) statusIcon.textContent = '📊';
+            if (statusIcon) statusIcon.textContent = '';
             if (statusText) statusText.textContent = 'No change detected. Try using AI suggestions on more error files.';
         }
     }
@@ -2150,7 +2150,7 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
     // Always show section when there's data
     if (withoutAI > 0 || withAI > 0) {
         section.classList.remove('hidden');
-        console.log('📊 AI Comparison:', withoutAI, '→', withAI, `(Run #${runNumber}, ${improvement > 0 ? '+' : ''}${improvement} files, ${percentImprovement}%)`);
+        console.log(' AI Comparison:', withoutAI, '→', withAI, `(Run #${runNumber}, ${improvement > 0 ? '+' : ''}${improvement} files, ${percentImprovement}%)`);
     }
 }
 
@@ -2164,7 +2164,7 @@ function resetBaseline() {
 
     baselineConverted = 0;
     currentRunCount = 0;
-    console.log('📊 Baseline reset for current repo! Run conversion again to set new baseline.');
+    console.log(' Baseline reset for current repo! Run conversion again to set new baseline.');
 
     // Hide comparison section until new data
     const section = document.getElementById('aiComparisonSection');
@@ -2177,7 +2177,7 @@ function resetAllBaselines() {
     localStorage.removeItem(AI_BASELINES_KEY);
     baselineConverted = 0;
     currentRunCount = 0;
-    console.log('📊 All baselines cleared!');
+    console.log(' All baselines cleared!');
 
     const section = document.getElementById('aiComparisonSection');
     if (section) section.classList.add('hidden');
@@ -2191,7 +2191,7 @@ function setManualBaseline(value) {
         localStorage.setItem(AI_BASELINES_KEY, JSON.stringify(repoBaselines));
     }
     currentRunCount = 2; // Pretend we're on second run
-    console.log('📊 Manual baseline set to:', baselineConverted);
+    console.log(' Manual baseline set to:', baselineConverted);
 
     // Use current result if available
     const withAI = currentRepoConverted > 0 ? currentRepoConverted : baselineConverted;
@@ -2220,7 +2220,7 @@ function setComparison(withoutAI, withAI) {
     const section = document.getElementById('aiComparisonSection');
     if (section) section.classList.remove('hidden');
 
-    console.log('📊 Comparison set: Without AI =', withoutAI, '→ With AI =', withAI, '| Improvement: +' + (withAI - withoutAI) + ' files');
+    console.log(' Comparison set: Without AI =', withoutAI, '→ With AI =', withAI, '| Improvement: +' + (withAI - withoutAI) + ' files');
 }
 
 // Expose functions to window for console access
@@ -2250,7 +2250,7 @@ window.getAccuracyLevel = getAccuracyLevel;
 // Initialize app
 init();
 
-// ─── HITL: review modal helpers ──────────────────────────────────────────
+// --- HITL: review modal helpers ------------------------------------------
 let currentReviewFileId = null;
 
 async function openReviewModal(fileId, label) {
@@ -2319,7 +2319,7 @@ window.openReviewModal = openReviewModal;
 window.closeReviewModal = closeReviewModal;
 window.submitReview = submitReview;
 
-// ─── HITL Phase 2: bulk actions + history polling ────────────────────────
+// --- HITL Phase 2: bulk actions + history polling ------------------------
 let reviewHistoryTimer = null;
 
 async function bulkReview(action) {
@@ -2370,7 +2370,7 @@ function renderReviewHistory(history) {
     const items = history.slice(-10).reverse();
     list.innerHTML = items.map(h => {
         const time = new Date(h.at).toLocaleTimeString();
-        const icon = h.action === 'approve' ? '✓' : h.action === 'reject' ? '✗' : '✎';
+        const icon = h.action === 'approve' ? 'OK' : h.action === 'reject' ? 'FAIL' : 'edit';
         const cls  = h.action === 'approve' ? 'approve' : h.action === 'reject' ? 'reject' : 'edit';
         const bulk = h.bulk ? ' (bulk)' : '';
         const name = (h.fileId || '').split('/').pop();
@@ -2390,7 +2390,7 @@ function escapeHtml(s) {
 
 window.bulkReview = bulkReview;
 
-// ─── Token panel updater ─────────────────────────────────────────────────
+// --- Token panel updater -------------------------------------------------
 function fmt(n) {
     if (n == null) return '0';
     if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
@@ -2411,7 +2411,7 @@ window.updateTokenPanel = function (tokens) {
     set('tokenCalls', fmt(tokens.calls));
 };
 
-// ─── Risks panel ─────────────────────────────────────────────────────────
+// --- Risks panel ---------------------------------------------------------
 window.updateRisksPanel = function (risks) {
     const panel = document.getElementById('risksPanel');
     const list  = document.getElementById('risksList');
@@ -2433,7 +2433,7 @@ window.updateRisksPanel = function (risks) {
     }).join('');
 };
 
-// ─── Results browser ─────────────────────────────────────────────────────
+// --- Results browser -----------------------------------------------------
 let browserFiles = [];
 let browserLoaded = false;
 
@@ -2513,7 +2513,7 @@ function renderTreeNode(node, parentPath, depth) {
         const fullPath = parentPath ? parentPath + '/' + name : name;
         html += `<div class="tree-folder">
             <div class="tree-folder-label" style="padding-left:${depth * 12}px">
-                <span class="tree-caret">▾</span>
+                <span class="tree-caret"></span>
                 <span class="tree-folder-name">${escapeHtml(name)}</span>
             </div>
             <div class="tree-folder-children">
@@ -2579,28 +2579,28 @@ function renderTreeNode(node, parentPath, depth) {
 
 function statusIcon(status) {
     switch (status) {
-        case 'SUCCESS': return '✓';
+        case 'SUCCESS': return 'OK';
         case 'CONVERT_FAIL':
         case 'FAIL':
-        case 'REJECTED_BY_REVIEW': return '✗';
+        case 'REJECTED_BY_REVIEW': return 'FAIL';
         case 'SKIPPED_COPYBOOK':
         case 'SKIPPED_NO_ID':
         case 'SKIPPED_JCL':
         case 'SKIPPED_DATA':
-        case 'SKIPPED_OTHER': return '○';
-        default: return '·';
+        case 'SKIPPED_OTHER': return '-';
+        default: return '-';
     }
 }
 
 function fileIcon(name) {
     const ext = (name.split('.').pop() || '').toLowerCase();
     const icons = {
-        md: '📄', txt: '📄', json: '{}', yml: '⚙', yaml: '⚙',
-        sh: '⌘', py: '🐍', js: '⬡', java: '☕', xml: '◇',
-        jpg: '🖼', jpeg: '🖼', png: '🖼', gif: '🖼', svg: '🖼',
-        gitignore: '⚙', dockerfile: '🐳'
+        md: '', txt: '', json: '{}', yml: '', yaml: '',
+        sh: 'cmd', py: '', js: '', java: '', xml: '',
+        jpg: '', jpeg: '', png: '', gif: '', svg: '',
+        gitignore: '', dockerfile: ''
     };
-    return icons[ext] || '·';
+    return icons[ext] || '-';
 }
 
 function statusClass(status) {
@@ -2728,11 +2728,11 @@ function buildStatusExplanation(data) {
     const suggestion = data.suggestion || '';
     const err = data.error || '';
 
-    let msg = '⚠️ Java not generated\n\n';
+    let msg = '[warn] Java not generated\n\n';
     msg += `Status: ${status}\n\n`;
     msg += `Why: ${reason}\n`;
     if (suggestion) msg += `\nWhat to do: ${suggestion}\n`;
-    if (err) msg += `\n─── Details ───\n${err}\n`;
+    if (err) msg += `\n--- Details ---\n${err}\n`;
     if (status === 'UNKNOWN') {
         msg += '\n(No report entry found. The file may still be in-flight, or the conversion was cancelled before reaching it.)';
     }
@@ -2753,7 +2753,7 @@ function toggleBrowserMaximize(force) {
     if (btn) {
         const iconEl  = btn.querySelector('.browser-maximize-icon');
         const labelEl = btn.querySelector('.browser-maximize-label');
-        if (iconEl)  iconEl.textContent  = shouldMax ? '✕' : '⛶';
+        if (iconEl)  iconEl.textContent  = shouldMax ? 'x' : '';
         if (labelEl) labelEl.textContent = shouldMax ? 'Exit' : 'Maximize';
         btn.title = shouldMax ? 'Exit maximized view (Esc)' : 'Maximize (Esc to exit)';
     }
@@ -2780,25 +2780,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fixBtn) fixBtn.addEventListener('click', fixSelectedJava);
 });
 
-// ─── Per-file timeline slide-out (reuses .fix-progress-panel styling) ───
+// --- Per-file timeline slide-out (reuses .fix-progress-panel styling) ---
 // Clicked from any node in the graph. Shows the file's phase history
 // (queued → ai_call → compile → [repair] → done) with timings + tokens.
 // While the conversion is still in flight for this file, the panel polls
 // for updates every 1.5s and appends new steps as they arrive.
 const ICONS_BY_STEP = {
-    queued: '•',
-    context_built: '📦',
-    ai_call: '🤖',
-    ai_done: '✓',
-    compile: '⚙',
-    compile_done: '✓',
-    accuracy: '📊',
-    repair: '🔧',
-    repair_done: '✓',
-    repair_failed: '✗',
-    repair_errored: '✗',
-    done: '🏁',
-    skipped: '⏭'
+    queued: '-',
+    context_built: '',
+    ai_call: '',
+    ai_done: 'OK',
+    compile: '',
+    compile_done: 'OK',
+    accuracy: '',
+    repair: '',
+    repair_done: 'OK',
+    repair_failed: 'FAIL',
+    repair_errored: 'FAIL',
+    done: '[done]',
+    skipped: 'skipped'
 };
 let _timelinePoll = null;
 function openFileTimelinePanel(relPath, label) {
@@ -2812,7 +2812,7 @@ function openFileTimelinePanel(relPath, label) {
             <div class="fix-progress-header">
                 <div class="title">File timeline</div>
                 <div class="file"></div>
-                <button type="button" class="fix-progress-close" aria-label="Close">✕</button>
+                <button type="button" class="fix-progress-close" aria-label="Close">x</button>
             </div>
             <ul class="fix-progress-steps"></ul>
             <div class="fix-progress-footer"><span class="elapsed">Loading…</span></div>
@@ -2832,7 +2832,7 @@ function openFileTimelinePanel(relPath, label) {
 
     let seenCount = 0;
     const renderEntry = (e) => {
-        const icon = ICONS_BY_STEP[e.step] || '◌';
+        const icon = ICONS_BY_STEP[e.step] || '-';
         const li = document.createElement('li');
         li.className = 'done';
         const meta = [];
@@ -2846,7 +2846,7 @@ function openFileTimelinePanel(relPath, label) {
             if (e.copybooks != null) p.push(`${e.copybooks} copybooks`);
             if (e.copybookBodies != null && e.copybookBodies > 0) p.push(`${e.copybookBodies} inlined`);
             if (e.jclInvocations != null && e.jclInvocations > 0) p.push(`${e.jclInvocations} JCL steps`);
-            meta.push(p.join(' · '));
+            meta.push(p.join(' - '));
         }
         if (e.errorPreview) meta.push(String(e.errorPreview).slice(0, 200));
         if (e.error)  meta.push(String(e.error).slice(0, 200));
@@ -2860,7 +2860,7 @@ function openFileTimelinePanel(relPath, label) {
             </div>
         `;
         li.querySelector('.label').textContent = e.label || e.step || '(step)';
-        if (meta.length) li.querySelector('.meta').textContent = meta.join(' · ');
+        if (meta.length) li.querySelector('.meta').textContent = meta.join(' - ');
         stepsEl.appendChild(li);
     };
 
@@ -2880,7 +2880,7 @@ function openFileTimelinePanel(relPath, label) {
             const last = timeline[timeline.length - 1];
             const state = data.state || '';
             footerEl.innerHTML = timeline.length
-                ? `<strong>${state || last.step}</strong> · ${timeline.length} events`
+                ? `<strong>${state || last.step}</strong> - ${timeline.length} events`
                 : `No events yet for <code>${(label || relPath).slice(0, 60)}</code> — file may be pending.`;
             // Stop polling once we hit a terminal state.
             const terminal = last && ['done', 'skipped', 'repair_failed', 'repair_errored'].includes(last.step);
@@ -2896,7 +2896,7 @@ function openFileTimelinePanel(relPath, label) {
     _timelinePoll = setInterval(refresh, 1500);
 }
 
-// ─── Fix-with-AI live progress panel ─────────────────────────────────────
+// --- Fix-with-AI live progress panel -------------------------------------
 // Right-side slide-out that shows each step of /api/fix-java as the server
 // streams events. Gives the user real-time visibility into the 10-30s repair
 // instead of a silent "Fixing…" spinner.
@@ -2910,7 +2910,7 @@ function openFixProgressPanel(fileLabel) {
             <div class="fix-progress-header">
                 <div class="title">Fix with AI</div>
                 <div class="file"></div>
-                <button type="button" class="fix-progress-close" aria-label="Close">✕</button>
+                <button type="button" class="fix-progress-close" aria-label="Close">x</button>
             </div>
             <ul class="fix-progress-steps"></ul>
             <div class="fix-progress-footer"><span class="elapsed">Starting…</span></div>
@@ -2935,7 +2935,7 @@ function openFixProgressPanel(fileLabel) {
             currentRunningLi.classList.remove('running');
             currentRunningLi.classList.add('done');
             const ico = currentRunningLi.querySelector('.ico');
-            if (ico) ico.textContent = '✓';
+            if (ico) ico.textContent = 'OK';
         }
     }
     function tickElapsed() {
@@ -2959,20 +2959,20 @@ function openFixProgressPanel(fileLabel) {
                 const p = [];
                 if (payload.cobolBytes != null) p.push(`${payload.cobolBytes}B COBOL`);
                 if (payload.javaBytes != null) p.push(`${payload.javaBytes}B Java`);
-                meta.push(p.join(' · '));
+                meta.push(p.join(' - '));
             }
             if (payload.errorPreview) meta.push(payload.errorPreview);
             if (payload.dependencies != null) meta.push(`deps: ${payload.dependencies}`);
             if (payload.compileStatus) meta.push(`javac: ${payload.compileStatus}`);
             li.innerHTML = `
-                <span class="ico">◌</span>
+                <span class="ico">-</span>
                 <div class="step-body">
                     <span class="label"></span>
                     ${meta.length ? `<span class="meta"></span>` : ''}
                 </div>
             `;
             li.querySelector('.label').textContent = payload.label || payload.step || '(step)';
-            if (meta.length) li.querySelector('.meta').textContent = meta.join(' · ');
+            if (meta.length) li.querySelector('.meta').textContent = meta.join(' - ');
             stepsEl.appendChild(li);
             li.scrollIntoView({ block: 'nearest' });
             currentRunningLi = li;
@@ -2981,7 +2981,7 @@ function openFixProgressPanel(fileLabel) {
             markRunningDone();
             const li = document.createElement('li');
             li.className = 'error';
-            li.innerHTML = `<span class="ico">✗</span><div class="step-body"><span class="label"></span></div>`;
+            li.innerHTML = `<span class="ico">FAIL</span><div class="step-body"><span class="label"></span></div>`;
             li.querySelector('.label').textContent = msg;
             stepsEl.appendChild(li);
             currentRunningLi = null;
@@ -2993,7 +2993,7 @@ function openFixProgressPanel(fileLabel) {
             const parts = [`total ${elapsed}s`];
             if (final && final.compileStatus) {
                 parts.push(final.compileStatus === 'ok'
-                    ? `<span class="compile-ok">compiles ✓</span>`
+                    ? `<span class="compile-ok">compiles OK</span>`
                     : `<span class="compile-fail">compile: ${final.compileStatus}</span>`);
             }
             if (final && typeof final.newAccuracy === 'number') parts.push(`accuracy ${final.newAccuracy}%`);
@@ -3001,7 +3001,7 @@ function openFixProgressPanel(fileLabel) {
                 parts.push(`${final.usage.total_tokens || final.usage.totalTokens} tokens`);
             }
             if (final && !final.success) parts.push(`<span class="compile-fail">failed</span>`);
-            footerEl.innerHTML = parts.join(' · ');
+            footerEl.innerHTML = parts.join(' - ');
         }
     };
 }
@@ -3177,7 +3177,7 @@ async function downloadConversionOutput() {
     }
 }
 
-// ─── Pre-conversion HITL: file selection modal ───────────────────────────
+// --- Pre-conversion HITL: file selection modal ---------------------------
 let preConvertScan = null; // { inputPath, files, counts }
 let preConvertSelected = new Set(); // relative paths
 
@@ -3269,7 +3269,7 @@ async function preConvertStart() {
     // Cost warning: large selections spend real tokens. Compute total source
     // bytes (sizeBytes is on each scan entry) and warn when above the
     // "accidental-click" threshold — 50 files OR 500KB of COBOL source.
-    // Ballpark token estimate: 1 char ≈ 0.3 tokens for COBOL (it's verbose
+    // Ballpark token estimate: 1 char ~ 0.3 tokens for COBOL (it's verbose
     // with lots of fixed-format whitespace, so a bit less dense than English).
     const selectedSet = new Set(selected);
     const selectedEntries = preConvertScan.files.filter(f => selectedSet.has(f.path));
@@ -3282,7 +3282,7 @@ async function preConvertStart() {
         // Rough upper bound: each file ~= input*2 + 4k output tokens (conv + likely repair)
         const estTotalTokens = estInTokens * 2 + selected.length * 4000;
         const msg =
-            `${selected.length} files · ${kb} KB of COBOL source.\n\n` +
+            `${selected.length} files - ${kb} KB of COBOL source.\n\n` +
             `Estimated token cost: ~${estTotalTokens.toLocaleString()} tokens total (input + output, includes possible auto-repair passes).\n\n` +
             `Run the conversion?`;
         const go = await confirmDialog(msg, { title: 'Confirm large conversion', okText: 'Start anyway', cancelText: 'Cancel' });
@@ -3301,7 +3301,7 @@ window.preConvertSelectNone = preConvertSelectNone;
 window.preConvertSelectCobol = preConvertSelectCobol;
 window.preConvertStart = preConvertStart;
 
-// ─── Post-conversion HITL: per-file sign-off in the browser pane ─────────
+// --- Post-conversion HITL: per-file sign-off in the browser pane ---------
 let postReviewState = {}; // fileId -> { action, note, at }
 
 async function postReviewFile(action) {
@@ -3346,13 +3346,13 @@ function updatePostReviewBadge() {
     if (!badge) return;
     const counts = { approve: 0, reject: 0 };
     Object.values(postReviewState).forEach(r => { if (counts[r.action] != null) counts[r.action]++; });
-    badge.textContent = `${counts.approve} approved · ${counts.reject} rejected`;
+    badge.textContent = `${counts.approve} approved - ${counts.reject} rejected`;
     badge.classList.toggle('hidden', counts.approve + counts.reject === 0);
 }
 
 window.postReviewFile = postReviewFile;
 
-// ─── Stop conversion ─────────────────────────────────────────────────────
+// --- Stop conversion -----------------------------------------------------
 async function stopConversion() {
     if (!currentConversionId) return;
     if (!(await confirmDialog('Cancel the current conversion? Files in flight will be marked as skipped.', { title: 'Cancel conversion', okText: 'Stop conversion', cancelText: 'Keep running', danger: true }))) return;
@@ -3377,7 +3377,7 @@ function swapToConvertButton() {
     }
 }
 
-// ─── KPI bar (post-completion) ───────────────────────────────────────────
+// --- KPI bar (post-completion) -------------------------------------------
 async function paintKpiBar() {
     if (!currentConversionId) return;
     try {
@@ -3428,7 +3428,7 @@ window.onConversionComplete = function () {
 
 window.stopConversion = stopConversion;
 
-// ─── Details drawer: per-file timeline view ──────────────────────────────
+// --- Details drawer: per-file timeline view ------------------------------
 let fileTimings = {}; // fileId -> { startedAt, endedAt, state }
 
 function recordFileStateForDetails(fileStates, currentFiles) {
@@ -3485,7 +3485,7 @@ actuallyStartConversion = async function (...args) {
     return _origActuallyStart.apply(this, args);
 };
 
-// ─── White-label + emoji-strip filter for streamed log lines ─────────────
+// --- White-label + emoji-strip filter for streamed log lines -------------
 // Strips brand mentions AND any emoji symbols so the Stream tab is clean text.
 function whiteLabel(text) {
     if (typeof text !== 'string') return text;
@@ -3515,7 +3515,7 @@ function whiteLabel(text) {
 }
 window.whiteLabel = whiteLabel;
 
-// ─── Active-file breadcrumb in header ────────────────────────────────────
+// --- Active-file breadcrumb in header ------------------------------------
 function updateBreadcrumb(currentFiles, isCompleted) {
     const wrap = document.getElementById('activeFileBreadcrumb');
     const nameEl = document.getElementById('activeFileName');
@@ -3531,7 +3531,7 @@ function updateBreadcrumb(currentFiles, isCompleted) {
     if (extraEl) extraEl.textContent = currentFiles.length > 1 ? `+${currentFiles.length - 1} more` : '';
 }
 
-// ─── HITL queue badge on the Human review pill ───────────────────────────
+// --- HITL queue badge on the Human review pill ---------------------------
 function updateReviewQueueBadge(awaitingCount) {
     const badge = document.getElementById('reviewQueueBadge');
     if (!badge) return;
@@ -3544,7 +3544,7 @@ function updateReviewQueueBadge(awaitingCount) {
     }
 }
 
-// ─── Toast (transient notifications) ─────────────────────────────────────
+// --- Toast (transient notifications) -------------------------------------
 // Legacy showToast — kept for compatibility with callers that pass rich HTML
 // (e.g. `<div class="toast-title">…</div><div class="toast-detail">…</div>`).
 // Forwards to the platform toast system but strips HTML to plain text so the
@@ -3601,12 +3601,12 @@ window.onConversionComplete = async function () {
         const failed = res.skippedError || 0;
         const kind = failed > 0 ? 'warning' : (ok === 0 ? 'error' : 'success');
         // Single-line toast: title + summary on one friendly line.
-        const summary = `${ok}/${total} converted · ${acc}% avg accuracy` + (failed > 0 ? ` · ${failed} failed` : '');
+        const summary = `${ok}/${total} converted - ${acc}% avg accuracy` + (failed > 0 ? ` - ${failed} failed` : '');
         toast(`Conversion complete — ${summary}`, kind, 5000);
     } catch {}
 };
 
-// ─── Review Assistant: closed-loop chat panel ────────────────────────────
+// --- Review Assistant: closed-loop chat panel ----------------------------
 let chatAnnouncedFiles = new Set();   // file IDs we've already announced as awaiting
 let chatHandledFiles = new Set();     // file IDs we've recorded an action for
 let chatPollTimer = null;
@@ -3661,9 +3661,9 @@ function renderChatActions(pendingCount) {
         </div>
         <div class="chat-action-row">
             <button class="btn-pill chat-btn view" onclick="chatViewCode()">View code</button>
-            <button class="btn-pill chat-btn approve" onclick="chatAct('approve')">✓ Approve</button>
-            <button class="btn-pill chat-btn edit" onclick="chatAct('edit')">✎ Edit</button>
-            <button class="btn-pill chat-btn reject" onclick="chatAct('reject')">✗ Reject</button>
+            <button class="btn-pill chat-btn approve" onclick="chatAct('approve')">OK Approve</button>
+            <button class="btn-pill chat-btn edit" onclick="chatAct('edit')">edit Edit</button>
+            <button class="btn-pill chat-btn reject" onclick="chatAct('reject')">FAIL Reject</button>
         </div>
         ${pendingCount > 1 ? `
         <div class="chat-action-row chat-bulk-row">
@@ -3700,7 +3700,7 @@ async function pollChatQueue() {
                 chatMessage('system', `
                     <div class="msg-strong"><code>${escapeHtml(name)}</code> ready for review</div>
                     <div class="msg-meta">
-                        ${(cobolBytes / 1024).toFixed(1)} KB COBOL · ${(javaBytes / 1024).toFixed(1)} KB Java
+                        ${(cobolBytes / 1024).toFixed(1)} KB COBOL - ${(javaBytes / 1024).toFixed(1)} KB Java
                     </div>
                 `, { kind: 'pending' });
             }
@@ -3725,7 +3725,7 @@ function stopChatPolling() {
     if (chatPollTimer) { clearTimeout(chatPollTimer); chatPollTimer = null; }
 }
 
-// ─── Chat actions ────────────────────────────────────────────────────────
+// --- Chat actions --------------------------------------------------------
 function chatViewCode() {
     if (!chatActiveFile) return;
     openReviewModal(chatActiveFile, chatActiveFile.split('/').pop());
@@ -3849,7 +3849,7 @@ window.closeReviewModal = function () {
     if (_origCloseReview) _origCloseReview();
 };
 
-// ─── Run program (COBOL + Java side by side) ─────────────────────────────
+// --- Run program (COBOL + Java side by side) -----------------------------
 async function runSelectedFile() {
     if (!currentBrowserFile || !currentConversionId) return;
     const file = currentBrowserFile;
@@ -3891,7 +3891,7 @@ async function runSelectedFile() {
             } else {
                 cobolEl.querySelector('code').textContent = data.cobol.output;
                 cobolEl.parentElement.classList.remove('failed');
-                cobolMeta.textContent = `exit ${data.cobol.exitCode} · ${data.cobol.duration}ms`;
+                cobolMeta.textContent = `exit ${data.cobol.exitCode} - ${data.cobol.duration}ms`;
             }
         }
         // Java pane
@@ -3903,7 +3903,7 @@ async function runSelectedFile() {
             } else {
                 javaEl.querySelector('code').textContent = data.java.output;
                 javaEl.parentElement.classList.remove('failed');
-                javaMeta.textContent = `exit ${data.java.exitCode} · ${data.java.duration}ms`;
+                javaMeta.textContent = `exit ${data.java.exitCode} - ${data.java.duration}ms`;
             }
         }
         // Render any program-written output files (PRTLINE, REPORT, REPOUT,
@@ -3948,7 +3948,7 @@ function renderRunOutputFiles(data) {
     container.className = 'run-output-files';
     container.innerHTML = `
         <div class="run-output-files-header">
-            <span class="run-output-files-title">📄 Program-written output files</span>
+            <span class="run-output-files-title"> Program-written output files</span>
             <span class="run-output-files-hint">COBOL WRITE / Java <code>BufferedWriter</code> — not in stdout</span>
         </div>
         <div class="run-output-files-grid"></div>
@@ -4053,10 +4053,10 @@ async function renderRunDivergenceBanner(data) {
     stillPanel.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
 
     const icon =
-        verdict.severity === 'ok'      ? '✓' :
-        verdict.severity === 'warning' ? '⚠' :
-        verdict.severity === 'error'   ? '✕' :
-                                          'ℹ';
+        verdict.severity === 'ok'      ? 'OK' :
+        verdict.severity === 'warning' ? '[warn]' :
+        verdict.severity === 'error'   ? 'x' :
+                                          'i';
 
     const banner = document.createElement('div');
     banner.className = 'run-diverge-banner run-diverge-' + (verdict.severity || 'info');
@@ -4064,7 +4064,7 @@ async function renderRunDivergenceBanner(data) {
     let html = `<strong>${icon} ${(verdict.title || 'Comparison').replace(/</g, '&lt;')}</strong>`;
     if (reasons.length > 0) {
         html += '<br>' + reasons
-            .map(r => `• ${String(r).replace(/</g, '&lt;')}`)
+            .map(r => `- ${String(r).replace(/</g, '&lt;')}`)
             .join('<br>');
     }
     banner.innerHTML = html;
@@ -4081,7 +4081,7 @@ function closeRunOutput() {
 window.runSelectedFile = runSelectedFile;
 window.closeRunOutput = closeRunOutput;
 
-// ─── Dependency intelligence helpers ─────────────────────────────────────
+// --- Dependency intelligence helpers -------------------------------------
 function gDeps() {
     return (window.cobolGraph && window.cobolGraph.rawGraph) || { nodes: [], edges: [] };
 }
@@ -4121,7 +4121,7 @@ function nodeLabel(fileId) {
     return n ? n.label : fileId.split('/').pop();
 }
 
-// ─── Rich Files-tab renderer (overrides the basic one) ──────────────────
+// --- Rich Files-tab renderer (overrides the basic one) ------------------
 // Reads from multiple sources to be resilient: prefers the live graph state,
 // falls back to fileTimings, then to whatever the rawGraph nodes list shows.
 function renderDetailsFilesRich(maybeStates) {
@@ -4179,7 +4179,7 @@ function renderDetailsFilesRich(maybeStates) {
         if (state === 'awaiting_review' && blockers.length > 0) {
             intel = `<div class="detail-intel blocked">Approve first: ${blockers.map(b => `<code>${escapeHtml(nodeLabel(b.id))}</code>`).join(', ')}</div>`;
         } else if (state === 'awaiting_review' && blockers.length === 0) {
-            intel = `<div class="detail-intel ready">Ready to approve${dependents.length ? ` · unblocks ${dependents.length} file${dependents.length === 1 ? '' : 's'}` : ''}</div>`;
+            intel = `<div class="detail-intel ready">Ready to approve${dependents.length ? ` - unblocks ${dependents.length} file${dependents.length === 1 ? '' : 's'}` : ''}</div>`;
         } else if (state === 'pending' && deps.length > 0) {
             intel = `<div class="detail-intel waits">Waiting on ${deps.length} dep${deps.length === 1 ? '' : 's'}</div>`;
         } else if (state === 'done' && dependents.length > 0) {
@@ -4189,9 +4189,9 @@ function renderDetailsFilesRich(maybeStates) {
         }
 
         const icon = ({
-            'active': '⟳', 'done': '✓', 'failed': '✗', 'skipped': '○',
-            'awaiting_review': '⏸', 'pending': '·'
-        })[state] || '·';
+            'active': '', 'done': 'OK', 'failed': 'FAIL', 'skipped': '-',
+            'awaiting_review': '', 'pending': '-'
+        })[state] || '-';
 
         return `<div class="detail-file ${state}" data-file-id="${escapeHtml(id)}">
             <div class="detail-row-main">
@@ -4264,7 +4264,7 @@ window.onConversionComplete = async function () {
     }, 100);
 };
 
-// ─── Run button: gate to entry points only ───────────────────────────────
+// --- Run button: gate to entry points only -------------------------------
 // Make sure rawGraph is loaded — fall back to a fresh fetch if it isn't.
 async function ensureGraphLoaded() {
     if (window.cobolGraph && window.cobolGraph.rawGraph && window.cobolGraph.rawGraph.nodes && window.cobolGraph.rawGraph.nodes.length) return;
@@ -4320,7 +4320,7 @@ selectBrowserFile = async function (file, el) {
     }
 };
 
-// ─── Review modal: gate Approve when dependencies are blocking ──────────
+// --- Review modal: gate Approve when dependencies are blocking ----------
 // Recomputes the banner + button enabled state for the file currently in the modal.
 // Called once on open AND on every state poll while the modal is visible, so an
 // approval elsewhere immediately unblocks the open modal.
@@ -4384,7 +4384,7 @@ window.openReviewModal = openReviewModal;
     tryWrap();
 })();
 
-// ─── Right drawer (Activity / Stream / History) ──────────────────────────
+// --- Right drawer (Activity / Stream / History) --------------------------
 function toggleRightDrawer() {
     const d = document.getElementById('rightDrawer');
     const btn = document.getElementById('drawerToggleBtn');
@@ -4419,7 +4419,7 @@ actuallyStartConversion = async function (...args) {
     return _origActuallyStartForDrawer.apply(this, args);
 };
 
-// ─── History tab: poll review history + render ───────────────────────────
+// --- History tab: poll review history + render ---------------------------
 async function refreshHistoryTab() {
     if (!currentConversionId) return;
     const list = document.getElementById('historyList');
@@ -4478,7 +4478,7 @@ actuallyStartConversion = async function (...args) {
     return _origStartForHistory.apply(this, args);
 };
 
-// ─── Custom input field: pass-through to /api/run ────────────────────────
+// --- Custom input field: pass-through to /api/run ------------------------
 const _origRunSelectedFile = runSelectedFile;
 runSelectedFile = async function () {
     if (!currentBrowserFile || !currentConversionId) return;
@@ -4526,7 +4526,7 @@ runSelectedFile = async function () {
             } else {
                 cobolEl.querySelector('code').textContent = data.cobol.output;
                 cobolEl.parentElement.classList.remove('failed');
-                cobolMeta.textContent = `exit ${data.cobol.exitCode} · ${data.cobol.duration}ms`;
+                cobolMeta.textContent = `exit ${data.cobol.exitCode} - ${data.cobol.duration}ms`;
             }
         }
         if (data.java) {
@@ -4537,7 +4537,7 @@ runSelectedFile = async function () {
             } else {
                 javaEl.querySelector('code').textContent = data.java.output;
                 javaEl.parentElement.classList.remove('failed');
-                javaMeta.textContent = `exit ${data.java.exitCode} · ${data.java.duration}ms`;
+                javaMeta.textContent = `exit ${data.java.exitCode} - ${data.java.duration}ms`;
             }
         }
         renderRunDivergenceBanner(data);
@@ -4554,10 +4554,10 @@ runSelectedFile = async function () {
 };
 window.runSelectedFile = runSelectedFile;
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Unified Details timeline — replaces Files/Stream/History tabs with
 // one chronological feed of everything that happens during a conversion.
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 let timelineEvents = []; // [{ at, type, html }]
 let lastLogLength = 0;
 let lastHistoryLength = 0;
@@ -4709,7 +4709,7 @@ window.onConversionComplete = async function () {
     setTimeout(stopTimelinePolling, 1500);
 };
 
-// ─── Graph zoom controls ─────────────────────────────────────────────────
+// --- Graph zoom controls -------------------------------------------------
 function graphZoom(factor) {
     const cy = window.cobolGraph && window.cobolGraph._cy;
     if (!cy) return;
@@ -4724,7 +4724,7 @@ function graphFit() {
 window.graphZoom = graphZoom;
 window.graphFit = graphFit;
 
-// ─── Diff view in review modal ───────────────────────────────────────────
+// --- Diff view in review modal -------------------------------------------
 let reviewOriginalJava = ''; // stashed when review modal opens
 
 // Stash original AI output when opening the modal
@@ -4783,11 +4783,11 @@ function hideReviewDiff() {
 window.showReviewDiff = showReviewDiff;
 window.hideReviewDiff = hideReviewDiff;
 
-// ─── Theme toggle (light / dark) ─────────────────────────────────────────
+// --- Theme toggle (light / dark) -----------------------------------------
 function applyTheme(theme) {
     document.body.classList.toggle('theme-light', theme === 'light');
     const icon = document.getElementById('themeIcon');
-    if (icon) icon.textContent = theme === 'light' ? '☾' : '☀';
+    if (icon) icon.textContent = theme === 'light' ? '' : '';
     localStorage.setItem('theme', theme);
 }
 function toggleTheme() {
@@ -4801,10 +4801,10 @@ window.toggleTheme = toggleTheme;
     if (saved) applyTheme(saved);
 })();
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Workflow stepper: tracks the current phase of the conversion process
 // and shows/hides UI sections accordingly.
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 const PHASES = ['input', 'select', 'analyze', 'convert', 'review', 'results'];
 let currentPhase = 'input';
 let completedPhases = new Set();
@@ -4916,13 +4916,13 @@ window.onConversionComplete = async function () {
 // Initialize on page load
 setPhase('input');
 
-// ─── Quick win: auto-focus repo input on page load ───────────────────────
+// --- Quick win: auto-focus repo input on page load -----------------------
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('repoInput');
     if (input) setTimeout(() => input.focus(), 100);
 });
 
-// ─── Quick win: persist last repo URL in localStorage ────────────────────
+// --- Quick win: persist last repo URL in localStorage --------------------
 (function persistRepoUrl() {
     const input = document.getElementById('repoInput');
     if (!input) return;
@@ -4936,7 +4936,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 })();
 
-// ─── Quick win: keyboard shortcuts ───────────────────────────────────────
+// --- Quick win: keyboard shortcuts ---------------------------------------
 document.addEventListener('keydown', (e) => {
     // Cmd/Ctrl + Enter → Convert (if enabled)
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -4955,7 +4955,7 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// ─── Quick win: copy-to-clipboard on code panels ─────────────────────────
+// --- Quick win: copy-to-clipboard on code panels -------------------------
 function addCopyButton(preEl, label) {
     if (!preEl || preEl.parentElement.querySelector('.copy-btn')) return;
     const btn = document.createElement('button');
@@ -4995,7 +4995,7 @@ selectBrowserFile = async function (...args) {
     }, 200);
 };
 
-// ─── Quick win: progress in browser tab title ────────────────────────────
+// --- Quick win: progress in browser tab title ----------------------------
 const originalTitle = document.title;
 function updateTabTitle(text) { document.title = text; }
 function resetTabTitle() { document.title = originalTitle; }
@@ -5027,7 +5027,7 @@ window.onConversionComplete = async function () {
     setTimeout(resetTabTitle, 5000);
 };
 
-// ─── Syntax highlighting via Prism.js ────────────────────────────────────
+// --- Syntax highlighting via Prism.js ------------------------------------
 function highlightCode(preEl, code, lang) {
     if (!preEl) return;
     const codeEl = preEl.querySelector('code') || preEl;
@@ -5066,7 +5066,7 @@ selectBrowserFile = async function (file, el) {
     }, 300);
 };
 
-// ─── Export report as JSON download ──────────────────────────────────────
+// --- Export report as JSON download --------------------------------------
 async function exportReport() {
     if (!currentConversionId) return;
     try {
@@ -5107,7 +5107,7 @@ async function exportReport() {
 }
 window.exportReport = exportReport;
 
-// ─── Hero animation: typing COBOL / Java code snippets ───────────────────
+// --- Hero animation: typing COBOL / Java code snippets -------------------
 (function heroAnimation() {
     const cobolSnippet = `IDENTIFICATION DIVISION.
 PROGRAM-ID. ACCOUNTS.
@@ -5162,7 +5162,7 @@ public class Accounts {
     }, 500);
 })();
 
-// ─── Hero animation v2: sequenced entrance ───────────────────────────────
+// --- Hero animation v2: sequenced entrance -------------------------------
 // Overrides the v1 typeWriter. Sequence:
 // 0.0s  COBOL box slides in + code starts typing
 // 2.5s  Coditation AI engine bounces in
@@ -5290,7 +5290,7 @@ public class Accounts {
     setTimeout(checkAndRun, 300);
 })();
 
-// ─── Hero animation v3: override v2 with smooth CSS reveal (no typing) ──
+// --- Hero animation v3: override v2 with smooth CSS reveal (no typing) --
 (function heroAnimationV3() {
     const cobolText = `IDENTIFICATION DIVISION.
 PROGRAM-ID. ACCOUNTS.
@@ -5383,7 +5383,7 @@ public class Accounts {
     setTimeout(tryStart, 200);
 })();
 
-// ─── Kill all prior hero animation versions ──────────────────────────────
+// --- Kill all prior hero animation versions ------------------------------
 // v1 and v2 typeWriters are still in the file. Neutralize them by
 // clearing any timers they started and preventing their DOM writes.
 window._heroAnimStopped = true;
@@ -5496,9 +5496,9 @@ public class Accounts {
     window.setPhase = setPhase;
 })();
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Session persistence: save conversionId to localStorage, restore on load
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 // Save session when conversion starts
 const _origStartForSession = actuallyStartConversion;
