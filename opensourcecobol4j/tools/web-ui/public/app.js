@@ -345,10 +345,17 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
             }
         }
 
+        // Pick up the Parallel workers slider value from the settings cog
+        // (hidden in /api/convert's request body so the worker clamps to the
+        // requested concurrency). Slider defaults to 5 even if the user
+        // hasn't opened the menu.
+        const batchSlider = document.getElementById('batchSizeSlider');
+        const batchSize = batchSlider ? parseInt(batchSlider.value, 10) : undefined;
+
         const response = await fetch(apiEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoUrl, reviewMode, reviewGlob, selectedFiles })
+            body: JSON.stringify({ repoUrl, reviewMode, reviewGlob, selectedFiles, batchSize })
         });
 
         const data = await response.json();

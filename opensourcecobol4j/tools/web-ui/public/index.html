@@ -110,9 +110,14 @@
                             <span class="settings-label">AI provider</span>
                             <span class="settings-value" id="settingsAiProvider">—</span>
                         </div>
-                        <div class="settings-row settings-reserved" title="Coming soon">
+                        <div class="settings-row" title="How many files the worker converts concurrently per wave. Larger = faster but may hit Azure rate limits on smaller tiers.">
                             <span class="settings-label">Parallel workers</span>
-                            <span class="settings-value muted">5 (coming soon)</span>
+                            <span class="settings-value">
+                                <input type="range" id="batchSizeSlider" min="1" max="10" value="5"
+                                       oninput="document.getElementById('batchSizeValue').textContent = this.value"
+                                       style="width: 90px; vertical-align: middle;">
+                                <span id="batchSizeValue" style="display: inline-block; min-width: 1.5em; text-align: right;">5</span>
+                            </span>
                         </div>
                         <div class="settings-row settings-reserved" title="Coming soon">
                             <span class="settings-label">Token budget</span>

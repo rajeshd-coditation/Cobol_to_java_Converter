@@ -391,8 +391,18 @@ app.post('/api/convert-azure', async (req, res) => {
             conversion.inputPath      = inputPath;
 
 
-            // Parallel processing configuration
-            const BATCH_SIZE = 5; // Process 5 files concurrently
+            // Parallel processing configuration. User can override via the
+            // settings-cog slider (req.body.batchSize) or the CONVERSION_BATCH_SIZE
+            // env var. Defaults to 5, clamped to 1-10 to stay inside typical
+            // Azure rate-limit tiers (gpt-4.1-mini default tier maxes around 10
+            // concurrent non-trivial requests before 429s start).
+            const envBatch = parseInt(process.env.CONVERSION_BATCH_SIZE, 10);
+            const requestedBatch = parseInt((req.body && req.body.batchSize), 10);
+            const rawBatch = Number.isFinite(requestedBatch) ? requestedBatch
+                          : Number.isFinite(envBatch)       ? envBatch
+                          : 5;
+            const BATCH_SIZE = Math.min(10, Math.max(1, rawBatch));
+            conversion.batchSize = BATCH_SIZE; // surfaced in /api/status for the UI
 
             // Index copybook files by UPPERCASE stem so processFile can look up
             // the actual .cpy path for any `COPY X` reference and inline its
