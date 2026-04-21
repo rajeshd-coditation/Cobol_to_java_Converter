@@ -3031,23 +3031,40 @@ window.showFileInBrowser = showFileInBrowser;
 // While the conversion is still in flight for this file, the panel polls
 // for updates every 1.5s and appends new steps as they arrive.
 const ICONS_BY_STEP = {
-    queued: '-',
-    context_built: '',
-    ai_call: '',
+    queued: '·',
+    context_built: '>',
+    ai_call: '>',
     ai_done: 'OK',
-    compile: '',
+    compile: '>',
     compile_done: 'OK',
-    accuracy: '',
-    repair: '',
+    accuracy: '>',
+    repair: '>',
     repair_done: 'OK',
     repair_failed: 'FAIL',
     repair_errored: 'FAIL',
-    done: '[done]',
-    skipped: 'skipped'
+    done: 'DONE',
+    skipped: 'SKIP'
 };
 let _timelinePoll = null;
 function openFileTimelinePanel(relPath, label) {
     if (!currentConversionId || !relPath) return;
+    // Close the global activity drawer if it's open — both panels anchor
+    // to the right edge and overlap each other otherwise. The file-timeline
+    // is the more specific view; the Details drawer stays one click away
+    // via its toggle button when the user wants the broader stream again.
+    const drawer = document.getElementById('rightDrawer');
+    if (drawer && !drawer.classList.contains('hidden')) {
+        drawer.classList.add('hidden');
+        const btn = document.getElementById('drawerToggleBtn');
+        if (btn) btn.classList.remove('active');
+        const glyph = document.getElementById('drawerHandleGlyph');
+        if (glyph) glyph.textContent = '<';
+        const handle = document.getElementById('drawerHandle');
+        if (handle) {
+            handle.classList.remove('drawer-open');
+            handle.title = 'Show activity drawer';
+        }
+    }
     let panel = document.getElementById('fileTimelinePanel');
     if (!panel) {
         panel = document.createElement('aside');
@@ -4931,6 +4948,17 @@ function toggleRightDrawer() {
     if (!d) return;
     d.classList.toggle('hidden');
     const isOpen = !d.classList.contains('hidden');
+    // When the activity drawer opens, dismiss the per-file timeline so the
+    // two right-anchored slide-outs don't stack on top of each other. They
+    // share the same edge of the screen; only one at a time keeps the UI
+    // readable.
+    if (isOpen) {
+        const fileTimeline = document.getElementById('fileTimelinePanel');
+        if (fileTimeline && fileTimeline.classList.contains('open')) {
+            fileTimeline.classList.remove('open');
+            if (_timelinePoll) { clearInterval(_timelinePoll); _timelinePoll = null; }
+        }
+    }
     if (btn) btn.classList.toggle('active', isOpen);
     // Flip the always-visible handle: `<` = open (click to close),
     // `>` = closed (click to open). Mirrors the common drawer idiom.
@@ -5351,7 +5379,31 @@ function pollTimeline() {
                 label = state;
             }
 
-            tlPush('state', `<span class="tl-state-pill ${state}">${label}</span> <span class="tl-file-name">${escapeHtml(name)}</span>`, id);
+            // Compose a one-line detail under the state pill so the user
+            // sees what the file actually IS, not just "Converted Foo.cbl".
+            // Pulls from window.cobolGraph.fileMeta (shipped by /api/graph):
+            //   calls/copies — structural context (who it depends on)
+            //   accuracy / tokens / durationMs — outcome metrics when done
+            //   error — first 120 chars of the failure when failed
+            const meta = (window.cobolGraph && window.cobolGraph.fileMeta && window.cobolGraph.fileMeta[id]) || null;
+            const detailParts = [];
+            if (meta) {
+                if (state === 'failed' && meta.error) {
+                    detailParts.push(String(meta.error));
+                } else if (state === 'done') {
+                    if (typeof meta.accuracy === 'number') detailParts.push(`accuracy ${meta.accuracy}%`);
+                    if (typeof meta.durationMs === 'number') detailParts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+                    if (typeof meta.tokens === 'number' && meta.tokens > 0) detailParts.push(`${meta.tokens.toLocaleString()} tokens`);
+                } else if (state === 'active' || state === 'awaiting_review') {
+                    if (meta.calls > 0) detailParts.push(`calls ${meta.calls}`);
+                    if (meta.copies > 0) detailParts.push(`${meta.copies} copybook${meta.copies === 1 ? '' : 's'}`);
+                    if (meta.jcl > 0) detailParts.push(`${meta.jcl} JCL step${meta.jcl === 1 ? '' : 's'}`);
+                }
+            }
+            const detailHtml = detailParts.length
+                ? `<div class="tl-file-detail">${escapeHtml(detailParts.join(' · '))}</div>`
+                : '';
+            tlPush('state', `<span class="tl-state-pill ${state}">${label}</span> <span class="tl-file-name">${escapeHtml(name)}</span>${detailHtml}`, id);
         }
     }
     prevFileStatesSnapshot = { ...states };

@@ -1492,9 +1492,15 @@ body:not(.theme-light) .fix-progress-steps li {
 }
 .fix-progress-steps .ico {
     flex-shrink: 0;
-    width: 16px;
-    text-align: center;
+    width: 48px;
+    text-align: left;
     margin-top: 1px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    color: var(--c-text-mute, #8c89a8);
 }
 .fix-progress-steps .step-body { flex: 1; min-width: 0; }
 .fix-progress-steps .label { font-weight: 500; }
@@ -3643,6 +3649,18 @@ body.theme-light .compare-table td { border-bottom-color: rgba(0, 0, 0, 0.04); }
     font-family: 'JetBrains Mono', 'Menlo', monospace;
     font-size: 11px;
     color: var(--c-text);
+}
+/* Second-line detail under a state pill: calls/copies while converting,
+   accuracy/tokens/duration when done, first-error when failed. Kept muted
+   so the file name + state pill stay the dominant visual cues. */
+.tl-file-detail {
+    margin-top: 2px;
+    padding-left: 2px;
+    font-size: 10.5px;
+    color: var(--c-text-mute, #8c89a8);
+    font-family: 'Inter', system-ui, sans-serif;
+    line-height: 1.4;
+    word-break: break-word;
 }
 
 .tl-review { border-left: 2px solid var(--c-warning); padding-left: 14px; }

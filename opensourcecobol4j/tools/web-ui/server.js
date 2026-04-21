@@ -1273,40 +1273,48 @@ const convertAzureHandler = async (req, res) => {
 
                 // Within a level, files have no inter-deps so we can fully parallelize.
                 // Still cap concurrency at BATCH_SIZE to avoid rate limits.
+                //
+                // Each per-file promise flips its own terminal state the moment
+                // it resolves (inside the .then()), rather than waiting for the
+                // whole batch's Promise.all. Otherwise 5 parallel files all
+                // appear green at once when the slowest one finishes — even
+                // though 4 of them have been done for seconds. The UI polls
+                // /api/graph every 800ms, so flipping state immediately lets
+                // the user watch nodes turn green in real time.
                 for (let i = 0; i < levelAbs.length; i += BATCH_SIZE) {
                     if (conversion.cancelled) break;
                     const batch = levelAbs.slice(i, Math.min(i + BATCH_SIZE, levelAbs.length));
                     const batchPromises = batch.map((cobolPath, idx) =>
                         processFile(cobolPath, completedCount + idx, cobolFiles.length, inputPath)
+                            .then(fileResult => {
+                                completedCount++;
+                                const relPath = fileResult.relativePath;
+                                conversion.currentFiles = conversion.currentFiles.filter(f => f !== relPath);
+
+                                if (fileResult.status === 'success') {
+                                    conversion.fileStates[relPath] = 'done';
+                                    results.converted++;
+                                    results.convertedFiles.push(`${fileResult.relativePath} [AZURE_AI]`);
+                                    conversion.logs.push(`   [ok] ${fileResult.relativePath}\n`);
+                                } else if (fileResult.status === 'skipped_noid' || fileResult.status === 'skipped_small') {
+                                    conversion.fileStates[relPath] = 'skipped';
+                                    results.skippedNoId++;
+                                    results.skippedFiles.push(`${fileResult.relativePath} - No PROGRAM-ID`);
+                                    conversion.logs.push(`   skipped ${fileResult.relativePath} (skipped)\n`);
+                                } else if (fileResult.status === 'error') {
+                                    conversion.fileStates[relPath] = 'failed';
+                                    results.skippedError++;
+                                    results.errorFiles.push(`${fileResult.relativePath} - ${fileResult.error}`);
+                                    conversion.logs.push(`   [error] ${fileResult.relativePath}: ${fileResult.error?.substring(0, 50) || 'Error'}\n`);
+                                }
+
+                                if (fileResult.reportEntry) {
+                                    results.report.files.push(fileResult.reportEntry);
+                                }
+                                return fileResult;
+                            })
                     );
-                    const batchResults = await Promise.all(batchPromises);
-
-                    for (const fileResult of batchResults) {
-                        completedCount++;
-                        const relPath = fileResult.relativePath;
-                        conversion.currentFiles = conversion.currentFiles.filter(f => f !== relPath);
-
-                        if (fileResult.status === 'success') {
-                            conversion.fileStates[relPath] = 'done';
-                            results.converted++;
-                            results.convertedFiles.push(`${fileResult.relativePath} [AZURE_AI]`);
-                            conversion.logs.push(`   [ok] ${fileResult.relativePath}\n`);
-                        } else if (fileResult.status === 'skipped_noid' || fileResult.status === 'skipped_small') {
-                            conversion.fileStates[relPath] = 'skipped';
-                            results.skippedNoId++;
-                            results.skippedFiles.push(`${fileResult.relativePath} - No PROGRAM-ID`);
-                            conversion.logs.push(`   skipped ${fileResult.relativePath} (skipped)\n`);
-                        } else if (fileResult.status === 'error') {
-                            conversion.fileStates[relPath] = 'failed';
-                            results.skippedError++;
-                            results.errorFiles.push(`${fileResult.relativePath} - ${fileResult.error}`);
-                            conversion.logs.push(`   [error] ${fileResult.relativePath}: ${fileResult.error?.substring(0, 50) || 'Error'}\n`);
-                        }
-
-                        if (fileResult.reportEntry) {
-                            results.report.files.push(fileResult.reportEntry);
-                        }
-                    }
+                    await Promise.all(batchPromises);
 
                     if (i + BATCH_SIZE < levelAbs.length) {
                         await new Promise(resolve => setTimeout(resolve, 1500));

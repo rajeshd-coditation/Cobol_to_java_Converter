@@ -13,6 +13,7 @@
     let onStateUpdate = null;
     let _rawGraphData = null;
     let _latestFileStates = {};
+    let _latestFileMeta = {}; // id -> { calls, copies, jcl, accuracy?, tokens?, durationMs?, error? }
 
     function destroy() {
         if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
@@ -482,6 +483,7 @@
         });
 
         applyStates(data.fileStates || {}, data.currentFiles || []);
+        if (data.fileMeta) _latestFileMeta = data.fileMeta;
         startPolling();
     }
 
@@ -494,6 +496,7 @@
                 const data = await r.json();
                 if (data.ready) {
                     applyStates(data.fileStates || {}, data.currentFiles || []);
+                    if (data.fileMeta) _latestFileMeta = data.fileMeta;
                     if (data.tokens && window.updateTokenPanel) {
                         window.updateTokenPanel(data.tokens);
                     }
@@ -518,6 +521,7 @@
         load, destroy, applyStates,
         get _cy() { return cy; },
         get rawGraph() { return _rawGraphData; },
-        get fileStates() { return _latestFileStates; }
+        get fileStates() { return _latestFileStates; },
+        get fileMeta() { return _latestFileMeta; }
     };
 })();
