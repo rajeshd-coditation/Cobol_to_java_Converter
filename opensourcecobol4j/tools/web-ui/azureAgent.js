@@ -17,7 +17,6 @@ function initializeAzure() {
     const apiKey = process.env.AZURE_OPENAI_API_KEY;
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-05-01-preview';
     const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
-    const agentId = process.env.AZURE_AGENT_ID;
 
     if (!endpoint || !apiKey) {
         console.warn('⚠️  Azure AI not configured. Azure AI features disabled.');
@@ -33,156 +32,31 @@ function initializeAzure() {
         apiKey,
         apiVersion,
         deploymentName,
-        agentId,
         isAIFoundry
     };
 
     console.log('✅ Azure AI Agent initialized successfully');
     console.log(`   Endpoint: ${endpoint}`);
     console.log(`   Platform: ${isAIFoundry ? 'Azure AI Foundry' : 'Azure OpenAI'}`);
-    if (agentId) {
-        console.log(`   Agent ID: ${agentId}`);
-    }
     return true;
 }
 
-/**
- * Create a thread for the Azure AI Foundry Agent
- */
-async function createThread() {
-    const url = `${azureConfig.endpoint}/openai/threads?api-version=${azureConfig.apiVersion}`;
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'api-key': azureConfig.apiKey,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create thread: ${response.status} - ${errorText}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Add a message to a thread
- */
-async function addMessage(threadId, content) {
-    const url = `${azureConfig.endpoint}/openai/threads/${threadId}/messages?api-version=${azureConfig.apiVersion}`;
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'api-key': azureConfig.apiKey,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            role: 'user',
-            content: content
-        })
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to add message: ${response.status} - ${errorText}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Run the agent on a thread
- */
-async function runAgent(threadId) {
-    const url = `${azureConfig.endpoint}/openai/threads/${threadId}/runs?api-version=${azureConfig.apiVersion}`;
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'api-key': azureConfig.apiKey,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            assistant_id: azureConfig.agentId
-        })
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to run agent: ${response.status} - ${errorText}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Get run status
- */
-async function getRunStatus(threadId, runId) {
-    const url = `${azureConfig.endpoint}/openai/threads/${threadId}/runs/${runId}?api-version=${azureConfig.apiVersion}`;
-
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'api-key': azureConfig.apiKey
-        }
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get run status: ${response.status} - ${errorText}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Get messages from a thread
- */
-async function getMessages(threadId) {
-    const url = `${azureConfig.endpoint}/openai/threads/${threadId}/messages?api-version=${azureConfig.apiVersion}`;
-
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'api-key': azureConfig.apiKey
-        }
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get messages: ${response.status} - ${errorText}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Wait for run to complete
- */
-async function waitForRun(threadId, runId, maxWaitMs = 120000) {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < maxWaitMs) {
-        const status = await getRunStatus(threadId, runId);
-
-        if (status.status === 'completed') {
-            return status;
-        } else if (status.status === 'failed' || status.status === 'cancelled' || status.status === 'expired') {
-            throw new Error(`Run ${status.status}: ${status.last_error?.message || 'Unknown error'}`);
-        }
-
-        // Wait before polling again
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    throw new Error('Run timed out');
-}
+// NOTE: the Azure Assistants/Agent API path (convertWithAgent + the thread
+// helpers createThread/addMessage/runAgent/waitForRun/getMessages/getRunStatus)
+// was removed. Reasons:
+//   - It had no retry/truncation detection (Chat Completions path has both).
+//   - It received no conversion context (copybook bodies, sibling signatures,
+//     JCL invocations — the improvements we layered into the chat path) so it
+//     produced systematically worse output.
+//   - Its prompt rules lived in Azure Portal (not code), so every change to
+//     the fidelity rules had to be manually re-applied in two places.
+//   - Chat Completions works for BOTH Azure OpenAI and AI Foundry with the
+//     same API key + deployment, so the dual-path complexity was earning
+//     nothing.
+// If the Assistants API becomes useful again (e.g. for persistent threads or
+// tool-use), reintroduce it through a single shared path that also gets
+// retry + context + truncation-detection, or wait for Azure's Responses API
+// which supersedes Assistants.
 
 /**
  * Make regular Azure OpenAI API request with retry logic for rate limits
@@ -215,6 +89,29 @@ async function makeOpenAIRequest(messages, options = {}) {
         messages,
         max_completion_tokens: options.maxTokens || 4000
     };
+
+    // Optional debug dump — set DEBUG_PROMPTS=<dir> to write every outbound
+    // prompt to disk. Makes "why did the AI make a weird choice?" debugging
+    // tractable without re-running the whole conversion. Filename is a
+    // timestamp + system-prompt hash so dumps don't collide across concurrent
+    // workers. Off by default (no cost when unset).
+    if (process.env.DEBUG_PROMPTS) {
+        try {
+            const dir = process.env.DEBUG_PROMPTS;
+            fs.mkdirSync(dir, { recursive: true });
+            const sys = (messages.find(m => m.role === 'system') || {}).content || '';
+            const tag = require('crypto').createHash('sha1').update(sys).digest('hex').slice(0, 8);
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const file = path.join(dir, `${stamp}.${tag}.json`);
+            fs.writeFileSync(file, JSON.stringify({
+                url,
+                maxTokens: body.max_completion_tokens,
+                messages
+            }, null, 2));
+        } catch (dumpErr) {
+            console.warn('   ⚠️  Prompt dump failed (non-fatal):', dumpErr.message);
+        }
+    }
 
     // Retry logic with exponential backoff for rate limits
     const maxRetries = 3;
@@ -269,57 +166,13 @@ async function makeOpenAIRequest(messages, options = {}) {
 }
 
 /**
- * Convert COBOL code to Java using Azure AI Foundry Agent
- */
-async function convertWithAgent(cobolSource) {
-    if (!azureConfig.agentId) {
-        throw new Error('Agent ID not configured');
-    }
-
-    // Create a thread
-    const thread = await createThread();
-    console.log(`   Created thread: ${thread.id}`);
-
-    // Add the COBOL code as a message
-    const prompt = `Convert this COBOL program to Java. Output ONLY the Java code, no explanations:\n\n${cobolSource}`;
-    await addMessage(thread.id, prompt);
-
-    // Run the agent
-    const run = await runAgent(thread.id);
-    console.log(`   Started run: ${run.id}`);
-
-    // Wait for completion
-    await waitForRun(thread.id, run.id);
-
-    // Get the response
-    const messages = await getMessages(thread.id);
-
-    // Find the assistant's response (first message with role 'assistant')
-    const assistantMessage = messages.data.find(m => m.role === 'assistant');
-
-    if (!assistantMessage) {
-        throw new Error('No response from agent');
-    }
-
-    // Extract text content
-    let javaCode = '';
-    for (const content of assistantMessage.content) {
-        if (content.type === 'text') {
-            javaCode += content.text.value;
-        }
-    }
-
-    // Clean up markdown code blocks if present
-    javaCode = javaCode.replace(/^```java\n?/i, '').replace(/\n?```$/i, '');
-    javaCode = javaCode.replace(/^```\n?/, '').replace(/\n?```$/, '');
-
-    return javaCode.trim();
-}
-
-/**
  * Auto-fix common Java compilation issues
  */
 function autoFixJavaCode(javaCode) {
+    // A/B test switch: when DISABLE_AUTOFIX=1, act as a no-op so we can
+    // measure the empirical effect of the regex patches on compile/run
+    // outcomes against the same AI output.
+    if (process.env.DISABLE_AUTOFIX === '1') return javaCode;
     let fixedCode = javaCode;
 
     // Fix 1: Ensure BigDecimal import if used
@@ -332,6 +185,257 @@ function autoFixJavaCode(javaCode) {
         if (!fixedCode.includes('import java.math.RoundingMode')) {
             fixedCode = fixedCode.replace('import java.math.BigDecimal;',
                 'import java.math.BigDecimal;\nimport java.math.RoundingMode;');
+        }
+    }
+
+    // Fix 2b: Auto-add `throws Exception` to methods that use try-with-resources
+    // for I/O (BufferedReader/FileReader/FileWriter). Without it, the implicit
+    // close() on the resource throws IOException and javac fails with
+    // "unreported exception IOException; must be caught or declared".
+    // Safe wide-net: any method signature that matches + contains a File I/O
+    // resource gets `throws Exception` added (or extended) — javac requires
+    // it and the caller is main()'s try/catch, which already catches Exception.
+    {
+        const methodRe = /((public|private|protected|static|\s)+[\w<>\[\]]+\s+\w+\s*\([^)]*\))(\s*(throws\s+[\w,\s]+)?\s*)(\{)/g;
+        fixedCode = fixedCode.replace(methodRe, (match, sig, _t, between, existingThrows, brace, offset, whole) => {
+            // Peek into the method body to see if it needs an IOException declaration.
+            // We match starting from the opening brace and walk forward until the
+            // matching closing brace — cheap shortcut: look ~2000 chars ahead.
+            const bodySlice = whole.substr(offset + match.length, 2000);
+            const needsIO =
+                /\btry\s*\(\s*(?:java\.io\.)?(?:Buffered\w+|File(?:Reader|Writer|Input|Output)\w*|PrintWriter|DataInput\w*|DataOutput\w*)\b/.test(bodySlice) ||
+                /\b\w+\.readLine\s*\(/.test(bodySlice) ||
+                /\bnew\s+Buffered(?:Reader|Writer)\s*\(/.test(bodySlice);
+            if (!needsIO) return match;
+            if (existingThrows) {
+                if (/Exception|IOException/.test(existingThrows)) return match;
+                // existing throws clause for other exceptions; append IOException
+                const updated = existingThrows.replace(/throws\s+/, 'throws java.io.IOException, ');
+                return sig + between.replace(existingThrows, updated) + brace;
+            }
+            // Insert `throws java.io.IOException` before the opening brace
+            return sig + ' throws java.io.IOException ' + brace;
+        });
+    }
+
+    // Fix 2c: Strip ILLEGAL `throws` clauses. Observed on the COBOL Programming
+    // Course repo: AI emits `for (...) throws IOException {`, `while (...) throws {`,
+    // `if (...) throws {`, `switch (...) throws {`, `else throws {`, `do throws {`.
+    // `throws` is valid ONLY on method signatures — in any other position it's a
+    // compile error. Both the initial convert AND the repair agent replicated
+    // this mistake, so deterministic stripping here is the only reliable fix.
+    // We preserve the control-flow statement and drop the `throws <Type>` part.
+    {
+        const illegalThrowsRe = /\b(for|while|if|else\s+if|switch|do)\b([^{\n]*?)\s+throws\s+[\w.,\s]+(?=\s*\{)/g;
+        fixedCode = fixedCode.replace(illegalThrowsRe, '$1$2');
+        // The standalone `else throws { ... }` and `do throws { ... }` variants
+        // don't carry parens, so they need a narrower pattern.
+        fixedCode = fixedCode.replace(/\b(else|do)\s+throws\s+[\w.,\s]+(?=\s*\{)/g, '$1');
+    }
+
+    // Fix 2d: Strip `throws IOException` from pure string/arithmetic helper
+    // methods that don't actually do I/O. Observed on the COBOL Programming
+    // Course repo: AI adds `throws IOException` to `static String repeatChar(…)`
+    // or `static String padRight(…)`, which then breaks callsites like
+    // `static final String FIELD = repeatChar(' ', 60);` with
+    // "unreported exception IOException; must be caught or declared". We scope
+    // the body-peek to THIS method's braces only (walking the brace balance
+    // from the opening `{` forward) so I/O in unrelated neighbor methods
+    // doesn't contaminate the decision.
+    {
+        // Conservative I/O-signal test — keep throws when the body shows ANY
+        // sign of real I/O. Too-broad stripping cascades into "IOException is
+        // never thrown in body of corresponding try statement" errors in
+        // callers (A/B-tested on COBOL Programming Course repo — the broad
+        // variant rescued 1 file but regressed 1 other). The narrow whitelist
+        // below is empirically zero-regression.
+        const ioSignals = /\b(?:Buffered(?:Reader|Writer)|FileReader|FileWriter|FileInputStream|FileOutputStream|PrintWriter|DataInputStream|DataOutputStream|RandomAccessFile|InputStream|OutputStream)\b|\bIOException\b|\.(?:readLine|newLine|flush|write|writeBytes|writeChars)\s*\(|Files\.(?:read|write|lines|newBufferedReader|newBufferedWriter|delete|copy|move|exists|createFile|createDirectory)|Paths\.get|\bthrow\s+new\s+/;
+        const findBodyEnd = (code, openBraceIdx) => {
+            let depth = 1;
+            for (let i = openBraceIdx + 1; i < code.length; i++) {
+                const ch = code[i];
+                if (ch === '{') depth++;
+                else if (ch === '}') {
+                    depth--;
+                    if (depth === 0) return i;
+                }
+            }
+            return -1;
+        };
+        // Helper-name whitelist. Expanded when real repos surface new helper
+        // names with the same AI mis-annotation pattern (e.g.
+        // `fixedLengthSpaces` caught on CBL0004). If this list grows past
+        // ~20 tokens, reconsider (B)-approach instead.
+        const helperNameRe = /(?:repeat\w*|pad(?:Right|Left|Spaces)?(?:Static)?|format(?:Money|Number|Date|Amount)?\w*|to(?:Ascii|String|Upper|Lower|Padded)?|trunc\w*|fill\w*|spaces\w*|stringOf\w*|leftJustify|rightJustify|center\w*|blank\w*|normalize\w*|fixedLength\w*|fixedWidth\w*|rightPad\w*|leftPad\w*|align\w*|zeroFill\w*|zeroPad\w*)/.source;
+        // Visibility modifier is OPTIONAL — helpers inside nested static
+        // classes are often package-private (`static String fooBar(...)`
+        // with no modifier). Safe to drop because the helper-name whitelist
+        // already constrains the match to known pure-string utilities, so
+        // a control-flow keyword like `while` can't false-match here.
+        const methodRe = new RegExp(
+            `(^|\\n)([ \\t]*(?:(?:public|private|protected|static|final|synchronized)\\s+)*[\\w<>\\[\\]]+\\s+${helperNameRe}\\s*\\([^)]*\\))\\s*throws\\s+(?:java\\.io\\.)?IOException\\s*(\\{)`,
+            'g'
+        );
+        let m;
+        const replacements = [];
+        while ((m = methodRe.exec(fixedCode)) !== null) {
+            const fullMatch = m[0];
+            const prefix = m[1];
+            const sig = m[2];
+            const openBraceAbs = m.index + fullMatch.length - 1; // absolute index of `{`
+            const closeIdx = findBodyEnd(fixedCode, openBraceAbs);
+            if (closeIdx === -1) continue; // malformed, leave alone
+            const body = fixedCode.slice(openBraceAbs + 1, closeIdx);
+            if (ioSignals.test(body)) continue; // method actually does I/O, keep throws
+            // Record the replacement: keep prefix + sig + `{`, drop the throws clause.
+            replacements.push({ start: m.index, end: m.index + fullMatch.length, text: prefix + sig + ' {' });
+        }
+        // Apply replacements right-to-left so earlier indices stay valid.
+        for (let i = replacements.length - 1; i >= 0; i--) {
+            const r = replacements[i];
+            fixedCode = fixedCode.slice(0, r.start) + r.text + fixedCode.slice(r.end);
+        }
+    }
+
+    // Fix 2e: Propagate `throws` declarations from callees to callers.
+    // Observed on CBL0002.cobol: `void writeRecord() { pr.print(writer); }`
+    // where `void print(...) throws IOException`. javac rejects with
+    // "unreported exception IOException". AI repair missed it. Deterministic
+    // fix: find every method that declares `throws <Type>`, collect their
+    // names, then scan every OTHER method body for calls to those names.
+    // For each caller that doesn't already declare the exception, add it.
+    {
+        // Strict return-type whitelist — either a known primitive keyword
+        // (void/int/…), or a class-name starting with uppercase (possibly
+        // generic / array), or a fully-qualified java.* type. Critically
+        // EXCLUDES lowercase control-flow keywords like `while`/`for`/`if`,
+        // which an over-permissive `[\w<>\[\]]+` pattern would otherwise
+        // accidentally match as a return type.
+        const RETURN_TYPE = '(?:void|boolean|byte|short|int|long|float|double|char|(?:[A-Z]\\w*(?:<[^>]+>)?(?:\\s*\\[\\s*\\])*)|(?:java\\.[\\w.]+(?:<[^>]+>)?))';
+
+        // Step 1: build callee → exception-type map.
+        const calleeThrows = {}; // methodName → "java.io.IOException"
+        const declRe = new RegExp(
+            `(^|\\n)[ \\t]*(?:(?:public|private|protected|static|final|synchronized)\\s+)*${RETURN_TYPE}\\s+(\\w+)\\s*\\([^)]*\\)\\s+throws\\s+([\\w.,\\s]+?)\\s*\\{`,
+            'g'
+        );
+        let dm;
+        while ((dm = declRe.exec(fixedCode)) !== null) {
+            const name = dm[2];
+            const thrown = dm[3].trim();
+            // Only propagate checked IO-ish exceptions. Others (NumberFormat,
+            // Unsupported, etc.) are either RuntimeException or already
+            // declared explicitly; not worth guessing.
+            if (/\bIOException\b/.test(thrown) && !calleeThrows[name]) {
+                calleeThrows[name] = 'java.io.IOException';
+            }
+        }
+        const calleeNames = Object.keys(calleeThrows);
+        if (calleeNames.length > 0) {
+            // Step 2: rewrite method signatures whose body calls any throwing
+            // callee and whose signature doesn't already declare a compatible
+            // throws. Walk the file top-down with brace-balance so we can
+            // attribute each call to its enclosing method reliably.
+            const findBodyEnd = (code, openBraceIdx) => {
+                let depth = 1;
+                for (let i = openBraceIdx + 1; i < code.length; i++) {
+                    const ch = code[i];
+                    if (ch === '{') depth++;
+                    else if (ch === '}') {
+                        depth--;
+                        if (depth === 0) return i;
+                    }
+                }
+                return -1;
+            };
+            // Match method signatures with optional existing throws clause.
+            // Uses the same strict RETURN_TYPE whitelist as declRe above.
+            const methodRe = new RegExp(
+                `(^|\\n)([ \\t]*(?:(?:public|private|protected|static|final|synchronized)\\s+)*${RETURN_TYPE}\\s+(\\w+)\\s*\\([^)]*\\))(\\s*throws\\s+[\\w.,\\s]+)?\\s*(\\{)`,
+                'g'
+            );
+            const edits = []; // collect { start, end, text } then apply R→L
+            let mm;
+            while ((mm = methodRe.exec(fixedCode)) !== null) {
+                const preamble = mm[1];
+                const sig = mm[2];
+                const methodName = mm[3];
+                const existingThrows = mm[4] || '';
+                const openBraceAbs = mm.index + mm[0].length - 1;
+                const closeIdx = findBodyEnd(fixedCode, openBraceAbs);
+                if (closeIdx === -1) continue;
+                const body = fixedCode.slice(openBraceAbs + 1, closeIdx);
+
+                // Does this body call any throwing callee (by name)?
+                let neededException = null;
+                for (const callee of calleeNames) {
+                    if (callee === methodName) continue; // skip self-recursion
+                    // Match "(identifier|this).callee(" or bare "callee(".
+                    const callRe = new RegExp(`(?:\\b|\\.)${callee}\\s*\\(`);
+                    if (callRe.test(body)) {
+                        neededException = calleeThrows[callee];
+                        break;
+                    }
+                }
+                if (!neededException) continue;
+
+                // Already declares something compatible? (Exception, IOException,
+                // or java.io.IOException — all cover IOException callees.)
+                if (/\bthrows\b[^{]*\b(?:Exception|IOException)\b/.test(existingThrows)) continue;
+
+                const newSig = existingThrows
+                    ? sig + existingThrows.replace(/throws\s+/, 'throws ' + neededException + ', ') + ' '
+                    : sig + ' throws ' + neededException + ' ';
+                const fullMatchStart = mm.index;
+                const fullMatchEnd = mm.index + mm[0].length;
+                edits.push({
+                    start: fullMatchStart,
+                    end:   fullMatchEnd,
+                    text:  preamble + newSig + '{'
+                });
+            }
+            // Apply right-to-left so earlier indices remain valid.
+            for (let i = edits.length - 1; i >= 0; i--) {
+                const e = edits[i];
+                fixedCode = fixedCode.slice(0, e.start) + e.text + fixedCode.slice(e.end);
+            }
+        }
+    }
+
+    // Fix 2f: Strip `final` from `static final` fields that are reassigned.
+    // Observed on CBL0010: AI declares `static final String HEADER = "";` then
+    // assigns it in a `static { try { HEADER = "…"; ... } }` block. Java rejects
+    // "cannot assign a value to static final variable". The minimal safe fix:
+    // drop `final` on fields whose name appears on the left-hand side of an
+    // assignment `NAME =` anywhere outside the declaration itself.
+    {
+        const fieldRe = /((?:public|private|protected|static|\s)+)final\s+((?:[\w<>\[\]]+\s+)+)(\w+)\s*(=|;)/g;
+        const edits = [];
+        let fm;
+        while ((fm = fieldRe.exec(fixedCode)) !== null) {
+            const fullMatch = fm[0];
+            const index = fm.index;
+            const name = fm[3];
+            // Look for `<name> =` anywhere that is NOT the declaration itself
+            // (not inside this match) and NOT part of `==` / `!=` / `<=` / `>=`.
+            const assignRe = new RegExp(`(^|[^=!<>])\\b${name}\\s*=(?!=)`, 'gm');
+            let match, reassigned = false;
+            while ((match = assignRe.exec(fixedCode)) !== null) {
+                if (match.index >= index && match.index < index + fullMatch.length) continue; // declaration
+                reassigned = true;
+                break;
+            }
+            if (!reassigned) continue;
+            edits.push({
+                start: index,
+                end:   index + fullMatch.length,
+                text:  fullMatch.replace(/\bfinal\s+/, '')
+            });
+        }
+        // Apply right-to-left so earlier indices stay valid.
+        for (let i = edits.length - 1; i >= 0; i--) {
+            const e = edits[i];
+            fixedCode = fixedCode.slice(0, e.start) + e.text + fixedCode.slice(e.end);
         }
     }
 
@@ -601,7 +705,66 @@ function autoFixJavaCode(javaCode) {
  * For AI Foundry: Uses Chat Completions (API key works)
  * For Azure OpenAI with Agent: Uses Agent API
  */
-async function convertCobolToJava(cobolSource, retryCount = 0) {
+/**
+ * @param {string} cobolSource
+ * @param {number} [retryCount=0]
+ * @param {object} [context] optional conversion context
+ * @param {string[]} [context.calledPrograms] names the COBOL source CALLs
+ * @param {string[]} [context.copybooks]      names the COBOL source COPYs
+ * @param {Record<string,string>} [context.programIdToJavaClass] PROGRAM-ID → Java class name
+ *        for siblings already/about-to-be converted in the same run. Lets the AI
+ *        emit a real Java call instead of a "simulated" stub.
+ * @param {Record<string,string>} [context.copybookBodies] PROGRAM-ID → copybook source text
+ *        (actual .cpy contents). Inlined verbatim so the AI sees the real field
+ *        definitions instead of guessing what "COPY FOO" defines.
+ * @param {Record<string,string>} [context.siblingSignatures] PROGRAM-ID → public-method
+ *        signature line (e.g. "public void run(String custId, BigDecimal amount)") of
+ *        the already-converted sibling class. Lets the AI emit correct parameter
+ *        lists on `new Foo().run(...)` instead of guessing.
+ * @param {Array<{jclFile:string, stepName:string, dds:Array<{name:string,dsn:string?,disp:string?,sysout:boolean}>}>} [context.jclInvocations]
+ *        JCL steps that invoke this program. Lets the AI generate Java file
+ *        paths that use real DD names ("ACCTREC") instead of guessing what
+ *        SELECT…ASSIGN maps to at runtime.
+ */
+/**
+ * Detect whether the AI's Java response was truncated (ran out of output tokens
+ * mid-class). Uses two signals:
+ *   1. Azure/OpenAI's own `finish_reason === 'length'` — authoritative when present.
+ *   2. Heuristic brace balance — `{` count vs `}` count, and whether the last
+ *      non-whitespace char is `}`. Catches cases where a provider doesn't set
+ *      finish_reason but the output is clearly cut off.
+ * Comments and strings can throw off a naïve brace count, but for the purpose of
+ * "is the file obviously incomplete" this is accurate enough in practice.
+ */
+function detectTruncation(javaCode, finishReason) {
+    if (finishReason === 'length') return true;
+    if (!javaCode || javaCode.length < 50) return false;
+
+    // Strip line comments and /* ... */ blocks and string literals so counts
+    // aren't thrown off by literal braces in text.
+    const stripped = javaCode
+        .replace(/\/\/[^\n]*/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/"(?:\\.|[^"\\])*"/g, '""')
+        .replace(/'(?:\\.|[^'\\])*'/g, "''");
+
+    let open = 0, close = 0;
+    for (const ch of stripped) {
+        if (ch === '{') open++;
+        else if (ch === '}') close++;
+    }
+    if (open !== close) return true;
+
+    const trimmed = javaCode.trimEnd();
+    const lastChar = trimmed[trimmed.length - 1];
+    // A valid Java source file ends in `}` (closing the outermost class).
+    // Anything else is almost certainly truncated.
+    if (lastChar !== '}') return true;
+
+    return false;
+}
+
+async function convertCobolToJava(cobolSource, retryCount = 0, context = {}) {
     if (!azureConfig) {
         return {
             success: false,
@@ -615,15 +778,11 @@ async function convertCobolToJava(cobolSource, retryCount = 0) {
         let javaCode;
         let capturedUsage = null;
 
-        // For AI Foundry, always use Chat Completions (Agent API needs Entra ID)
-        // For Azure OpenAI with Agent ID, can try Agent API
-        const useAgentAPI = azureConfig.agentId && !azureConfig.isAIFoundry;
-
-        if (useAgentAPI) {
-            console.log('   Using Azure OpenAI Agent API...');
-            javaCode = await convertWithAgent(cobolSource);
-        } else {
-            // Use Chat Completions (works with API key for both platforms)
+        // Single path: Chat Completions. The Assistants/Agent API branch that
+        // lived here was removed — it had no retry/truncation detection, no
+        // conversion context, and duplicated prompt rules that leaked out of
+        // sync. Chat Completions works identically for Azure OpenAI + Foundry.
+        {
             console.log('   Using Azure AI Chat Completions...');
 
             // Use different prompts for retries to improve success chance
@@ -631,40 +790,63 @@ async function convertCobolToJava(cobolSource, retryCount = 0) {
                 // Primary prompt - detailed instructions for HIGH QUALITY conversion
                 `You are an expert COBOL to Java modernization agent. Generate PRODUCTION-QUALITY, COMPILABLE, RUNNABLE Java 8+ code.
 
-CRITICAL: ALWAYS PRODUCE MEANINGFUL OUTPUT
-The converted Java programs MUST produce meaningful console output demonstrating the program's logic even when input files don't exist. Use this pattern:
+CRITICAL: FAITHFUL CONVERSION — DO NOT FABRICATE INPUT DATA
+The converted Java must faithfully reproduce what the ORIGINAL COBOL does.
+Do NOT invent fallback behavior the COBOL doesn't have:
+- If the COBOL opens a file and fails when it's missing, Java must ALSO fail
+  when the file is missing (throw the exception, exit non-zero).
+- Do NOT add "if file not found, use sample data" fallbacks — that hides real
+  errors and produces output that looks successful but isn't comparable to
+  the COBOL run.
+- Do NOT embed hardcoded sample records. If the input is not available, the
+  Java run should surface that the same way the COBOL does.
+- The only acceptable "demo-friendly" behavior is printing a clear error
+  message BEFORE exiting non-zero — never silently substituting data.
 
-1. TRY to open real files first
-2. If file not found, print a message and USE EMBEDDED SAMPLE DATA
-3. Process the sample data the same way real data would be processed
-4. ALWAYS print results showing what the program does
-
-Example file handling pattern:
+Example CORRECT file handling:
 \`\`\`java
-BufferedReader reader = null;
 List<String> data = new ArrayList<>();
-try {
-    reader = new BufferedReader(new FileReader("DATAFILE.txt"));
+try (BufferedReader reader = new BufferedReader(new FileReader("ACCTREC"))) {
     String line;
     while ((line = reader.readLine()) != null) {
         data.add(line);
     }
 } catch (FileNotFoundException e) {
-    System.out.println("Input file not found, using sample data for demonstration...");
-    // Use embedded sample data
-    data.add("1001,John Doe,ACTIVE,5000.00");
-    data.add("1002,Jane Smith,ACTIVE,7500.00");
-    data.add("1003,Bob Johnson,INACTIVE,0.00");
+    System.err.println("File not found: ACCTREC (status = 35)");
+    System.exit(1);          // match COBOL's non-zero exit
 }
-// Then process 'data' the same way...
+// Process 'data' only if we got this far
+\`\`\`
+
+CRITICAL: COBOL ACCEPT FROM SYSIN semantics — DO NOT THROW on invalid input
+COBOL's \`ACCEPT WS-VAR FROM SYSIN\` is LOSSY and FORGIVING, not strict:
+  - Non-numeric text into a PIC 9(N) field → silently stored as zeroes (or garbled
+    bytes). COBOL does NOT throw, does NOT exit, does NOT print "invalid input".
+  - End-of-stream on SYSIN → most runtimes return blanks/zeroes forever;
+    COBOL keeps looping. It does NOT throw NoSuchElementException.
+Therefore Java conversions that use Integer.parseInt / BigDecimal(...) on
+Scanner.nextLine() input MUST wrap the parse in try/catch and default to 0
+on NumberFormatException. They MUST check for null on Scanner.nextLine()
+returns and treat null as an empty string (mimicking COBOL reading blanks).
+They MUST NOT throw, must NOT System.exit on invalid input, must NOT print
+"invalid numeric input" — COBOL prints no such message.
+
+Example CORRECT stdin handling (match COBOL ACCEPT behavior):
+\`\`\`java
+BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
+String rawAmount = stdin.readLine();
+if (rawAmount == null) rawAmount = "";           // EOF — COBOL would see blanks
+int amount = 0;
+try { amount = Integer.parseInt(rawAmount.trim()); }
+catch (NumberFormatException e) { amount = 0; }  // COBOL would see zeroes
 \`\`\`
 
 QUALITY REQUIREMENTS:
 1. Use REAL file I/O with BufferedReader/BufferedWriter for COBOL FILE operations
-2. FALLBACK to embedded sample data when files don't exist
+2. On missing files: print an error and exit non-zero — do NOT fabricate data
 3. Use ArrayList<> for OCCURS DEPENDING ON / variable arrays
 4. Implement proper exception handling with specific exception types
-5. ALWAYS print processing results and summaries
+5. ALWAYS print processing results and summaries based on REAL inputs
 
 CICS/IMS PROGRAMS (if present):
 - Convert EXEC CICS commands to method calls that demonstrate the logic flow
@@ -695,9 +877,10 @@ STRUCTURE:
 CRITICAL - PRODUCE OUTPUT:
 - ALWAYS print "=== Program Started ===" at beginning
 - Print processing steps as they happen
-- Print summaries (records read, processed, written)
+- Print summaries (records read, processed, written) — based on REAL input only
 - ALWAYS print "=== Program Completed ===" at end
-- If using sample data, make that clear in output
+- NEVER substitute sample/placeholder records for missing input files. If the
+  input file is absent, print an error and exit non-zero (same as COBOL status 35).
 
 BANNED:
 - Scanner (hardcode test inputs instead)
@@ -706,6 +889,47 @@ BANNED:
 - Incomplete code or truncated output
 - Unterminated strings or unclosed braces
 - package statements (no package declaration)
+- Inventing behavior NOT present in the COBOL source (do not add HTTP handling,
+  JSON parsing, auth flows, REST calls, etc. unless the COBOL explicitly does it)
+- Calling methods that are not defined in the same class (do NOT call
+  closeCursor(), executeSQL(), openFile() etc. unless you ALSO define them)
+
+COMPILE-SAFE RULES (CRITICAL — the code MUST compile with plain javac):
+1. Every method that uses File I/O (BufferedReader, FileReader, FileWriter,
+   readLine, etc.) MUST wrap the I/O in a try-catch that catches IOException
+   explicitly — OR declare \`throws IOException\` on the method signature.
+   If you use try-with-resources \`try (BufferedReader br = ...)\`, the
+   enclosing method MUST still catch IOException — the implicit close() call
+   throws it. main() should catch ALL Exceptions at the outer level.
+2. \`throws\` is ONLY valid on a method signature. NEVER write \`for (...) throws\`,
+   \`while (...) throws\`, \`if (...) throws\`, \`switch (...) throws\`,
+   \`else throws\`, or \`do throws\` — those are COMPILE ERRORS. If a loop or
+   conditional body calls something that throws a checked exception, either:
+     (a) add \`throws IOException\` (or the relevant type) to the ENCLOSING
+         METHOD signature, or
+     (b) wrap the loop/conditional body in \`try { ... } catch (...) { ... }\`.
+3. Generic collections must be type-consistent. If you declare
+   \`List<AcctRec> sampleData\`, every \`.add(...)\` call must pass an
+   AcctRec — not raw strings. Build a helper that returns AcctRec (not
+   String) before calling \`.add()\`.
+4. Every method you CALL must be DEFINED in the same class (or be a
+   standard Java library method). Do not reference helper methods like
+   \`closeCursor()\`, \`openDb()\`, \`fetchRow()\` unless you also define them.
+5. When emulating SQL cursors: define concrete methods like
+   \`int closeCursor(String name) { ... return 0; }\` before using them.
+6. Every \`try-with-resources\` block must close cleanly: the enclosing
+   method signature declares \`throws IOException\` OR the block is wrapped
+   in an outer \`try { ... } catch (IOException e) { ... }\`.
+
+CALL RESOLUTION (CRITICAL):
+- If a sibling Java class is listed in CONTEXT below for a COBOL PROGRAM-ID,
+  generate a REAL Java call like \`new ClassName().run(...)\` — NOT a simulation
+  with print-only fake data. The sibling class exists.
+- If no sibling class is listed for a CALL target, emit a // TODO comment
+  explaining the call is to an external program, then fall through. Do NOT
+  invent data for it.
+- Do NOT write \`// Since original program CALLs an external program...\` and
+  fabricate behavior. Either call the real converted class or TODO.
 
 IMPORTS TO ALWAYS INCLUDE:
 - import java.io.*;
@@ -717,6 +941,12 @@ Output ONLY the complete Java code, no explanations.`,
 
                 // Retry prompt 1 - simpler, focus on working code
                 `You are a COBOL to Java converter. Generate WORKING, COMPILABLE Java code.
+
+FIDELITY RULE (non-negotiable):
+Do NOT fabricate input data. If the COBOL opens a file and fails when it's
+missing, the Java MUST also fail when the file is missing — print a clear
+error (e.g. "File not found: ACCTREC (status = 35)") and call System.exit(1).
+Never substitute hardcoded sample records for a missing input file.
 
 CRITICAL RULES:
 1. ONE public class only with main() method
@@ -739,17 +969,93 @@ MUST:
 - No final keyword
 - System.out.println() for output
 - try-catch for all operations
-- Complete, balanced braces`
+- Complete, balanced braces
+- On missing input file: print error + System.exit(1). Do NOT fabricate sample records.`
             ];
 
             const systemPrompt = systemPrompts[Math.min(retryCount, systemPrompts.length - 1)];
 
+            // Build a context block so the AI knows which CALL targets it can
+            // resolve to real sibling Java classes (vs simulating them), and
+            // can see the actual copybook contents instead of guessing fields.
+            let contextBlock = '';
+            const pidMap   = (context && context.programIdToJavaClass) || {};
+            const sigMap   = (context && context.siblingSignatures) || {};
+            const cpyBodies = (context && context.copybookBodies) || {};
+            const calls    = (context && Array.isArray(context.calledPrograms)) ? context.calledPrograms : [];
+            const copies   = (context && Array.isArray(context.copybooks)) ? context.copybooks : [];
+            const jclInvs  = (context && Array.isArray(context.jclInvocations)) ? context.jclInvocations : [];
+            if (calls.length || Object.keys(pidMap).length || copies.length || jclInvs.length) {
+                contextBlock = '\n\n=== CONTEXT ===\n';
+                if (calls.length) {
+                    contextBlock += 'This COBOL program CALLs:\n';
+                    for (const name of calls) {
+                        const key = name.toUpperCase();
+                        const javaClass = pidMap[key];
+                        if (javaClass) {
+                            contextBlock += `  - '${name}' → Java class \`${javaClass}\` (exists — use \`new ${javaClass}().<entry>(...)\`)\n`;
+                            // If we extracted the sibling's public method signature
+                            // during an earlier conversion wave, surface it so the
+                            // AI matches its argument list instead of guessing.
+                            const sig = sigMap[key];
+                            if (sig) {
+                                contextBlock += `      entry signature: ${sig}\n`;
+                            }
+                        } else {
+                            contextBlock += `  - '${name}' → NOT IN THIS CONVERSION (emit a // TODO, do not simulate)\n`;
+                        }
+                    }
+                }
+                if (copies.length) {
+                    // If we have the copybook content, inline it verbatim — the AI
+                    // needs the real PIC clauses to generate correct Java field
+                    // types. Name-only hints lead to guessed field names that the
+                    // compile-gate then rejects.
+                    const withBodies = copies.filter(n => cpyBodies[n.toUpperCase()]);
+                    const withoutBodies = copies.filter(n => !cpyBodies[n.toUpperCase()]);
+                    if (withBodies.length) {
+                        contextBlock += 'COPY targets — FULL COPYBOOK SOURCE BELOW. Use these field definitions exactly (preserve COBOL names via PascalCase/camelCase):\n';
+                        for (const name of withBodies) {
+                            contextBlock += `  - ${name}\n`;
+                        }
+                    }
+                    if (withoutBodies.length) {
+                        contextBlock += 'COPY targets (source not available — infer from usage):\n';
+                        for (const name of withoutBodies) contextBlock += `  - ${name}\n`;
+                    }
+                    for (const name of withBodies) {
+                        const body = cpyBodies[name.toUpperCase()];
+                        contextBlock += `\n=== COPYBOOK ${name} ===\n${body}\n=== END COPYBOOK ${name} ===\n`;
+                    }
+                }
+                if (jclInvs.length) {
+                    // This program is invoked from at least one JCL. Surface the
+                    // staged DD names + DSNs so the AI emits Java file paths that
+                    // match the mainframe runtime. A COBOL `SELECT ACCT-REC ASSIGN
+                    // TO ACCTREC` should map to a Java path of "ACCTREC" (the DD
+                    // name) — NOT a guessed filename like "accounts.txt".
+                    contextBlock += '\nJCL invocations (use the DD NAME as the file path — this is how mainframe staging works):\n';
+                    for (const inv of jclInvs) {
+                        contextBlock += `  - Step ${inv.stepName} in ${inv.jclFile}:\n`;
+                        for (const dd of inv.dds || []) {
+                            const parts = [`DD ${dd.name}`];
+                            if (dd.dsn)    parts.push(`DSN=${dd.dsn}`);
+                            if (dd.disp)   parts.push(`DISP=${dd.disp}`);
+                            if (dd.sysout) parts.push('SYSOUT');
+                            contextBlock += `      ${parts.join(' ')}\n`;
+                        }
+                    }
+                    contextBlock += '  → For each SELECT/ASSIGN in the COBOL, use the DD NAME as the Java file path (e.g. `new FileReader("ACCTREC")`). Leave the DSN in a brief comment so the reader sees the mainframe origin.\n';
+                }
+                contextBlock += '===============\n';
+            }
+
             const response = await makeOpenAIRequest([
                 { role: 'system', content: systemPrompt },
-                { role: 'user', content: `Convert this COBOL program to production-quality Java:\n\n${cobolSource}` }
+                { role: 'user', content: `Convert this COBOL program to production-quality Java:${contextBlock}\n\n${cobolSource}` }
             ], {
                 temperature: retryCount === 0 ? 0.2 : 0.3, // Slightly higher temp on retry
-                maxTokens: 8000  // Increased to prevent truncated code
+                maxTokens: 16000  // Headroom for large COBOL programs; watch `finish_reason` for truncation
             });
 
             // Check if response is valid
@@ -760,7 +1066,7 @@ MUST:
                 if (retryCount < MAX_RETRIES) {
                     console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                     await new Promise(resolve => setTimeout(resolve, 2000));
-                    return convertCobolToJava(cobolSource, retryCount + 1);
+                    return convertCobolToJava(cobolSource, retryCount + 1, context);
                 }
 
                 return {
@@ -771,11 +1077,34 @@ MUST:
 
             javaCode = response.choices[0].message?.content || '';
             capturedUsage = response.usage || null;
+            const finishReason = response.choices[0].finish_reason || null;
 
             // Clean up markdown code blocks if present
             javaCode = javaCode.replace(/^```java\n?/i, '').replace(/\n?```$/i, '');
             javaCode = javaCode.replace(/^```\n?/, '').replace(/\n?```$/i, '');
             javaCode = javaCode.trim();
+
+            // ─── Truncation detection ────────────────────────────────────
+            // Two signals that the model ran out of output tokens mid-class:
+            //   1. Azure/OpenAI reports finish_reason === 'length'
+            //   2. Heuristic: unbalanced braces, or the file doesn't end with '}'
+            // Either means we should retry; if we've exhausted retries, surface a
+            // specific error so the UI explains "too large for one pass" instead
+            // of showing half-broken Java.
+            const isTruncated = detectTruncation(javaCode, finishReason);
+            if (isTruncated) {
+                console.warn(`   ⚠️  Response appears truncated (finish_reason=${finishReason}, length=${javaCode.length})`);
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`   🔄 Retrying with fresh prompt (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return convertCobolToJava(cobolSource, retryCount + 1, context);
+                }
+                return {
+                    success: false,
+                    error: `AI response truncated (${javaCode.length} chars, finish_reason=${finishReason || 'unknown'}). This COBOL file is likely too large for a single conversion pass — consider splitting it or raising the output token budget.`,
+                    usage: capturedUsage
+                };
+            }
         }
 
         // Validate that we got actual Java code
@@ -786,7 +1115,7 @@ MUST:
             if (retryCount < MAX_RETRIES) {
                 console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                return convertCobolToJava(cobolSource, retryCount + 1);
+                return convertCobolToJava(cobolSource, retryCount + 1, context);
             }
 
             return {
@@ -811,7 +1140,7 @@ MUST:
             if (retryCount < MAX_RETRIES) {
                 console.log(`   🔄 Retrying conversion (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                return convertCobolToJava(cobolSource, retryCount + 1);
+                return convertCobolToJava(cobolSource, retryCount + 1, context);
             }
 
             return {
@@ -828,7 +1157,7 @@ MUST:
         return {
             success: true,
             javaCode,
-            method: useAgentAPI ? 'agent' : 'chat',
+            method: 'chat',
             platform: azureConfig.isAIFoundry ? 'AI Foundry' : 'Azure OpenAI',
             usage: capturedUsage
         };
@@ -839,7 +1168,7 @@ MUST:
         if (retryCount < MAX_RETRIES && (error.message.includes('fetch failed') || error.message.includes('timeout'))) {
             console.log(`   🔄 Retrying after error (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
             await new Promise(resolve => setTimeout(resolve, 3000));
-            return convertCobolToJava(cobolSource, retryCount + 1);
+            return convertCobolToJava(cobolSource, retryCount + 1, context);
         }
 
         return {
@@ -902,10 +1231,10 @@ Your output: Total: 250`;
         // Build user prompt with both COBOL and Java code
         let userPrompt = `Analyze and execute these programs to determine the exact console output:\n\n`;
 
-        userPrompt += `=== ORIGINAL COBOL PROGRAM ===\n${cobolSource.substring(0, 3500)}\n\n`;
+        userPrompt += `=== ORIGINAL COBOL PROGRAM ===\n${cobolSource}\n\n`;
 
         if (javaCode && javaCode.length > 50) {
-            userPrompt += `=== CONVERTED JAVA PROGRAM ===\n${javaCode.substring(0, 3500)}\n\n`;
+            userPrompt += `=== CONVERTED JAVA PROGRAM ===\n${javaCode}\n\n`;
         }
 
         userPrompt += `Cross-reference both programs and provide the EXACT execution output. Execute the code step by step, calculating all values, then show only what would be printed.`;
@@ -965,8 +1294,18 @@ Your output: Total: 250`;
 
 /**
  * Analyze failed conversion using Azure AI
+ * @param {string} cobolSource
+ * @param {string} errorLog
+ * @param {string} errorType
+ * @param {object} [context] optional repo-level context so the analyst can
+ *        reference real sibling files, copybook bodies, JCL — instead of
+ *        giving generic advice based only on the source shown.
+ * @param {string[]} [context.calledPrograms]
+ * @param {string[]} [context.copybooks]
+ * @param {Record<string,string>} [context.programIdToJavaClass]
+ * @param {Record<string,string>} [context.copybookBodies] name → .cpy source
  */
-async function analyzeConversionFailure(cobolSource, errorLog, errorType) {
+async function analyzeConversionFailure(cobolSource, errorLog, errorType, context = {}) {
     if (!azureConfig) {
         return {
             success: false,
@@ -974,41 +1313,56 @@ async function analyzeConversionFailure(cobolSource, errorLog, errorType) {
         };
     }
 
-    try {
-        let analysis;
-
-        if (azureConfig.agentId && azureConfig.isAIFoundry) {
-            // Use agent for analysis
-            const thread = await createThread();
-            const prompt = `Analyze this COBOL conversion failure and suggest fixes:
-
-**Error Type:** ${errorType}
-**Error Log:** ${errorLog || 'No error log'}
-**COBOL Source:**
-${cobolSource.substring(0, 6000)}
-
-Provide: 1) Root cause 2) Suggested fixes 3) Modified code if applicable`;
-
-            await addMessage(thread.id, prompt);
-            const run = await runAgent(thread.id);
-            await waitForRun(thread.id, run.id);
-
-            const messages = await getMessages(thread.id);
-            const assistantMessage = messages.data.find(m => m.role === 'assistant');
-
-            if (assistantMessage) {
-                analysis = assistantMessage.content.map(c => c.type === 'text' ? c.text.value : '').join('');
+    // Build an optional context block. Without this, "COPY MISSING-BOOK"
+    // failures get generic "add the copybook" advice — with it, the analyst
+    // can say "the copybook is named FOO and exists at path X" or "it really
+    // is missing from the repo, here are the copybooks that DO exist".
+    let contextBlock = '';
+    const calls = Array.isArray(context.calledPrograms) ? context.calledPrograms : [];
+    const copies = Array.isArray(context.copybooks) ? context.copybooks : [];
+    const pidMap = context.programIdToJavaClass || {};
+    const cpyBodies = context.copybookBodies || {};
+    if (calls.length || copies.length || Object.keys(pidMap).length) {
+        contextBlock = '\n\n=== REPO CONTEXT ===\n';
+        if (calls.length) {
+            contextBlock += 'This COBOL program CALLs:\n';
+            for (const name of calls) {
+                const key = name.toUpperCase();
+                const javaClass = pidMap[key];
+                contextBlock += javaClass
+                    ? `  - '${name}' → Java class ${javaClass} exists in this conversion\n`
+                    : `  - '${name}' → NOT in this conversion (external module)\n`;
             }
-        } else {
-            // Use chat completions
-            const response = await makeOpenAIRequest([
-                { role: 'system', content: 'You are an expert COBOL to Java migration specialist. Analyze conversion failures and provide actionable solutions.' },
-                { role: 'user', content: `Analyze this failure:\nError Type: ${errorType}\nError: ${errorLog}\nCOBOL: ${cobolSource.substring(0, 6000)}` }
-            ], { temperature: 0.3, maxTokens: 2000 });
-
-            analysis = response.choices[0].message.content;
         }
+        if (copies.length) {
+            contextBlock += 'COPY targets referenced:\n';
+            for (const name of copies) {
+                const key = name.toUpperCase();
+                contextBlock += cpyBodies[key]
+                    ? `  - ${name} (source available; see below)\n`
+                    : `  - ${name} (source NOT in repo — likely cause of a COPY failure)\n`;
+            }
+            for (const name of copies) {
+                const body = cpyBodies[name.toUpperCase()];
+                if (body) {
+                    contextBlock += `\n=== COPYBOOK ${name} ===\n${body}\n=== END COPYBOOK ${name} ===\n`;
+                }
+            }
+        }
+        contextBlock += '===============\n';
+    }
 
+    try {
+        // Single path: Chat Completions. The Assistants/Agent branch that
+        // lived here never received context improvements and duplicated
+        // behavior that drifts from the chat path; removed with the rest
+        // of the Agent API cleanup.
+        const response = await makeOpenAIRequest([
+            { role: 'system', content: 'You are an expert COBOL to Java migration specialist. Analyze conversion failures and provide actionable solutions. If REPO CONTEXT is provided, reference specific files / copybooks by name — don\'t give generic advice when the repo state is known.' },
+            { role: 'user', content: `Analyze this failure:\nError Type: ${errorType}\nError: ${errorLog}\nCOBOL: ${cobolSource}${contextBlock}` }
+        ], { temperature: 0.3, maxTokens: 2000 });
+
+        const analysis = response.choices[0].message.content;
         return {
             success: true,
             analysis
@@ -1440,6 +1794,26 @@ function analyzeConversionAccuracy(cobolSource, javaCode) {
                 }
             }
 
+            // 6b. Fabricated sample-data fallback for missing input files.
+            // Banned pattern: COBOL would fail with file-not-found but Java silently
+            // substitutes hardcoded records. Detect the literal prompt-leakage
+            // phrases emitted by prior conversions.
+            const fabricatedFallbackPhrases = [
+                'using sample data for demonstration',
+                'input file not found, using sample',
+                'not found, using sample data',
+                'using sample acct-rec record',
+                'using sample record',
+                'sample data for demo'
+            ];
+            for (const phrase of fabricatedFallbackPhrases) {
+                if (javaLower.includes(phrase)) {
+                    semanticScore -= 6;
+                    penalties.push('Fabricated input fallback');
+                    break;
+                }
+            }
+
             // 7. CICS commands (EXEC CICS SEND, RECEIVE, RETURN, XCTL, LINK, SYNCPOINT)
             const hasCICS = cobolLower.includes('exec cics');
             if (hasCICS) {
@@ -1577,9 +1951,268 @@ function getConfig() {
         endpoint: azureConfig.endpoint,
         deployment: azureConfig.deploymentName,
         apiVersion: azureConfig.apiVersion,
-        hasAgentId: !!azureConfig.agentId,
         isAIFoundry: azureConfig.isAIFoundry
     };
+}
+
+/**
+ * Ask the AI to compare the runtime output of the original COBOL vs the
+ * generated Java and render a human-readable verdict. Used by the "Run and
+ * compare" panel to replace brittle regex heuristics with a semantic check.
+ *
+ * @param {object} p
+ * @param {string} p.cobolOutput - captured stdout/stderr from the COBOL run
+ * @param {string} p.javaOutput  - captured stdout/stderr from the Java run
+ * @param {number|null} [p.cobolExit]
+ * @param {number|null} [p.javaExit]
+ * @param {boolean} [p.cobolTimedOut]
+ * @param {boolean} [p.javaTimedOut]
+ * @param {string} [p.fileName]
+ * @param {string} [p.cobolSource] - optional original COBOL source. When provided,
+ *        the comparator can reason about which DISPLAY statement produced which
+ *        line, catching "different numeric result" as expected transformation
+ *        vs real divergence.
+ * @param {string} [p.javaCode] - optional generated Java source. Same rationale
+ *        as cobolSource — lets the comparator verify the Java actually implements
+ *        what the COBOL intended, not just that both produced similar strings.
+ * @returns {Promise<{verdict:'match'|'partial'|'diverge', severity:'ok'|'info'|'warning'|'error', title:string, reasons:string[]}>}
+ */
+async function compareRunOutputs(p) {
+    if (!azureConfig) {
+        return {
+            verdict: 'unknown', severity: 'info',
+            title: 'AI unavailable',
+            reasons: ['Azure AI is not configured — output comparison is skipped.']
+        };
+    }
+
+    // Keep the payload bounded to avoid token bloat; outputs from stuck programs
+    // can be 10MB. Take head+tail so we see both the start AND whether it ended.
+    const snippet = (s) => {
+        if (!s) return '(empty)';
+        if (s.length <= 4000) return s;
+        return s.slice(0, 2000) + `\n…[${s.length - 4000} chars elided]…\n` + s.slice(-2000);
+    };
+
+    const systemPrompt =
+        'You are a mainframe-modernization reviewer. You receive the runtime' +
+        ' output of a COBOL program and the runtime output of the Java conversion' +
+        ' of that same program, run with identical input. Decide whether they' +
+        ' represent EQUIVALENT program behavior or meaningfully DIVERGE.\n\n' +
+        'CRITICAL: distinguish source/toolchain issues from semantic divergence.\n' +
+        'If the COBOL side reports a COMPILE error (text like "compile failed",' +
+        '"error:", "is not defined", "unexpected", "syntax error"), that is a' +
+        ' source-code or toolchain issue — NOT a behavioral divergence between' +
+        ' the two programs. Label it verdict="partial" severity="warning" with' +
+        ' title "COBOL source will not compile" and explain the compile error' +
+        ' briefly. The Java output in that case is not comparable.\n' +
+        'Similarly if Java fails to compile while COBOL runs — source issue, not' +
+        ' divergence.\n\n' +
+        'Be pragmatic about the actual behavior comparison:\n' +
+        '• Different amounts of padded whitespace, minor formatting, or extra' +
+        '  debug lines on one side are NOT divergence if the business outcome' +
+        '  matches.\n' +
+        '• Both programs getting stuck in the same input-waiting loop (truncated' +
+        '  output, killed by timeout) is a *matched* failure mode — NOT divergence.\n' +
+        '• COBOL "file does not exist (status = 35)" paired with Java "using' +
+        '  sample data for demonstration" is DIVERGENT: the Java is fabricating' +
+        '  input the COBOL did not have. Verdict="diverge" severity="error"' +
+        '  with a reason that the Java conversion must be regenerated to fail' +
+        '  on missing input (print error + non-zero exit), not substitute data.\n' +
+        '• COBOL status 35 paired with a Java FileNotFoundException /' +
+        '  non-zero exit on the same file is a MATCHED failure mode — both' +
+        '  programs correctly refused to run without the input. Label "match"' +
+        '  (or "partial" if output formatting differs) with a hint to stage' +
+        '  the data file before re-running.\n' +
+        '• COBOL output "unavailable" + "requires DB2/CICS/IMS preprocessor"' +
+        '  means COBOL could not compile or run in this local environment —' +
+        '  NOT a behavioral difference with Java. If the Java side exits' +
+        '  correctly on missing input (status = 35, FileNotFoundException,' +
+        '  System.exit(1)), that is FAITHFUL behavior matching what COBOL' +
+        '  would do on a real mainframe. Do NOT label this "divergence" and' +
+        '  do NOT call Java "fabricating" — Java is doing exactly what the' +
+        '  fidelity rule requires. Verdict="partial" severity="info" title' +
+        '  "COBOL unrunnable locally — Java behavior acceptable" with a' +
+        '  reason that a DB2/CICS/IMS-capable environment is needed for a' +
+        '  true runtime comparison.\n' +
+        '• Treat as DIVERGENT: different numeric results, different control flow' +
+        '  where BOTH actually ran, one side simulating (mock/sample/stub) while' +
+        '  the other is real business logic, one side loading an external module' +
+        '  that the other does not, or the Java inventing behavior (HTTP, JSON,' +
+        '  auth) absent from the COBOL.\n\n' +
+        'Respond in JSON only. Shape:\n' +
+        '{\n' +
+        '  "verdict":  "match" | "partial" | "diverge",\n' +
+        '  "severity": "ok" | "info" | "warning" | "error",\n' +
+        '  "title":    "<5-10 word summary>",\n' +
+        '  "reasons":  ["<concise reason>", "..."]\n' +
+        '}\n' +
+        'Keep reasons <= 3 and each one actionable.';
+
+    // Source is sent in full when available so the comparator can cite specific
+    // DISPLAY statements / computations. Outputs stay head+tail-snippet because
+    // stuck programs can produce megabytes of repetitive text.
+    const userPrompt =
+        `File: ${p.fileName || 'unknown'}\n` +
+        `COBOL exit code: ${p.cobolExit ?? 'unknown'} (timedOut=${!!p.cobolTimedOut})\n` +
+        `Java  exit code: ${p.javaExit ?? 'unknown'} (timedOut=${!!p.javaTimedOut})\n` +
+        (p.cobolSource ? `\n=== ORIGINAL COBOL SOURCE ===\n${p.cobolSource}\n` : '') +
+        (p.javaCode    ? `\n=== GENERATED JAVA SOURCE ===\n${p.javaCode}\n`    : '') +
+        (p.cobolError ? `\n=== COBOL TOOLCHAIN ERROR (compile/run side) ===\n${snippet(p.cobolError)}\n` : '') +
+        (p.javaError  ? `\n=== JAVA TOOLCHAIN ERROR (compile/run side) ===\n${snippet(p.javaError)}\n`  : '') +
+        `\n=== COBOL OUTPUT ===\n${snippet(p.cobolOutput)}\n\n` +
+        `=== JAVA OUTPUT ===\n${snippet(p.javaOutput)}\n`;
+
+    try {
+        const response = await makeOpenAIRequest(
+            [
+                { role: 'system', content: systemPrompt },
+                { role: 'user',   content: userPrompt }
+            ],
+            { temperature: 0.1, maxTokens: 500 }
+        );
+        let content = response?.choices?.[0]?.message?.content || '';
+        // Strip code fences if present
+        content = content.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+        let parsed;
+        try { parsed = JSON.parse(content); }
+        catch {
+            // Recover: try to find the first {...} block
+            const m = content.match(/\{[\s\S]*\}/);
+            if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+        }
+        if (!parsed || typeof parsed !== 'object') {
+            return {
+                verdict: 'unknown', severity: 'info',
+                title: 'AI response unparseable',
+                reasons: [String(content).slice(0, 300) || 'Empty response']
+            };
+        }
+        // Clamp to known shape / defaults
+        const verdict = ['match', 'partial', 'diverge'].includes(parsed.verdict) ? parsed.verdict : 'unknown';
+        const severity = ['ok', 'info', 'warning', 'error'].includes(parsed.severity)
+            ? parsed.severity
+            : (verdict === 'match' ? 'ok' : verdict === 'partial' ? 'info' : 'warning');
+        return {
+            verdict,
+            severity,
+            title: String(parsed.title || (verdict === 'match' ? 'Outputs match' : verdict === 'partial' ? 'Outputs mostly match' : 'Outputs diverge')).slice(0, 120),
+            reasons: Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 5).map(r => String(r).slice(0, 300)) : []
+        };
+    } catch (err) {
+        return {
+            verdict: 'unknown', severity: 'info',
+            title: 'Comparison unavailable',
+            reasons: [err.message || 'AI call failed']
+        };
+    }
+}
+
+/**
+ * Repair a generated Java file using a separate AI pass. Given:
+ *   - the current Java code (that likely has compile errors or wrong behavior)
+ *   - the original COBOL source
+ *   - compile errors + run output
+ *   - known sibling dependencies (class names the caller can use)
+ * …produce a better Java file that compiles and behaves closer to COBOL.
+ *
+ * Returns { success, javaCode, error, usage }
+ */
+async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, cobolOutput, dependencies }) {
+    if (!azureConfig) {
+        return { success: false, error: 'Azure AI not configured' };
+    }
+    if (!javaCode) {
+        return { success: false, error: 'No Java code to fix' };
+    }
+
+    // Head+tail snippet helper — used ONLY for runtime stdout capture below.
+    // Source code, Java code, and compile errors are sent in FULL so the
+    // repair agent has complete context (mid-file bugs are invisible to a
+    // head-only snippet; a compile error on line 800 with the source sliced
+    // at 4k chars = ~150 lines leaves the repair agent blind).
+    const snippet = (s, limit = 3000) => {
+        if (!s) return '';
+        if (s.length <= limit) return s;
+        return s.slice(0, limit * 2 / 3) + `\n…[${s.length - limit} chars elided]…\n` + s.slice(-limit / 3);
+    };
+
+    const systemPrompt =
+        'You are a Java repair agent specialized in COBOL-to-Java conversions.\n' +
+        'You receive an existing Java file that was produced by another AI agent\n' +
+        'and probably has bugs (compile errors, type mismatches, missing methods,\n' +
+        'invented behavior, or semantic drift from the original COBOL). Return a\n' +
+        'repaired version that:\n' +
+        '1. COMPILES cleanly with plain javac (no external dependencies).\n' +
+        '2. Preserves the business logic expressed in the ORIGINAL COBOL.\n' +
+        '3. Uses the listed sibling classes instead of simulating their calls.\n' +
+        '4. Does NOT invent behavior (HTTP, JSON, REST, auth) absent from COBOL.\n' +
+        '5. `throws` appears ONLY on method signatures. NEVER write `for (...) throws`,\n' +
+        '   `while (...) throws`, `if (...) throws`, `switch (...) throws`, `else throws`,\n' +
+        '   `do throws` — those are compile errors. A checked exception inside a loop\n' +
+        '   either (a) bubbles up via `throws IOException` on the enclosing method, or\n' +
+        '   (b) is caught with try/catch inside that loop/conditional.\n' +
+        '5b. Properly handles IOException — methods that use File I/O must either\n' +
+        '   declare `throws Exception` OR wrap the I/O in try-catch.\n' +
+        '6. Every method called must be DEFINED in the same class or standard\n' +
+        '   Java library.\n' +
+        '7. Generic collections must be type-consistent.\n' +
+        '8. REMOVE FABRICATED INPUT DATA. If the current Java has blocks like\n' +
+        '   "Input file not found, using sample data for demonstration…" or\n' +
+        '   hardcoded account/employee records that substitute for missing\n' +
+        '   files, DELETE that fallback. The repaired Java must fail the same\n' +
+        '   way the COBOL does when input is missing: print a clear error and\n' +
+        '   exit non-zero. No silent sample-data substitution.\n' +
+        '\n' +
+        'Respect the same conventions as the original agent:\n' +
+        '- One public class per file, no package declaration\n' +
+        '- No `final` on instance fields\n' +
+        '- No Scanner; no interactive input — use hardcoded demo values\n' +
+        '- Initialize ALL variables at declaration\n' +
+        '- Include all necessary imports (java.io.*, java.util.*, java.math.*)\n' +
+        '- main() wraps in try-catch with Exception handling\n' +
+        '- Print "=== Program Started ===" / "=== Program Completed ===" banners\n' +
+        '\n' +
+        'Output ONLY the complete, corrected Java source. No explanations, no\n' +
+        'markdown fences, no commentary — just the raw Java file.';
+
+    const depBlock = (dependencies && Object.keys(dependencies).length > 0)
+        ? 'Sibling Java classes available (you CAN call these via `new ClassName().run(...)`):\n'
+          + Object.entries(dependencies).map(([pid, cls]) => `  - PROGRAM-ID ${pid} → class ${cls}`).join('\n')
+        : 'No sibling Java classes are available for CALL targets — emit // TODO instead of simulating.';
+
+    // Source material is sent FULL — matches the primary convertCobolToJava
+    // policy so the repair agent sees every line. Runtime stdout (cobolOutput
+    // / runOutput) stays head+tail-snipped because stuck-in-a-loop programs
+    // produce megabytes of repetitive text; first+last few KB tell the story.
+    const userPrompt =
+        `=== ORIGINAL COBOL ===\n${cobolSource}\n\n` +
+        `=== CURRENT JAVA (needs fixing) ===\n${javaCode}\n\n` +
+        (compileErrors ? `=== COMPILE ERRORS ===\n${compileErrors}\n\n` : '') +
+        (cobolOutput ? `=== WHAT COBOL OUTPUTS WHEN RUN ===\n${snippet(cobolOutput, 1500)}\n\n` : '') +
+        (runOutput   ? `=== WHAT CURRENT JAVA OUTPUTS ===\n${snippet(runOutput, 1500)}\n\n`   : '') +
+        `=== DEPENDENCIES ===\n${depBlock}\n\n` +
+        `Produce the corrected Java file.`;
+
+    try {
+        const response = await makeOpenAIRequest(
+            [
+                { role: 'system', content: systemPrompt },
+                { role: 'user',   content: userPrompt }
+            ],
+            { temperature: 0.15, maxTokens: 16000 }
+        );
+        let content = response?.choices?.[0]?.message?.content || '';
+        content = content.replace(/^```(?:java)?\n?/i, '').replace(/\n?```$/i, '').trim();
+        if (!content || content.length < 50 || !/class\s+\w+/.test(content)) {
+            return { success: false, error: 'AI did not return valid Java source', usage: response?.usage };
+        }
+        // Apply existing auto-fixes for consistency
+        const finalCode = autoFixJavaCode(content);
+        return { success: true, javaCode: finalCode, usage: response?.usage };
+    } catch (err) {
+        return { success: false, error: err.message || 'AI call failed' };
+    }
 }
 
 module.exports = {
@@ -1591,6 +2224,8 @@ module.exports = {
     scanForCobolFiles,
     scanForAllMainframeFiles,
     convertDirectory,
+    compareRunOutputs,
+    fixJavaCode,
     isAvailable,
     getConfig
 };

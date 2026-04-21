@@ -151,7 +151,7 @@ To use the AI-powered conversion, you need to set up an agent in Azure AI Foundr
      AZURE_OPENAI_API_KEY=your-key
      AZURE_OPENAI_API_VERSION=2024-05-01-preview
      AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
-     AZURE_AGENT_ID=your-agent-id
+     # AZURE_AGENT_ID removed — Chat Completions is the sole conversion path now.
      ```
 
 ---

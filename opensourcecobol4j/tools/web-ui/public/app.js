@@ -1,5 +1,114 @@
 // COBOL to Java Converter - Frontend Application
 
+// ══════════════════════════════════════════════════════════════════
+// Platform dialogs & toasts — replacement for native alert/confirm/prompt.
+// Why: browser-native dialogs say "localhost:3000 says…" and look jarring.
+// These match the app's visual language and live inside the page.
+// ══════════════════════════════════════════════════════════════════
+
+/**
+ * Show an ephemeral toast notification.
+ * @param {string} message
+ * @param {'info'|'success'|'warning'|'error'} [type='info']
+ * @param {number} [duration=4500] ms; 0 = sticky until dismissed
+ */
+function toast(message, type = 'info', duration = 4500) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const icons = { info: 'i', success: '✓', warning: '!', error: '×' };
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    el.innerHTML = `
+        <span class="toast-icon">${icons[type] || 'i'}</span>
+        <span class="toast-message"></span>
+        <button class="toast-close" aria-label="Dismiss">×</button>
+    `;
+    el.querySelector('.toast-message').textContent = String(message);
+    const dismiss = () => {
+        if (el.classList.contains('toast-leaving')) return;
+        el.classList.add('toast-leaving');
+        setTimeout(() => el.remove(), 180);
+    };
+    el.querySelector('.toast-close').addEventListener('click', dismiss);
+    container.appendChild(el);
+    if (duration > 0) setTimeout(dismiss, duration);
+    return dismiss;
+}
+
+// Internal: open the shared dialog modal. Returns a Promise that resolves with
+// the user's choice (boolean for confirm, string|null for prompt).
+function _openDialog({ title, message, showInput, okText, cancelText, danger, defaultValue }) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('appDialog');
+        if (!modal) { resolve(null); return; }
+        const titleEl  = document.getElementById('appDialogTitle');
+        const msgEl    = document.getElementById('appDialogMessage');
+        const inputEl  = document.getElementById('appDialogInput');
+        const okBtn    = document.getElementById('appDialogOkBtn');
+        const cancelBtn = document.getElementById('appDialogCancelBtn');
+
+        titleEl.textContent = title || 'Confirm';
+        msgEl.textContent = message || '';
+        okBtn.textContent = okText || 'OK';
+        cancelBtn.textContent = cancelText || 'Cancel';
+        okBtn.classList.toggle('danger', !!danger);
+
+        if (showInput) {
+            inputEl.classList.remove('hidden');
+            inputEl.value = defaultValue || '';
+        } else {
+            inputEl.classList.add('hidden');
+            inputEl.value = '';
+        }
+
+        modal.classList.remove('hidden');
+        // Focus input if prompt, else OK button
+        setTimeout(() => (showInput ? inputEl : okBtn).focus(), 30);
+
+        const close = (outcome) => {
+            modal.classList.add('hidden');
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            inputEl.removeEventListener('keydown', onInputKey);
+            resolve(outcome);
+        };
+        const onOk = () => close(showInput ? (inputEl.value || '') : true);
+        const onCancel = () => close(showInput ? null : false);
+        const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+        const onKey = (e) => {
+            if (e.key === 'Escape') onCancel();
+            else if (e.key === 'Enter' && !showInput) onOk();
+        };
+        const onInputKey = (e) => { if (e.key === 'Enter') onOk(); };
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKey);
+        inputEl.addEventListener('keydown', onInputKey);
+    });
+}
+
+/**
+ * In-app confirm dialog. Returns Promise<boolean>.
+ * Usage: if (!await confirmDialog('Cancel conversion?')) return;
+ */
+function confirmDialog(message, { title = 'Confirm', okText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
+    return _openDialog({ title, message, showInput: false, okText, cancelText, danger });
+}
+
+/**
+ * In-app prompt dialog. Returns Promise<string|null>.
+ * Empty string means the user pressed OK but entered nothing.
+ * Null means Cancel / Escape.
+ */
+function promptDialog(message, { title = 'Input required', okText = 'OK', cancelText = 'Cancel', defaultValue = '' } = {}) {
+    return _openDialog({ title, message, showInput: true, okText, cancelText, danger: false, defaultValue });
+}
+
 // DOM Elements
 const repoInput = document.getElementById('repoInput');
 const convertBtn = document.getElementById('convertBtn');
@@ -247,7 +356,7 @@ async function startConversion() {
         overlay.remove();
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Scan failed: ' + (err.error || r.status));
+            toast('Scan failed: ' + (err.error || r.status), 'error');
             setLoading(false);
             return;
         }
@@ -256,7 +365,7 @@ async function startConversion() {
         setLoading(false);
     } catch (err) {
         overlay.remove();
-        alert('Scan failed: ' + err.message);
+        toast('Scan failed: ' + err.message, 'error');
         setLoading(false);
     }
 }
@@ -370,8 +479,16 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
                         openReviewModal(nodeData.id, nodeData.label);
                         return;
                     }
+                    // Open per-file timeline panel alongside (or before) code
+                    // comparison. While a file is still converting, the
+                    // timeline is the useful thing — code comparison would
+                    // show an empty Java pane. For completed files, we show
+                    // both: timeline + code.
+                    if (typeof openFileTimelinePanel === 'function') {
+                        openFileTimelinePanel(nodeData.id, nodeData.label);
+                    }
                     if (typeof viewCodeComparison === 'function' && nodeData.path) {
-                        viewCodeComparison(nodeData.path, nodeData.label);
+                        viewCodeComparison(nodeData.path, nodeData.label, nodeData.id);
                     }
                 },
                 onStateUpdate: (counts) => {
@@ -833,8 +950,14 @@ async function fetchResults() {
         // Determine if we have rich report data
         if (data.report && data.report.files) {
             const reportFiles = data.report.files;
-            // Filter for converted/attempted files
-            const converted = reportFiles.filter(f => f.java_status !== 'SKIPPED_COPYBOOK' && f.java_status !== 'SKIPPED_NO_ID');
+            // Filter for converted/attempted files — exclude files skipped
+            // before the AI ever saw them (copybooks, no-ID, JCL, too-large).
+            const SKIPPED_STATUSES = new Set([
+                'SKIPPED_COPYBOOK', 'SKIPPED_NO_ID', 'SKIPPED_JCL',
+                'SKIPPED_DATA', 'SKIPPED_OTHER', 'SKIPPED_TOO_LARGE',
+                'SKIPPED_BUDGET'
+            ]);
+            const converted = reportFiles.filter(f => !SKIPPED_STATUSES.has(f.java_status));
 
             // Separate errors (Explicit inclusion)
             const errors = converted.filter(f => f.java_status === 'CONVERT_FAIL' || f.java_status === 'COMPILE_FAIL' || f.java_status === 'FAIL' || f.java_status === 'EXEC_FAIL');
@@ -844,13 +967,7 @@ async function fetchResults() {
             const list = converted.filter(f => f.java_status === 'SUCCESS' || f.java_status === 'COMPARE_FAIL' || f.compare === 'MATCH' || f.compare === 'MISMATCH' || f.compare === 'JAVA_ONLY');
 
             // Skipped files - filter from report for rich data (includes source_path)
-            const skippedFromReport = reportFiles.filter(f =>
-                f.java_status === 'SKIPPED_COPYBOOK' ||
-                f.java_status === 'SKIPPED_NO_ID' ||
-                f.java_status === 'SKIPPED_JCL' ||
-                f.java_status === 'SKIPPED_DATA' ||
-                f.java_status === 'SKIPPED_OTHER'
-            );
+            const skippedFromReport = reportFiles.filter(f => SKIPPED_STATUSES.has(f.java_status));
 
             updateConvertedList(list); // Pass objects directly
             updateSkippedList(skippedFromReport.length > 0 ? skippedFromReport : data.skippedFiles || []);
@@ -1177,6 +1294,14 @@ function updateSkippedList(files) {
                     reason = 'Other';
                     icon = '📄';
                     break;
+                case 'SKIPPED_TOO_LARGE':
+                    reason = 'Too Large';
+                    icon = '📏';
+                    break;
+                case 'SKIPPED_BUDGET':
+                    reason = 'Budget Hit';
+                    icon = '💰';
+                    break;
                 default:
                     reason = 'Skipped';
                     icon = '⏭️';
@@ -1230,6 +1355,8 @@ function updateErrorList(items) {
             'COMPILE_FAIL': { text: 'Compilation Failed', detail: 'Java compilation error', icon: '⚙️' },
             'EXEC_FAIL': { text: 'Execution Failed', detail: 'Runtime error in generated Java', icon: '🔥' },
             'FAIL': { text: 'Failed', detail: 'Unknown error during processing', icon: '❓' },
+            'SKIPPED_TOO_LARGE': { text: 'Too Large', detail: 'Source exceeds single-pass size cap (~80KB)', icon: '📏' },
+            'SKIPPED_BUDGET':    { text: 'Budget Hit', detail: 'Conversion stopped — token ceiling reached', icon: '💰' },
             'CICS_DEPENDENCY': { text: 'CICS Dependency', detail: 'Requires CICS/MQ mainframe calls', icon: '🖥️' },
             'DB2_DEPENDENCY': { text: 'DB2 Dependency', detail: 'Requires DB2 database integration', icon: '🗄️' },
             'VSAM_DEPENDENCY': { text: 'VSAM Dependency', detail: 'Requires VSAM file handling', icon: '📁' }
@@ -1438,19 +1565,180 @@ function closeComparisonModal() {
     comparisonModal.classList.add('hidden');
 }
 
+// Render the accuracy panel as a first-class UI element above a Java code pane.
+// Used by the Results browser (not the modal) to keep Java source clean.
+function renderAccuracyPanel(paneEl, data) {
+    if (!paneEl || data == null) return;
+    const acc = data.accuracy;
+    if (acc === null || acc === undefined || acc >= 100) return;
+
+    const br = data.accuracyBreakdown || {};
+    const cm = br.cobolMetrics || {};
+    const jm = br.javaMetrics || {};
+    const penalties = Array.isArray(br.semanticPenalties) ? br.semanticPenalties : [];
+
+    const scoreClass = acc >= 85 ? 'good' : acc >= 65 ? 'warn' : 'poor';
+
+    const panel = document.createElement('div');
+    panel.className = 'accuracy-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Conversion accuracy breakdown');
+
+    // Header with score pill
+    const header = document.createElement('div');
+    header.className = 'accuracy-panel-header';
+    header.innerHTML = `
+        <span class="accuracy-panel-score ${scoreClass}">${acc}%</span>
+        <span>Conversion confidence — review the items below</span>
+    `;
+    panel.appendChild(header);
+
+    // Metrics row
+    if (cm.codeLines || jm.codeLines) {
+        const metrics = document.createElement('div');
+        metrics.className = 'accuracy-panel-metrics';
+        metrics.innerHTML = `
+            <span>COBOL: <strong>${cm.codeLines || 0}</strong> lines · <strong>${cm.dataItems || 0}</strong> PIC · <strong>${cm.procedures || 0}</strong> procedures</span>
+            <span>Java: <strong>${jm.codeLines || 0}</strong> lines · <strong>${jm.fields || 0}</strong> fields · <strong>${jm.methods || 0}</strong> methods</span>
+        `;
+        panel.appendChild(metrics);
+    }
+
+    // Penalty list with actionable guidance
+    if (penalties.length > 0) {
+        const label = document.createElement('div');
+        label.className = 'accuracy-panel-label';
+        label.textContent = 'What lowered the score';
+        panel.appendChild(label);
+
+        const list = document.createElement('ul');
+        list.className = 'accuracy-panel-penalties';
+        for (const p of penalties) {
+            const desc = PENALTY_GUIDANCE[p] || 'Manual inspection recommended.';
+            const li = document.createElement('li');
+            li.className = 'accuracy-panel-penalty';
+            const title = document.createElement('span');
+            title.className = 'pn-title';
+            title.textContent = p;
+            const d = document.createElement('span');
+            d.className = 'pn-desc';
+            d.textContent = desc;
+            li.appendChild(title);
+            li.appendChild(d);
+            list.appendChild(li);
+        }
+        panel.appendChild(list);
+    } else {
+        // No named penalties — lower score usually means code-volume ratio.
+        const note = document.createElement('div');
+        note.className = 'accuracy-panel-metrics';
+        note.innerHTML = '<span>No specific feature penalties. Lower score reflects code-volume or procedure-coverage ratios — verify all paragraphs and data items are represented.</span>';
+        panel.appendChild(note);
+    }
+
+    // Insert BEFORE the <pre> that holds the Java source so it appears above the code.
+    const pre = paneEl.querySelector('pre.browser-code');
+    if (pre) paneEl.insertBefore(panel, pre);
+    else paneEl.appendChild(panel);
+}
+
+// Build a human-readable accuracy breakdown banner prepended to the Java code view.
+// Tells the user WHY the score isn't 100% so they know what to verify manually.
+// Known penalty strings map to actionable "what to check" guidance.
+const PENALTY_GUIDANCE = {
+    'File I/O simulated':       'Real file I/O was replaced with in-memory arrays. Verify SELECT/OPEN/READ/WRITE/CLOSE logic against your target file system (FileReader/FileWriter, BufferedReader, etc.).',
+    'File I/O simplified':      'File handling was generated but may not use proper Java I/O classes. Check that file paths, encoding, and error handling match production needs.',
+    'DEPENDING ON simplified':  'OCCURS DEPENDING ON (variable-length tables) may not use dynamic collections. Confirm ArrayList/List<> is used where COBOL had variable-length data.',
+    'FILE STATUS simulated':    'COBOL FILE STATUS codes were not mapped to Java IOException/FileNotFoundException. Verify error handling around file operations.',
+    'Packed decimal simplified':'COMP-3/COMP packed decimal should use BigDecimal for financial precision. Check arithmetic correctness (rounding, scale).',
+    'Variable records approximated': 'RECORDING MODE V (variable-length records) is hard to replicate. Verify record serialization format matches source.',
+    'Contains simulation markers': 'The Java code has comments marked "mock", "simulate", "placeholder", or "stub". Replace these with real implementations before production use.',
+    'Fabricated input fallback': 'The Java silently substitutes hardcoded sample records when an input file is missing — COBOL would fail with status 35. Regenerate or hand-edit so the Java prints a file-not-found error and exits non-zero, matching COBOL behavior.',
+    'CICS simplified':          'EXEC CICS commands (SEND/RECEIVE/LINK/XCTL) were simplified. You need a CICS runtime (JCICS) or equivalent transaction framework.',
+    'IMS/DLI simplified':       'EXEC DLI / IMS database calls were simplified. You need an IMS framework (IMS Connect, etc.) or a relational equivalent.',
+    'BMS adapted':              'BMS screen maps were adapted to console output. If you need a UI, replace with Swing/JavaFX or web frontend.',
+    'CICS keys simplified':     'DFHAID (PF/Enter key) handling was simplified. Wire up real key events (KeyListener/ActionEvent) for a UI.',
+};
+function buildAccuracyBanner(data) {
+    const acc = data.accuracy;
+    if (acc === null || acc === undefined || acc >= 100) return '';
+
+    const br = data.accuracyBreakdown || {};
+    const cm = br.cobolMetrics || {};
+    const jm = br.javaMetrics || {};
+    const penalties = Array.isArray(br.semanticPenalties) ? br.semanticPenalties : [];
+
+    let banner = '// ═══════════════════════════════════════════════════════════════\n';
+    banner += `// Conversion confidence: ${acc}%   —   review the items below\n`;
+    banner += '// ═══════════════════════════════════════════════════════════════\n';
+
+    // Metrics comparison
+    if (cm.codeLines || jm.codeLines) {
+        banner += `// COBOL: ${cm.codeLines || 0} code lines, ${cm.dataItems || 0} PIC items, ${cm.procedures || 0} procedures\n`;
+        banner += `// Java:  ${jm.codeLines || 0} code lines, ${jm.fields || 0} fields, ${jm.methods || 0} methods\n`;
+    }
+
+    // Penalties with actionable guidance
+    if (penalties.length > 0) {
+        banner += '//\n// What lowered the score — please verify manually:\n';
+        for (const p of penalties) {
+            const guidance = PENALTY_GUIDANCE[p] || 'Manual inspection recommended.';
+            banner += `//   • ${p}\n`;
+            // Word-wrap the guidance at ~90 chars for readability
+            const words = guidance.split(' ');
+            let line = '//       ';
+            for (const w of words) {
+                if ((line.length + w.length + 1) > 95) {
+                    banner += line + '\n';
+                    line = '//       ' + w;
+                } else {
+                    line += (line.endsWith(' ') ? '' : ' ') + w;
+                }
+            }
+            banner += line + '\n';
+        }
+    } else if (acc < 100) {
+        // Score dropped without named penalties — usually means code volume ratio
+        // or coverage ratio is below ideal. Offer a generic pointer.
+        banner += '//\n// No specific feature penalties — lower score reflects code-volume or\n';
+        banner += '// procedure-coverage ratios. Compare the generated Java against the COBOL\n';
+        banner += '// source side-by-side to confirm all paragraphs/data items are represented.\n';
+    }
+
+    banner += '// ═══════════════════════════════════════════════════════════════\n\n';
+    return banner;
+}
+
 // View dual code comparison (COBOL source vs Java code)
-async function viewCodeComparison(cobolPath, workDir, fileName) {
+// Overloaded call shapes (to stay back-compatible):
+//   (cobolPath, workDir, fileName)        -- original form from result table
+//   (cobolPath, fileName)                 -- from graph click (workDir inferred server-side)
+//   (cobolPath, fileName, relativePath)   -- preferred form from graph click
+async function viewCodeComparison(cobolPath, arg2, arg3) {
+    // Resolve args. If arg2 looks like a filesystem path (contains a separator),
+    // treat it as workDir (original call shape). Otherwise it's the fileName.
+    let workDir = null, fileName = null, relativePath = null;
+    if (arg2 && (arg2.includes('/') || arg2.includes('\\')) && !arg2.endsWith('.cobol') && !arg2.endsWith('.cbl') && !arg2.endsWith('.cpy')) {
+        workDir = arg2;
+        fileName = arg3;
+    } else {
+        fileName = arg2;
+        relativePath = arg3 || null;
+    }
+    // Derive fileName from path if still missing
+    if (!fileName && cobolPath) {
+        fileName = cobolPath.split(/[\\/]/).pop();
+    }
+    if (!fileName) fileName = 'file';
+
     const modal = document.getElementById('codeComparisonModal');
     const title = document.getElementById('codeComparisonTitle');
     const cobolSource = document.getElementById('cobolSource');
     const javaCode = document.getElementById('javaCode');
 
-    // Reset modal
     title.textContent = `Code Comparison: ${fileName}`;
     cobolSource.querySelector('code').textContent = 'Loading COBOL source...';
     javaCode.querySelector('code').textContent = 'Loading Java code...';
-
-    // Show modal immediately
     modal.classList.remove('hidden');
 
     try {
@@ -1461,27 +1749,75 @@ async function viewCodeComparison(cobolPath, workDir, fileName) {
             cobolSource.querySelector('code').textContent = cobolData.content || 'COBOL source not available';
         }
 
-        // Try to fetch Java code from work directory
-        if (workDir) {
-            const javaResp = await fetch(`/api/code-comparison?workDir=${encodeURIComponent(workDir)}`);
-            const javaData = await javaResp.json();
+        // Build query with conversion context so server can report the real reason.
+        const qs = new URLSearchParams();
+        if (workDir) qs.set('workDir', workDir);
+        if (currentConversionId) qs.set('conversionId', currentConversionId);
+        if (relativePath) qs.set('relativePath', relativePath);
 
-            if (javaData.javaCode) {
-                javaCode.querySelector('code').textContent = javaData.javaCode;
-            } else {
-                javaCode.querySelector('code').textContent =
-                    '⚠️ Java code not generated\n\n' +
-                    'Possible reasons:\n' +
-                    '• Missing COPYBOOK dependency\n' +
-                    '• Unsupported COBOL syntax\n' +
-                    '• CICS/DB2/VSAM dependency\n\n' +
-                    'Check the log for details.';
+        const javaResp = await fetch(`/api/code-comparison?${qs.toString()}`);
+        let javaData = await javaResp.json();
+
+        // Fallback A: if the code-comparison endpoint didn't return javaCode
+        // (stale conversionId, server restarted and lost in-memory state, etc.)
+        // but we CAN infer the java file path, read it directly from disk via
+        // /api/file-content. Previously this path returned "Java not generated"
+        // even when the .java file existed — because the modal trusted the
+        // API's "no entry found" over the file system.
+        if (!javaData.javaCode && currentBrowserFile && currentBrowserFile.javaPath) {
+            try {
+                const r2 = await fetch(`/api/file-content?path=${encodeURIComponent(currentBrowserFile.javaPath)}`);
+                const d2 = await r2.json();
+                if (d2 && d2.content) {
+                    javaData = Object.assign({}, javaData, {
+                        javaCode: d2.content,
+                        javaExists: true,
+                        javaStatus: javaData.javaStatus || currentBrowserFile.status || 'SUCCESS',
+                        reason: javaData.reason || 'Java source loaded directly from disk (conversion state not in memory).'
+                    });
+                }
+            } catch (e) { /* fall through to whatever we have */ }
+        }
+
+        // Fallback B: infer java path from cobolPath convention
+        // (<outputDir>/java/<PascalCase>.java). Only if we still have nothing.
+        if (!javaData.javaCode && cobolPath) {
+            const base = (cobolPath.split(/[\\/]/).pop() || '').replace(/\.(cobol|cbl|cob)$/i, '');
+            const pascal = base.replace(/[-_]/g, ' ').split(' ')
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+            const guess = typeof window.lastOutputDir === 'string' ? `${window.lastOutputDir}/java/${pascal}.java` : null;
+            if (guess) {
+                try {
+                    const r3 = await fetch(`/api/file-content?path=${encodeURIComponent(guess)}`);
+                    const d3 = await r3.json();
+                    if (d3 && d3.content) {
+                        javaData = Object.assign({}, javaData, {
+                            javaCode: d3.content,
+                            javaExists: true,
+                            javaStatus: javaData.javaStatus || 'SUCCESS',
+                            reason: 'Java source loaded directly from disk (via inferred path).'
+                        });
+                    }
+                } catch (e) { /* fall through */ }
             }
+        }
+
+        if (javaData.javaCode) {
+            // Render the accuracy panel as a UI element above the Java pane
+            // (the code itself stays clean and copyable).
+            const javaPane = javaCode.closest('.comparison-pane');
+            if (javaPane) {
+                javaPane.querySelectorAll('.accuracy-panel').forEach(n => n.remove());
+                renderAccuracyPanel(javaPane, javaData);
+            }
+            javaCode.querySelector('code').textContent = javaData.javaCode;
+        } else {
+            javaCode.querySelector('code').textContent = buildStatusExplanation(javaData);
         }
     } catch (error) {
         console.error('Error loading code comparison:', error);
         cobolSource.querySelector('code').textContent = 'Error loading COBOL source';
-        javaCode.querySelector('code').textContent = 'Error loading Java code';
+        javaCode.querySelector('code').textContent = `Error loading Java code: ${error.message || error}`;
     }
 }
 
@@ -1969,12 +2305,12 @@ async function submitReview(action) {
         );
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Review failed: ' + (err.error || r.status));
+            toast('Review failed: ' + (err.error || r.status), 'error');
             return;
         }
         closeReviewModal();
     } catch (err) {
-        alert('Review failed: ' + err.message);
+        toast('Review failed: ' + err.message, 'error');
     }
 }
 
@@ -1988,7 +2324,7 @@ let reviewHistoryTimer = null;
 
 async function bulkReview(action) {
     if (!currentConversionId) return;
-    if (action === 'reject' && !confirm('Reject ALL files awaiting review?')) return;
+    if (action === 'reject' && !(await confirmDialog('Reject ALL files awaiting review?', { title: 'Reject all', okText: 'Reject all', danger: true }))) return;
     try {
         const r = await fetch(`/api/reviews/${currentConversionId}/bulk`, {
             method: 'POST',
@@ -1997,10 +2333,10 @@ async function bulkReview(action) {
         });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Bulk action failed: ' + (err.error || r.status));
+            toast('Bulk action failed: ' + (err.error || r.status), 'error');
         }
     } catch (err) {
-        alert('Bulk action failed: ' + err.message);
+        toast('Bulk action failed: ' + err.message, 'error');
     }
 }
 
@@ -2109,6 +2445,9 @@ async function loadBrowser() {
         const data = await r.json();
         if (!data.ready) return;
         browserFiles = data.files || [];
+        // Stash outputDir so viewCodeComparison can fall back to reading Java
+        // directly from disk when the server's code-comparison lookup misses.
+        if (data.outputDir) window.lastOutputDir = data.outputDir;
         renderBrowserTree(browserFiles);
         const section = document.getElementById('browserSection');
         const count = document.getElementById('browserCount');
@@ -2195,7 +2534,24 @@ function renderTreeNode(node, parentPath, depth) {
             const f = item.file;
             const isCobol = ['SUCCESS', 'CONVERT_FAIL', 'FAIL', 'REJECTED_BY_REVIEW', 'SKIPPED_COPYBOOK', 'SKIPPED_NO_ID'].includes(f.status);
             const cls = isCobol ? statusClass(f.status) : 'context-file';
-            const acc = f.accuracy != null ? `<span class="tree-acc">${f.accuracy}%</span>` : '';
+            // Build the accuracy badge with a tooltip explaining the penalty drivers.
+            let accTooltip = '';
+            if (f.accuracy != null) {
+                if (f.accuracy >= 100) {
+                    accTooltip = 'Converted at full confidence.';
+                } else {
+                    accTooltip = `Conversion confidence: ${f.accuracy}%.`;
+                    if (Array.isArray(f.penalties) && f.penalties.length > 0) {
+                        accTooltip += ' Review: ' + f.penalties.join(', ') + '.';
+                    } else {
+                        accTooltip += ' Lower than ideal code-volume/coverage ratio — check for missing paragraphs or data items.';
+                    }
+                    accTooltip += ' Click the file to see details.';
+                }
+            }
+            const acc = f.accuracy != null
+                ? `<span class="tree-acc" title="${escapeHtml(accTooltip)}">${f.accuracy}%</span>`
+                : '';
             const isCopybook = f.status === 'SKIPPED_COPYBOOK';
             const isNoId = f.status === 'SKIPPED_NO_ID';
             let badge = '';
@@ -2259,6 +2615,24 @@ async function selectBrowserFile(file, el) {
     document.querySelectorAll('.tree-file.selected').forEach(e => e.classList.remove('selected'));
     if (el) el.classList.add('selected');
     currentBrowserFile = file;
+
+    // Show "Fix with AI" for any file where the AI produced Java we can
+    // inspect — SUCCESS, COMPILE_FAIL (compile error after repair),
+    // CONVERT_FAIL (rare — Java may still have partial output), and any
+    // FAIL where java_path is set. Hide only for pre-AI-skipped cases
+    // (copybooks, no-ID, JCL) where there's nothing to fix.
+    const fixBtn = document.getElementById('fixJavaBtn');
+    if (fixBtn) {
+        const FIXABLE_STATUSES = new Set(['SUCCESS', 'COMPILE_FAIL', 'CONVERT_FAIL', 'FAIL', 'EXEC_FAIL', 'COMPARE_FAIL']);
+        const showable = file && FIXABLE_STATUSES.has(file.status) && file.javaPath;
+        fixBtn.classList.toggle('hidden', !showable);
+        // Tweak the tooltip so the user knows why fix is worth clicking on a failure.
+        if (showable) {
+            fixBtn.title = file.status === 'SUCCESS'
+                ? 'Use AI to repair this Java file (e.g. to lift the accuracy score or fix low-confidence areas).'
+                : `Compile/run issue (${file.status}) — use AI to repair using the COBOL source, compile errors, and known dependencies.`;
+        }
+    }
     // Show the terminal panel when a runnable file is selected
     const canRun = file.status === 'SUCCESS' && file.javaPath;
     const panel = document.getElementById('runOutputPanel');
@@ -2302,21 +2676,506 @@ async function selectBrowserFile(file, el) {
         cobolEl.querySelector('code').textContent = '[COBOL source path not recorded]';
     }
 
-    // Fetch Java code
-    if (file.javaPath) {
+    // Fetch Java code + per-file diagnostics (status, accuracy breakdown, reason)
+    // so we can explain WHY a file is at e.g. 71% or why it was skipped.
+    let diagnostics = null;
+    try {
+        const qs = new URLSearchParams();
+        if (currentConversionId) qs.set('conversionId', currentConversionId);
+        if (file.cobolPath) qs.set('relativePath', file.cobolPath);
+        if (file.workDir) qs.set('workDir', file.workDir);
+        const dr = await fetch(`/api/code-comparison?${qs.toString()}`);
+        if (dr.ok) diagnostics = await dr.json();
+    } catch { /* non-fatal — fall back to plain file content */ }
+
+    if (!javaEl) return;
+    const codeNode = javaEl.querySelector('code');
+
+    // Whichever path we take below, make sure any stale panel from a prior
+    // selection is removed first.
+    const javaPane = javaEl.closest('.browser-pane');
+    if (javaPane) {
+        javaPane.querySelectorAll('.accuracy-panel').forEach(n => n.remove());
+    }
+
+    if (diagnostics && diagnostics.javaCode) {
+        // Successful conversion — render accuracy panel as a UI element above
+        // the code (NOT inside the Java source), so the code itself stays clean
+        // and copyable.
+        renderAccuracyPanel(javaPane, diagnostics);
+        codeNode.textContent = diagnostics.javaCode;
+    } else if (diagnostics && (diagnostics.javaStatus || diagnostics.reason)) {
+        // Skipped / failed — show structured explanation instead of a dry error string.
+        const msg = buildStatusExplanation(diagnostics);
+        codeNode.textContent = msg;
+    } else if (file.javaPath) {
+        // Legacy path — diagnostics unavailable, but the java file exists on disk.
         const text = await loadFileContent(file.javaPath);
-        if (javaEl) javaEl.querySelector('code').textContent = text != null ? text : '[Java file not available]';
-    } else if (javaEl) {
-        javaEl.querySelector('code').textContent = file.error
+        codeNode.textContent = text != null ? text : '[Java file not available]';
+    } else {
+        codeNode.textContent = file.error
             ? `[No Java generated]\n\n${file.error}`
             : '[No Java generated for this file]';
     }
+}
+
+// Shared helper used by both the Results browser and the comparison modal.
+// Renders a rich, actionable explanation when Java wasn't produced (or was
+// produced with a low score and no code to show).
+function buildStatusExplanation(data) {
+    const status = data.javaStatus || 'UNKNOWN';
+    const reason = data.reason || 'Java code was not generated for this file.';
+    const suggestion = data.suggestion || '';
+    const err = data.error || '';
+
+    let msg = '⚠️ Java not generated\n\n';
+    msg += `Status: ${status}\n\n`;
+    msg += `Why: ${reason}\n`;
+    if (suggestion) msg += `\nWhat to do: ${suggestion}\n`;
+    if (err) msg += `\n─── Details ───\n${err}\n`;
+    if (status === 'UNKNOWN') {
+        msg += '\n(No report entry found. The file may still be in-flight, or the conversion was cancelled before reaching it.)';
+    }
+    return msg;
 }
 
 // Hook into the existing graph poll: when status flips to completed, load the browser
 window.onConversionComplete = function () {
     loadBrowser();
 };
+
+// Maximize/restore the Results browser section (full-viewport mode).
+function toggleBrowserMaximize(force) {
+    const body = document.body;
+    const btn  = document.getElementById('browserMaximizeBtn');
+    const shouldMax = typeof force === 'boolean' ? force : !body.classList.contains('browser-maximized');
+    body.classList.toggle('browser-maximized', shouldMax);
+    if (btn) {
+        const iconEl  = btn.querySelector('.browser-maximize-icon');
+        const labelEl = btn.querySelector('.browser-maximize-label');
+        if (iconEl)  iconEl.textContent  = shouldMax ? '✕' : '⛶';
+        if (labelEl) labelEl.textContent = shouldMax ? 'Exit' : 'Maximize';
+        btn.title = shouldMax ? 'Exit maximized view (Esc)' : 'Maximize (Esc to exit)';
+    }
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('browserMaximizeBtn');
+    if (btn) btn.addEventListener('click', () => toggleBrowserMaximize());
+    // Esc exits maximized view (but only when no modal is capturing Escape).
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!document.body.classList.contains('browser-maximized')) return;
+        // Don't steal Escape from an open modal dialog.
+        const openModal = document.querySelector('.modal:not(.hidden)');
+        if (openModal) return;
+        toggleBrowserMaximize(false);
+    });
+
+    // Download button — streams a zip of Java output + manual-review guide.
+    const dlBtn = document.getElementById('browserDownloadBtn');
+    if (dlBtn) dlBtn.addEventListener('click', downloadConversionOutput);
+
+    // "Fix with AI" button — repair the currently-selected Java file.
+    const fixBtn = document.getElementById('fixJavaBtn');
+    if (fixBtn) fixBtn.addEventListener('click', fixSelectedJava);
+});
+
+// ─── Per-file timeline slide-out (reuses .fix-progress-panel styling) ───
+// Clicked from any node in the graph. Shows the file's phase history
+// (queued → ai_call → compile → [repair] → done) with timings + tokens.
+// While the conversion is still in flight for this file, the panel polls
+// for updates every 1.5s and appends new steps as they arrive.
+const ICONS_BY_STEP = {
+    queued: '•',
+    context_built: '📦',
+    ai_call: '🤖',
+    ai_done: '✓',
+    compile: '⚙',
+    compile_done: '✓',
+    accuracy: '📊',
+    repair: '🔧',
+    repair_done: '✓',
+    repair_failed: '✗',
+    repair_errored: '✗',
+    done: '🏁',
+    skipped: '⏭'
+};
+let _timelinePoll = null;
+function openFileTimelinePanel(relPath, label) {
+    if (!currentConversionId || !relPath) return;
+    let panel = document.getElementById('fileTimelinePanel');
+    if (!panel) {
+        panel = document.createElement('aside');
+        panel.id = 'fileTimelinePanel';
+        panel.className = 'fix-progress-panel';  // reuse same slide-out CSS
+        panel.innerHTML = `
+            <div class="fix-progress-header">
+                <div class="title">File timeline</div>
+                <div class="file"></div>
+                <button type="button" class="fix-progress-close" aria-label="Close">✕</button>
+            </div>
+            <ul class="fix-progress-steps"></ul>
+            <div class="fix-progress-footer"><span class="elapsed">Loading…</span></div>
+        `;
+        document.body.appendChild(panel);
+        panel.querySelector('.fix-progress-close').addEventListener('click', () => {
+            panel.classList.remove('open');
+            if (_timelinePoll) { clearInterval(_timelinePoll); _timelinePoll = null; }
+        });
+    }
+    const stepsEl = panel.querySelector('.fix-progress-steps');
+    const footerEl = panel.querySelector('.fix-progress-footer');
+    panel.querySelector('.file').textContent = label || relPath;
+    stepsEl.innerHTML = '';
+    footerEl.innerHTML = '<span class="elapsed">Loading…</span>';
+    panel.classList.add('open');
+
+    let seenCount = 0;
+    const renderEntry = (e) => {
+        const icon = ICONS_BY_STEP[e.step] || '◌';
+        const li = document.createElement('li');
+        li.className = 'done';
+        const meta = [];
+        if (e.ms != null) meta.push(`${e.ms}ms`);
+        if (e.tokens != null) meta.push(`${e.tokens} tokens`);
+        if (e.accuracy != null) meta.push(`accuracy ${e.accuracy}%`);
+        if (e.compileStatus) meta.push(`javac: ${e.compileStatus}`);
+        if (e.calls != null || e.copybooks != null || e.copybookBodies != null) {
+            const p = [];
+            if (e.calls != null) p.push(`${e.calls} calls`);
+            if (e.copybooks != null) p.push(`${e.copybooks} copybooks`);
+            if (e.copybookBodies != null && e.copybookBodies > 0) p.push(`${e.copybookBodies} inlined`);
+            if (e.jclInvocations != null && e.jclInvocations > 0) p.push(`${e.jclInvocations} JCL steps`);
+            meta.push(p.join(' · '));
+        }
+        if (e.errorPreview) meta.push(String(e.errorPreview).slice(0, 200));
+        if (e.error)  meta.push(String(e.error).slice(0, 200));
+        if (e.totalMs != null) meta.push(`total ${(e.totalMs / 1000).toFixed(1)}s`);
+        if (e.javaBytes != null && e.javaBytes > 0) meta.push(`${e.javaBytes}B java`);
+        li.innerHTML = `
+            <span class="ico">${icon}</span>
+            <div class="step-body">
+                <span class="label"></span>
+                ${meta.length ? `<span class="meta"></span>` : ''}
+            </div>
+        `;
+        li.querySelector('.label').textContent = e.label || e.step || '(step)';
+        if (meta.length) li.querySelector('.meta').textContent = meta.join(' · ');
+        stepsEl.appendChild(li);
+    };
+
+    const refresh = async () => {
+        try {
+            const r = await fetch(`/api/file-timeline/${currentConversionId}?file=${encodeURIComponent(relPath)}`);
+            if (!r.ok) return;
+            const data = await r.json();
+            const timeline = (data && data.timeline) || [];
+            // Append any new entries (stable order, ids by array index).
+            for (let i = seenCount; i < timeline.length; i++) renderEntry(timeline[i]);
+            if (timeline.length > seenCount) {
+                seenCount = timeline.length;
+                stepsEl.scrollTop = stepsEl.scrollHeight;
+            }
+            // Footer: show the latest phase + state.
+            const last = timeline[timeline.length - 1];
+            const state = data.state || '';
+            footerEl.innerHTML = timeline.length
+                ? `<strong>${state || last.step}</strong> · ${timeline.length} events`
+                : `No events yet for <code>${(label || relPath).slice(0, 60)}</code> — file may be pending.`;
+            // Stop polling once we hit a terminal state.
+            const terminal = last && ['done', 'skipped', 'repair_failed', 'repair_errored'].includes(last.step);
+            if (terminal && _timelinePoll) {
+                clearInterval(_timelinePoll);
+                _timelinePoll = null;
+            }
+        } catch { /* silent — polling is best-effort */ }
+    };
+
+    if (_timelinePoll) clearInterval(_timelinePoll);
+    refresh();
+    _timelinePoll = setInterval(refresh, 1500);
+}
+
+// ─── Fix-with-AI live progress panel ─────────────────────────────────────
+// Right-side slide-out that shows each step of /api/fix-java as the server
+// streams events. Gives the user real-time visibility into the 10-30s repair
+// instead of a silent "Fixing…" spinner.
+function openFixProgressPanel(fileLabel) {
+    let panel = document.getElementById('fixProgressPanel');
+    if (!panel) {
+        panel = document.createElement('aside');
+        panel.id = 'fixProgressPanel';
+        panel.className = 'fix-progress-panel';
+        panel.innerHTML = `
+            <div class="fix-progress-header">
+                <div class="title">Fix with AI</div>
+                <div class="file"></div>
+                <button type="button" class="fix-progress-close" aria-label="Close">✕</button>
+            </div>
+            <ul class="fix-progress-steps"></ul>
+            <div class="fix-progress-footer"><span class="elapsed">Starting…</span></div>
+        `;
+        document.body.appendChild(panel);
+        panel.querySelector('.fix-progress-close').addEventListener('click', () => {
+            panel.classList.remove('open');
+        });
+    }
+    const stepsEl = panel.querySelector('.fix-progress-steps');
+    const footerEl = panel.querySelector('.fix-progress-footer');
+    const fileEl = panel.querySelector('.file');
+    stepsEl.innerHTML = '';
+    footerEl.innerHTML = '<span class="elapsed">Starting…</span>';
+    fileEl.textContent = fileLabel || '';
+    panel.classList.add('open');
+
+    const startedAt = Date.now();
+    let currentRunningLi = null;
+    function markRunningDone() {
+        if (currentRunningLi) {
+            currentRunningLi.classList.remove('running');
+            currentRunningLi.classList.add('done');
+            const ico = currentRunningLi.querySelector('.ico');
+            if (ico) ico.textContent = '✓';
+        }
+    }
+    function tickElapsed() {
+        const el = panel.querySelector('.elapsed');
+        if (el && panel.classList.contains('open')) {
+            el.textContent = `${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed`;
+        }
+    }
+    const tickInterval = setInterval(tickElapsed, 200);
+
+    return {
+        el: panel,
+        addStep(payload) {
+            markRunningDone();
+            const li = document.createElement('li');
+            li.className = 'running';
+            const meta = [];
+            if (payload.ms != null) meta.push(`${payload.ms}ms`);
+            if (payload.tokens != null) meta.push(`${payload.tokens} tokens`);
+            if (payload.cobolBytes != null || payload.javaBytes != null) {
+                const p = [];
+                if (payload.cobolBytes != null) p.push(`${payload.cobolBytes}B COBOL`);
+                if (payload.javaBytes != null) p.push(`${payload.javaBytes}B Java`);
+                meta.push(p.join(' · '));
+            }
+            if (payload.errorPreview) meta.push(payload.errorPreview);
+            if (payload.dependencies != null) meta.push(`deps: ${payload.dependencies}`);
+            if (payload.compileStatus) meta.push(`javac: ${payload.compileStatus}`);
+            li.innerHTML = `
+                <span class="ico">◌</span>
+                <div class="step-body">
+                    <span class="label"></span>
+                    ${meta.length ? `<span class="meta"></span>` : ''}
+                </div>
+            `;
+            li.querySelector('.label').textContent = payload.label || payload.step || '(step)';
+            if (meta.length) li.querySelector('.meta').textContent = meta.join(' · ');
+            stepsEl.appendChild(li);
+            li.scrollIntoView({ block: 'nearest' });
+            currentRunningLi = li;
+        },
+        errorStep(msg) {
+            markRunningDone();
+            const li = document.createElement('li');
+            li.className = 'error';
+            li.innerHTML = `<span class="ico">✗</span><div class="step-body"><span class="label"></span></div>`;
+            li.querySelector('.label').textContent = msg;
+            stepsEl.appendChild(li);
+            currentRunningLi = null;
+        },
+        finalize(final) {
+            clearInterval(tickInterval);
+            markRunningDone();
+            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+            const parts = [`total ${elapsed}s`];
+            if (final && final.compileStatus) {
+                parts.push(final.compileStatus === 'ok'
+                    ? `<span class="compile-ok">compiles ✓</span>`
+                    : `<span class="compile-fail">compile: ${final.compileStatus}</span>`);
+            }
+            if (final && typeof final.newAccuracy === 'number') parts.push(`accuracy ${final.newAccuracy}%`);
+            if (final && final.usage && (final.usage.total_tokens || final.usage.totalTokens)) {
+                parts.push(`${final.usage.total_tokens || final.usage.totalTokens} tokens`);
+            }
+            if (final && !final.success) parts.push(`<span class="compile-fail">failed</span>`);
+            footerEl.innerHTML = parts.join(' · ');
+        }
+    };
+}
+
+/**
+ * Consume an SSE-style response from /api/fix-java and feed its events into
+ * the progress panel. Returns the final payload (same shape the non-streaming
+ * endpoint returned before), so the caller can proceed with its existing
+ * success/failure logic unchanged.
+ */
+async function consumeFixStream(response, panel) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let finalPayload = null;
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // SSE events are separated by blank lines. Parse each complete event.
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const lines = raw.split('\n');
+            let type = 'message', data = '';
+            for (const l of lines) {
+                if (l.startsWith('event:')) type = l.slice(6).trim();
+                else if (l.startsWith('data:')) data += l.slice(5).trim();
+            }
+            let payload = null;
+            try { payload = JSON.parse(data); } catch { /* ignore */ }
+            if (!payload) continue;
+            if (type === 'step') panel.addStep(payload);
+            else if (type === 'final') {
+                finalPayload = payload;
+                panel.finalize(payload);
+            }
+        }
+    }
+    return finalPayload;
+}
+
+/**
+ * Invoke the AI repair agent on the currently-selected file. Sends the
+ * COBOL source, current Java, compile errors, run outputs, and sibling
+ * dependency map as context. Replaces the Java pane in place when done
+ * and refreshes the accuracy panel + tree badge from the updated report.
+ */
+async function fixSelectedJava() {
+    if (!currentBrowserFile || !currentConversionId) {
+        toast('Select a converted file first.', 'warning');
+        return;
+    }
+    const fixBtn = document.getElementById('fixJavaBtn');
+    const javaEl = document.getElementById('browserJavaCode');
+    const codeNode = javaEl && javaEl.querySelector('code');
+    const labelEl = fixBtn && fixBtn.querySelector('.fix-java-label');
+
+    if (fixBtn) { fixBtn.disabled = true; if (labelEl) labelEl.textContent = 'Fixing…'; }
+    if (codeNode) codeNode.textContent = '// AI repair agent is analyzing the COBOL source, current Java,\n// compile errors, and sibling dependencies to produce a fixed version.\n// This usually takes 10–30 seconds — live progress is in the right panel.\n\n' + codeNode.textContent;
+
+    // Open a live progress panel on the right so the user sees each step
+    // instead of staring at a spinner. The server streams events as it runs.
+    const panel = openFixProgressPanel(currentBrowserFile.cobolPath);
+
+    try {
+        const r = await fetch('/api/fix-java', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+            body: JSON.stringify({
+                conversionId: currentConversionId,
+                relativePath: currentBrowserFile.cobolPath
+            })
+        });
+
+        let data = null;
+        const ctype = (r.headers.get('content-type') || '').toLowerCase();
+        if (ctype.includes('text/event-stream')) {
+            data = await consumeFixStream(r, panel);
+        } else {
+            // Backwards compat — old server returns a single JSON payload.
+            data = await r.json();
+            panel.finalize(data);
+        }
+
+        if (!r.ok || !data || !data.success) {
+            toast('Fix failed: ' + ((data && data.error) || r.status), 'error');
+            if (codeNode) codeNode.textContent = codeNode.textContent.replace(/^\/\/ AI repair agent[^]*?\n\n/, '');
+            return;
+        }
+        // Replace pane contents with the new Java
+        if (codeNode) codeNode.textContent = data.newJavaCode;
+
+        // Refresh the accuracy panel from the updated server state — the
+        // report entry was rewritten with new metrics + penalty list.
+        const javaPane = javaEl && javaEl.closest('.browser-pane');
+        if (javaPane) {
+            javaPane.querySelectorAll('.accuracy-panel').forEach(n => n.remove());
+            try {
+                const qs = new URLSearchParams({
+                    conversionId: currentConversionId,
+                    relativePath: currentBrowserFile.cobolPath
+                });
+                const diagResp = await fetch(`/api/code-comparison?${qs.toString()}`);
+                if (diagResp.ok) {
+                    const diagData = await diagResp.json();
+                    renderAccuracyPanel(javaPane, diagData);
+                    // Mutate the cached browser file so later clicks reflect the fix
+                    currentBrowserFile.accuracy = diagData.accuracy;
+                    currentBrowserFile.penalties = (diagData.accuracyBreakdown && diagData.accuracyBreakdown.semanticPenalties) || [];
+                }
+            } catch { /* non-fatal */ }
+        }
+
+        // Refresh the tree so the accuracy badge updates in place.
+        try {
+            const br = await fetch(`/api/browser/${currentConversionId}`);
+            if (br.ok) {
+                const data2 = await br.json();
+                if (data2 && Array.isArray(data2.files)) {
+                    browserFiles = data2.files;
+                    browserLoaded = true;
+                    renderBrowserTree(browserFiles);
+                    // Re-select the same row so the user doesn't lose context
+                    const row = document.querySelector(`.tree-file[data-path="${CSS.escape(currentBrowserFile.cobolPath)}"]`);
+                    if (row) row.classList.add('selected');
+                }
+            }
+        } catch { /* non-fatal */ }
+
+        const accMsg = (typeof data.newAccuracy === 'number') ? ` (accuracy now ${data.newAccuracy}%)` : '';
+        toast(`Java file repaired${accMsg}. Backup saved as .java.before-fix.`, 'success');
+    } catch (err) {
+        toast('Fix failed: ' + (err.message || err), 'error');
+    } finally {
+        if (fixBtn) { fixBtn.disabled = false; if (labelEl) labelEl.textContent = 'Fix with AI'; }
+    }
+}
+
+// Download the conversion output as a zip archive. The server streams it so
+// we just navigate the browser to the endpoint; it triggers a file save.
+async function downloadConversionOutput() {
+    if (!currentConversionId) {
+        toast('No active conversion to download yet.', 'warning');
+        return;
+    }
+    try {
+        // Pre-flight: HEAD the endpoint to surface errors (not-complete, missing)
+        // nicely as a toast instead of a broken download.
+        const head = await fetch(`/api/download/${currentConversionId}`, { method: 'GET' });
+        if (!head.ok) {
+            const err = await head.json().catch(() => ({}));
+            toast(err.error || `Download failed (${head.status})`, 'error');
+            return;
+        }
+        // Turn the response stream into a blob and trigger a save.
+        const blob = await head.blob();
+        const contentDisp = head.headers.get('Content-Disposition') || '';
+        const nameMatch = /filename="?([^"]+)"?/i.exec(contentDisp);
+        const filename = nameMatch ? nameMatch[1] : `conversion-${currentConversionId}.zip`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast(`Downloaded ${filename}`, 'success');
+    } catch (e) {
+        toast('Download failed: ' + (e.message || e), 'error');
+    }
+}
 
 // ─── Pre-conversion HITL: file selection modal ───────────────────────────
 let preConvertScan = null; // { inputPath, files, counts }
@@ -2406,6 +3265,30 @@ async function preConvertStart() {
     if (!preConvertScan || preConvertSelected.size === 0) return;
     const inputPath = preConvertScan.inputPath;
     const selected = Array.from(preConvertSelected);
+
+    // Cost warning: large selections spend real tokens. Compute total source
+    // bytes (sizeBytes is on each scan entry) and warn when above the
+    // "accidental-click" threshold — 50 files OR 500KB of COBOL source.
+    // Ballpark token estimate: 1 char ≈ 0.3 tokens for COBOL (it's verbose
+    // with lots of fixed-format whitespace, so a bit less dense than English).
+    const selectedSet = new Set(selected);
+    const selectedEntries = preConvertScan.files.filter(f => selectedSet.has(f.path));
+    const totalBytes = selectedEntries.reduce((s, f) => s + (f.sizeBytes || 0), 0);
+    const WARN_COUNT = 50;
+    const WARN_BYTES = 500 * 1024;
+    if (selected.length >= WARN_COUNT || totalBytes >= WARN_BYTES) {
+        const kb = Math.round(totalBytes / 1024);
+        const estInTokens = Math.round(totalBytes * 0.3);
+        // Rough upper bound: each file ~= input*2 + 4k output tokens (conv + likely repair)
+        const estTotalTokens = estInTokens * 2 + selected.length * 4000;
+        const msg =
+            `${selected.length} files · ${kb} KB of COBOL source.\n\n` +
+            `Estimated token cost: ~${estTotalTokens.toLocaleString()} tokens total (input + output, includes possible auto-repair passes).\n\n` +
+            `Run the conversion?`;
+        const go = await confirmDialog(msg, { title: 'Confirm large conversion', okText: 'Start anyway', cancelText: 'Cancel' });
+        if (!go) return;
+    }
+
     closePreConvertModal();
     // Pass the cloned/local inputPath as repoUrl so the converter doesn't re-clone
     await actuallyStartConversion(inputPath, selected);
@@ -2426,13 +3309,16 @@ async function postReviewFile(action) {
     // Use the currently-selected file in the browser
     const selected = document.querySelector('.tree-file.selected');
     if (!selected) {
-        alert('Select a file in the tree first.');
+        toast('Select a file in the tree first.', 'warning');
         return;
     }
     const fileId = selected.dataset.path;
     let note = null;
     if (action === 'reject') {
-        note = prompt('Optional reason for rejection:') || null;
+        const entered = await promptDialog('Optional reason for rejection (leave blank to skip):', { title: 'Reject file', okText: 'Reject', cancelText: 'Cancel' });
+        // User cancelled the prompt — abort the whole reject action.
+        if (entered === null) return;
+        note = entered.trim() || null;
     }
     try {
         const r = await fetch(`/api/post-review/${currentConversionId}/${encodeURIComponent(fileId)}`, {
@@ -2442,7 +3328,7 @@ async function postReviewFile(action) {
         });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Sign-off failed: ' + (err.error || r.status));
+            toast('Sign-off failed: ' + (err.error || r.status), 'error');
             return;
         }
         postReviewState[fileId] = { action, note, at: Date.now() };
@@ -2451,7 +3337,7 @@ async function postReviewFile(action) {
         selected.classList.add('reviewed-' + action);
         updatePostReviewBadge();
     } catch (err) {
-        alert('Sign-off failed: ' + err.message);
+        toast('Sign-off failed: ' + err.message, 'error');
     }
 }
 
@@ -2469,15 +3355,15 @@ window.postReviewFile = postReviewFile;
 // ─── Stop conversion ─────────────────────────────────────────────────────
 async function stopConversion() {
     if (!currentConversionId) return;
-    if (!confirm('Cancel the current conversion? Files in flight will be marked as skipped.')) return;
+    if (!(await confirmDialog('Cancel the current conversion? Files in flight will be marked as skipped.', { title: 'Cancel conversion', okText: 'Stop conversion', cancelText: 'Keep running', danger: true }))) return;
     try {
         const r = await fetch(`/api/cancel/${currentConversionId}`, { method: 'POST' });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Cancel failed: ' + (err.error || r.status));
+            toast('Cancel failed: ' + (err.error || r.status), 'error');
         }
     } catch (err) {
-        alert('Cancel failed: ' + err.message);
+        toast('Cancel failed: ' + err.message, 'error');
     }
 }
 
@@ -2659,18 +3545,21 @@ function updateReviewQueueBadge(awaitingCount) {
 }
 
 // ─── Toast (transient notifications) ─────────────────────────────────────
+// Legacy showToast — kept for compatibility with callers that pass rich HTML
+// (e.g. `<div class="toast-title">…</div><div class="toast-detail">…</div>`).
+// Forwards to the platform toast system but strips HTML to plain text so the
+// message lays out cleanly in the grid-based toast container.
 function showToast(message, kind) {
-    const c = document.getElementById('toastContainer');
-    if (!c) return;
-    const t = document.createElement('div');
-    t.className = 'toast ' + (kind || 'info');
-    t.innerHTML = message;
-    c.appendChild(t);
-    requestAnimationFrame(() => t.classList.add('visible'));
-    setTimeout(() => {
-        t.classList.remove('visible');
-        setTimeout(() => t.remove(), 400);
-    }, 5500);
+    let text = String(message || '');
+    // Strip HTML: swap <br>/block tags for newlines, then drop other tags.
+    text = text
+        .replace(/<\/?(?:div|p|br|li)[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    const typeMap = { success: 'success', warning: 'warning', error: 'error', info: 'info' };
+    return toast(text, typeMap[kind] || 'info', 5500);
 }
 window.showToast = showToast;
 
@@ -2711,13 +3600,9 @@ window.onConversionComplete = async function () {
         const acc = ((res.report && res.report.summary) || {}).averageAccuracy || 0;
         const failed = res.skippedError || 0;
         const kind = failed > 0 ? 'warning' : (ok === 0 ? 'error' : 'success');
-        showToast(
-            `<div class="toast-body">` +
-                `<div class="toast-title">Conversion complete</div>` +
-                `<div class="toast-detail">${ok} of ${total} files converted · ${acc}% avg accuracy${failed > 0 ? ' · ' + failed + ' failed' : ''}</div>` +
-            `</div>`,
-            kind
-        );
+        // Single-line toast: title + summary on one friendly line.
+        const summary = `${ok}/${total} converted · ${acc}% avg accuracy` + (failed > 0 ? ` · ${failed} failed` : '');
+        toast(`Conversion complete — ${summary}`, kind, 5000);
     } catch {}
 };
 
@@ -2883,7 +3768,7 @@ async function chatAct(action) {
 
 async function chatBulk(action) {
     if (!currentConversionId) return;
-    if (action === 'reject' && !confirm('Reject ALL pending files at once?')) return;
+    if (action === 'reject' && !(await confirmDialog('Reject ALL pending files at once?', { title: 'Reject all', okText: 'Reject all', danger: true }))) return;
     chatMessage('user', `${action === 'approve' ? 'Approve all' : 'Reject all'}`);
 
     // Snapshot pending file IDs BEFORE the call so we can mark them handled
@@ -3021,6 +3906,10 @@ async function runSelectedFile() {
                 javaMeta.textContent = `exit ${data.java.exitCode} · ${data.java.duration}ms`;
             }
         }
+        // Surface obvious divergence between COBOL and Java outputs so the user
+        // knows when the Java is fabricating behavior (simulated CALLs, invented
+        // HTTP handling, fake data) instead of matching the source program.
+        renderRunDivergenceBanner(data);
     } catch (err) {
         if (cobolEl) cobolEl.querySelector('code').textContent = '[Network error]';
         if (javaEl) javaEl.querySelector('code').textContent = err.message;
@@ -3032,6 +3921,90 @@ async function runSelectedFile() {
             else runBtn.textContent = 'Run program';
         }
     }
+}
+
+// Show an AI-powered verdict comparing the COBOL and Java run outputs.
+// Regex heuristics can't anticipate the N possible output shapes, so we ask
+// the agent to decide if the two programs are behaving equivalently.
+// The banner updates as soon as the AI responds (non-blocking).
+async function renderRunDivergenceBanner(data) {
+    const panel = document.getElementById('runOutputPanel');
+    if (!panel) return;
+    panel.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
+
+    // Only run the comparison if we have something to compare. If either side
+    // didn't run at all, skip the banner.
+    if (!data.cobol || !data.java) return;
+    if (!data.cobol.output && !data.java.output) return;
+
+    // Placeholder while the AI is thinking — so the user knows we're analyzing.
+    const placeholder = document.createElement('div');
+    placeholder.className = 'run-diverge-banner run-diverge-info';
+    placeholder.innerHTML = `<strong>Analyzing outputs…</strong><br><span class="subtle">AI is comparing the COBOL and Java runs.</span>`;
+    const grid = panel.querySelector('.run-output-grid');
+    if (grid) panel.insertBefore(placeholder, grid);
+    else panel.appendChild(placeholder);
+
+    const fileName = (currentBrowserFile && currentBrowserFile.cobolPath) || '';
+
+    let verdict;
+    try {
+        const r = await fetch('/api/compare-runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cobolOutput: data.cobol.output || '',
+                javaOutput:  data.java.output  || '',
+                // Compile/runtime error strings matter — without them the AI
+                // can't tell "COBOL compile failed" from "COBOL ran silently".
+                cobolError:  data.cobol.error  || '',
+                javaError:   data.java.error   || '',
+                cobolExit:   data.cobol.exitCode,
+                javaExit:    data.java.exitCode,
+                cobolTimedOut: !!data.cobol.timedOut,
+                javaTimedOut:  !!data.java.timedOut,
+                fileName,
+                // Identify the converted file so the backend can read source
+                // straight from disk — lets the comparator reason about DISPLAY
+                // statements and computations, not just output strings.
+                conversionId: currentConversionId || undefined,
+                relativePath: (currentBrowserFile && currentBrowserFile.cobolPath) || undefined
+            })
+        });
+        verdict = await r.json();
+    } catch (err) {
+        verdict = {
+            verdict: 'unknown', severity: 'info',
+            title: 'Comparison unavailable',
+            reasons: [err.message || 'Network error']
+        };
+    }
+
+    // Refresh the banner — the placeholder may have been removed if the user
+    // ran again; re-query the panel each time.
+    const stillPanel = document.getElementById('runOutputPanel');
+    if (!stillPanel) return;
+    stillPanel.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
+
+    const icon =
+        verdict.severity === 'ok'      ? '✓' :
+        verdict.severity === 'warning' ? '⚠' :
+        verdict.severity === 'error'   ? '✕' :
+                                          'ℹ';
+
+    const banner = document.createElement('div');
+    banner.className = 'run-diverge-banner run-diverge-' + (verdict.severity || 'info');
+    const reasons = Array.isArray(verdict.reasons) ? verdict.reasons : [];
+    let html = `<strong>${icon} ${(verdict.title || 'Comparison').replace(/</g, '&lt;')}</strong>`;
+    if (reasons.length > 0) {
+        html += '<br>' + reasons
+            .map(r => `• ${String(r).replace(/</g, '&lt;')}`)
+            .join('<br>');
+    }
+    banner.innerHTML = html;
+    const grid2 = stillPanel.querySelector('.run-output-grid');
+    if (grid2) stillPanel.insertBefore(banner, grid2);
+    else stillPanel.appendChild(banner);
 }
 
 function closeRunOutput() {
@@ -3501,6 +4474,7 @@ runSelectedFile = async function () {
                 javaMeta.textContent = `exit ${data.java.exitCode} · ${data.java.duration}ms`;
             }
         }
+        renderRunDivergenceBanner(data);
     } catch (err) {
         if (cobolEl) cobolEl.querySelector('code').textContent = '[Network error]';
         if (javaEl) javaEl.querySelector('code').textContent = err.message;
@@ -3933,8 +4907,17 @@ function addCopyButton(preEl, label) {
             setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         }
     });
-    preEl.parentElement.style.position = 'relative';
-    preEl.parentElement.appendChild(btn);
+    // If the pane has a header, insert Copy as a flex child so it lines up
+    // next to other header buttons (e.g. "Fix with AI"). Otherwise fall back
+    // to the absolute-positioned floating corner button.
+    const header = preEl.parentElement.querySelector('.pane-header');
+    if (header) {
+        btn.classList.add('copy-btn--inline');
+        header.appendChild(btn);
+    } else {
+        preEl.parentElement.style.position = 'relative';
+        preEl.parentElement.appendChild(btn);
+    }
 }
 // Observe browser panes and add copy buttons when content loads
 const _origSelectForCopy = selectBrowserFile;
@@ -4053,7 +5036,7 @@ async function exportReport() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     } catch (err) {
-        alert('Export failed: ' + err.message);
+        toast('Export failed: ' + err.message, 'error');
     }
 }
 window.exportReport = exportReport;
@@ -4505,7 +5488,7 @@ async function restoreSession() {
                             return;
                         }
                         if (typeof viewCodeComparison === 'function' && nodeData.path) {
-                            viewCodeComparison(nodeData.path, nodeData.label);
+                            viewCodeComparison(nodeData.path, nodeData.label, nodeData.id);
                         }
                     },
                     onStateUpdate: (counts) => {
@@ -4597,6 +5580,7 @@ function resetSession() {
     localStorage.removeItem('lastConversionPhase');
     currentConversionId = null;
     setPhase('input');
+
     // Hide all results
     document.getElementById('kpiBar')?.classList.add('hidden');
     document.getElementById('browserSection')?.classList.add('hidden');
@@ -4605,10 +5589,42 @@ function resetSession() {
     document.getElementById('risksPanel')?.classList.add('hidden');
     document.getElementById('tokenPanel')?.classList.add('hidden');
     if (window.cobolGraph) window.cobolGraph.destroy();
+
+    // Clear the URL / repo input box
+    if (repoInput) repoInput.value = '';
+
+    // Clear the Activity timeline and its unread badge
+    const timeline = document.getElementById('detailsTimeline');
+    if (timeline) {
+        timeline.innerHTML = '<div class="empty-state">Activity will appear here once a conversion starts.</div>';
+    }
+    const drawerBadge = document.getElementById('drawerBadge');
+    if (drawerBadge) { drawerBadge.textContent = '0'; drawerBadge.classList.add('hidden'); }
+
+    // Reset legacy log / file / history containers kept alive for compatibility
+    const logs = document.getElementById('logsOutput');          if (logs) logs.textContent = '';
+    const fileList = document.getElementById('detailsFilesList'); if (fileList) fileList.innerHTML = '';
+    const history  = document.getElementById('historyList');     if (history)  history.innerHTML = '';
+
+    // Reset chat panel state (HITL chat messages + status pill)
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) { chatMessages.innerHTML = ''; chatMessages.classList.add('hidden'); }
+    const chatStatus = document.getElementById('chatStatusPill');
+    if (chatStatus) { chatStatus.textContent = 'Idle'; chatStatus.className = 'chat-status idle'; }
+
+    // Reset any review-mode bookkeeping the frontend keeps in globals
+    window._filePhaseTracker = {};
+    if (window.cobolGraph) { try { window.cobolGraph.fileStates = {}; } catch {} }
+
     convertBtn.dataset.busy = '0';
     if (window.updateConvertEnabled) window.updateConvertEnabled();
     const stopBtn = document.getElementById('stopBtn');
     if (stopBtn) { stopBtn.disabled = true; }
+
+    // Exit maximized results view if it's currently open
+    if (document.body.classList.contains('browser-maximized')) {
+        document.body.classList.remove('browser-maximized');
+    }
 }
 window.resetSession = resetSession;
 

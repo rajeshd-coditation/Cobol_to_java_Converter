@@ -41,6 +41,88 @@ The framework supports:
 
 ---
 
+## Key Capabilities
+
+A walkthrough of what the product does — grouped by the user's journey.
+
+### Discovery
+
+**1. One-click repository exploration**
+Paste any GitHub URL or local path. The scanner clones (if remote), walks the tree, and surfaces every source file. No manual install or CLI tooling required to get started.
+*How:* shallow `git clone --depth 1` for speed, then a recursive directory walk that skips build/VCS noise (`node_modules`, `.git`, `dist`, `build`, `target`, etc.).
+
+**2. Intelligent file classification**
+The scanner distinguishes COBOL programs, copybooks, JCL jobs, data files, and unrelated assets. JCL is flagged as out-of-scope, copybooks are routed to be embedded as Java data classes, programs are queued for conversion.
+*How:* extension-bucketing across five categories (`.cbl/.cob/.cobol` → programs, `.cpy/.copy` → copybooks, `.jcl/.proc` → JCL, `.dat/.csv/.txt` → data, everything else → other), plus downstream checks like *"has `PROGRAM-ID`"* to catch mis-extensioned files.
+
+**3. Selective conversion**
+You choose which files to convert — ideal for incremental modernization, scoped proofs-of-concept, or focused regression runs.
+*How:* the UI posts a `selectedFiles[]` array to the conversion endpoint; the backend filters the discovered set to that allow-list before building the dependency graph.
+
+### Understanding
+
+**4. Dependency graph via static analysis**
+Every file is parsed for `CALL` and `COPY` statements, and a dependency graph is built before any conversion runs. Because COBOL resolves `CALL` by **PROGRAM-ID at runtime** (not filename), the graph indexes both — so a `CALL 'FOO'` that targets a file with `PROGRAM-ID. FOO.` resolves correctly even if the file is named differently.
+*How:* regex-based extraction of `CALL '…'` and `COPY …` targets + a second-pass regex that captures each file's `PROGRAM-ID` (including the multi-line form), merged into a single name-index so targets resolve against both filenames and declared program IDs.
+
+**5. Live conversion visualization**
+As conversion runs, nodes on the graph animate through states — *pending → converting → awaiting-review → done / failed*. The user watches progress instead of tailing logs.
+*How:* the browser polls `/api/graph/:id` for per-file state deltas; Cytoscape.js re-styles nodes by CSS class, so only what changed re-renders.
+
+**6. Dependency-aware wave processing**
+Files are stratified into dependency levels: Level 0 has no COBOL dependencies, Level 1 depends only on Level 0, and so on. Each level runs in parallel; levels run sequentially. This guarantees `CALL` chains resolve correctly at Java runtime.
+*How:* a topological sort over the CALL graph groups files into waves; within each wave, a `Promise.all`-with-concurrency-cap runs up to 5 AI conversions in parallel, while waves are awaited sequentially.
+
+### AI conversion
+
+**7. Azure AI agent translation**
+An Azure AI Foundry agent preserves business logic, data structures, control flow, and arithmetic semantics. Output is idiomatic Java — not a line-for-line transliteration.
+*How:* a dedicated agent (persistent `asst_…` ID) with a curated system prompt and dialect hints; the agent is invoked per-file over Azure's assistants API, with the COBOL source + any detected dependencies passed as context.
+
+**8. Parallel batch execution**
+Up to 5 files convert concurrently within each dependency wave, so a 30-program application doesn't serialize into 30 sequential API calls.
+*How:* a bounded concurrency semaphore (`BATCH_SIZE = 5`) around the per-file AI call, giving roughly 5× throughput versus serial while respecting Azure rate limits.
+
+### Quality — the differentiator
+
+**9. Per-file accuracy score with a reason**
+Every converted file receives a **0–100% confidence score** and a structured metric breakdown (COBOL lines vs Java lines, data items vs fields, procedures vs methods) — not a black-box number.
+*How:* a weighted rubric combining *code-volume ratio* (35%), *data-structure coverage* (25%), *procedure coverage* (15%), *completeness checks* (10%), and *semantic checks* (15%), computed deterministically from regex-extracted metrics over both sources.
+
+**10. Semantic penalty detection**
+Patterns that need human verification are explicitly flagged: *File I/O simulated*, *Packed decimal simplified*, *CICS/IMS/DLI simplified*, *BMS adapted*, *Contains simulation markers*, *DEPENDING ON simplified*, and more. Users never wonder what the missing % represents.
+*How:* each feature-specific rule looks for a COBOL trigger (e.g. `SELECT … ASSIGN`, `COMP-3`, `EXEC CICS`) and checks whether the Java uses a real counterpart (`BufferedReader`, `BigDecimal`, a CICS framework) — if not, a penalty is recorded with a named reason.
+
+**11. Actionable guidance, not just labels**
+Each flag comes with specific "what to check" guidance. *Packed decimal* → verify `BigDecimal` usage for rounding and scale. *CICS* → you'll need JCICS or an equivalent transaction framework. The reviewer gets the checklist automatically.
+*How:* a curated `PENALTY_GUIDANCE` map in the frontend pairs each penalty label with reviewer-facing text; when accuracy < 100%, the guidance is rendered as a commented banner prepended to the generated Java.
+
+**12. Human-in-the-loop (HITL) review, toggleable mid-run**
+Optional pause-after-each-file workflow — reviewer can approve, reject, or edit the Java before it's written. The toggle works seamlessly mid-conversion: switch it off and the queue drains; switch it on and future files start pausing. No restart, no deadlock.
+*How:* the worker `await`s a per-file `Promise` that's only resolved by a reviewer action (via `/api/review/:id/:fileId`); toggling HITL off hits `/api/review-mode/:id`, which auto-resolves every pending promise with "approve" so the worker continues.
+
+### Verification
+
+**13. Side-by-side COBOL / Java comparison**
+Click any file in the Results browser to see the original COBOL and generated Java together. The accuracy banner sits directly above the Java code, so reviewers see *"71% confidence — verify packed decimal"* before reading a line.
+*How:* a single endpoint (`/api/code-comparison`) takes `conversionId + relativePath`, looks up the file's report entry, and returns the Java source plus the structured accuracy breakdown — the UI renders both in one pass.
+
+**14. Run-and-compare output parity**
+Both the original COBOL (via GnuCOBOL) and the generated Java can be executed with identical input, and outputs are diffed automatically. When `stdout` matches, the business logic survived the translation — the strongest possible verification short of a full test suite.
+*How:* the backend compiles the original with `cobc` and runs both programs under the same `stdin`, captures `stdout` / exit codes, and returns a structured diff the UI renders side-by-side.
+
+### Platform polish
+
+**15. In-app dialogs and notifications**
+Every prompt, confirm, and notification is a platform-native modal or toast — no browser "localhost:3000 says…" dialogs. Keyboard shortcuts (Esc, Enter), focus management, and hover tooltips throughout.
+*How:* a small dialog/toast layer (`toast()`, `confirmDialog()`, `promptDialog()`) returns `Promise`-based results and fully replaces `window.alert/confirm/prompt`; the shared modal uses `role="dialog"`/`aria-modal` for screen reader support.
+
+**16. Resilient: checkpointed and resumable**
+Completed conversions persist across server restarts. Revisit a conversion hours later and see the same files, same Java, same accuracy breakdown. Nothing is lost.
+*How:* every conversion's full state (report, file states, accuracy breakdowns, review history) is serialized to a JSON checkpoint in the OS temp dir; on server boot, completed checkpoints are rehydrated into memory (in-flight ones are skipped since their worker promises can't be restored).
+
+---
+
 ## Technology Stack
 
 | Layer          | Technology                 |
@@ -222,8 +304,12 @@ AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
-AZURE_AGENT_ID=your-agent-id
 ```
+
+> `AZURE_AGENT_ID` is no longer used — the Assistants/Agent API path was
+> removed. Chat Completions works for both Azure OpenAI and AI Foundry and
+> is the only code path now. If your `.env` still has `AZURE_AGENT_ID=...`,
+> it's safely ignored.
 
 ---
 

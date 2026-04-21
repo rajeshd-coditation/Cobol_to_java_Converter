@@ -16,7 +16,12 @@ Add these to your .env file:
     AZURE_OPENAI_API_KEY=your-azure-api-key
     AZURE_OPENAI_API_VERSION=2024-05-01-preview
     AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
-    AZURE_AGENT_ID=your-agent-id (if using AI Foundry Agents)
+
+NOTE: AZURE_AGENT_ID is no longer used. The Assistants/Agent API path was
+removed in favour of Chat Completions (which works identically for both
+Azure OpenAI and AI Foundry and carries the full conversion context —
+retries, truncation detection, copybook inlining, sibling signatures,
+JCL DD mapping). If your .env still has AZURE_AGENT_ID, it is ignored.
 
 ================================================================================
 WHERE TO FIND EACH VALUE IN AZURE PORTAL
@@ -62,16 +67,12 @@ WHERE TO FIND EACH VALUE IN AZURE PORTAL
    
    Alternative: Azure AI Studio → Deployments → Your deployment name
 
-5. AZURE_AGENT_ID (for AI Foundry Agents)
-   ---------------------------------------
-   Location: Azure AI Foundry Portal → Agents → Your Agent
-   
-   Steps:
-   a) Go to https://ai.azure.com
-   b) Select your project
-   c) Navigate to "Build" → "Agents"
-   d) Click on your agent
-   e) Copy the Agent ID from the agent details page
+5. AZURE_AGENT_ID — REMOVED
+   -------------------------
+   The Assistants/Agent API code path was deleted. Chat Completions is
+   now the sole conversion path and handles both Azure OpenAI and AI
+   Foundry. This variable is no longer read; leaving it in .env is
+   harmless but has no effect.
    
    Format: asst_xxxxxxxxxxxxxxxxxxxxx
 

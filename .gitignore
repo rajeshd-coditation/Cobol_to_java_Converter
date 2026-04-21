@@ -106,3 +106,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# graphify artifacts — per-run analysis outputs (not checked in)
+graphify-out/
+opensourcecobol4j/tools/web-ui/graphify-out/

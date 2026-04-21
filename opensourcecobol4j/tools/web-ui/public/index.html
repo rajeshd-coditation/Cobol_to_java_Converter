@@ -322,6 +322,19 @@
                             <span id="browserCount">0 files</span>
                             <span class="browser-hint">Click a file to view COBOL and Java side by side.</span>
                         </div>
+                        <div class="browser-header-actions">
+                            <button type="button" id="browserDownloadBtn" class="btn-pill btn-sm browser-download-btn"
+                                    title="Download converted Java + manual-review guide as a zip"
+                                    aria-label="Download conversion output">
+                                <span class="browser-download-icon">↓</span>
+                                <span class="browser-download-label">Download</span>
+                            </button>
+                            <button type="button" id="browserMaximizeBtn" class="btn-pill btn-sm browser-maximize-btn"
+                                    title="Maximize (Esc to exit)" aria-label="Maximize Results browser">
+                                <span class="browser-maximize-icon">⛶</span>
+                                <span class="browser-maximize-label">Maximize</span>
+                            </button>
+                        </div>
                     </div>
                     <!-- Compact terminal: inline input + side-by-side output -->
                     <div id="runOutputPanel" class="run-terminal hidden">
@@ -367,6 +380,12 @@
                         <div class="browser-pane">
                             <div class="pane-header java-header">
                                 <span class="pane-title" id="browserJavaTitle">Generated Java</span>
+                                <button type="button" id="fixJavaBtn" class="btn-pill btn-sm fix-java-btn hidden"
+                                        title="Use AI to repair this Java file using the COBOL source, compile errors, run output, and known dependencies as context"
+                                        aria-label="Fix this Java file with AI">
+                                    <span class="fix-java-icon">✨</span>
+                                    <span class="fix-java-label">Fix with AI</span>
+                                </button>
                             </div>
                             <pre id="browserJavaCode" class="browser-code"><code>Select a file from the tree to preview…</code></pre>
                         </div>
@@ -646,6 +665,25 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cobol.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+
+    <!-- Platform-native toast + confirm/prompt dialog (replaces window.alert / confirm / prompt) -->
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+    <div id="appDialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
+        <div class="modal-content glass-card app-dialog">
+            <div class="modal-header">
+                <h3 id="appDialogTitle">Confirm</h3>
+            </div>
+            <div class="app-dialog-body">
+                <p id="appDialogMessage"></p>
+                <input type="text" id="appDialogInput" class="app-dialog-input hidden" autocomplete="off" />
+            </div>
+            <div class="app-dialog-actions">
+                <button type="button" class="btn-pill app-dialog-cancel" id="appDialogCancelBtn">Cancel</button>
+                <button type="button" class="btn-pill btn-primary app-dialog-ok" id="appDialogOkBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 

@@ -1,6 +1,25 @@
 /**
- * AI Agent Service for COBOL to Java Conversion
- * Uses OpenAI GPT-4 to analyze failed conversions and suggest fixes
+ * OpenAI-direct fallback for COBOL→Java conversion failure analysis.
+ *
+ * Role after the 2026-04-21 cleanup:
+ *   - Used ONLY when Azure isn't configured (the primary path is `azureAgent.js`).
+ *   - The `/api/ai/analyze` endpoint prefers `azureAgent.analyzeConversionFailure`
+ *     when Azure is available, and routes here only as a fallback — so this
+ *     file's `analyzeConversionFailure` is rarely hit in production.
+ *   - `getQuickSuggestions` stays as the single-source regex-based first-pass
+ *     hinter (curated common-error patterns); not worth duplicating into azureAgent.
+ *
+ * Exposed surface is intentionally small:
+ *   - initializeOpenAI() — config; called at server boot.
+ *   - analyzeConversionFailure(src, log, type, context?) — Azure-fallback analyst.
+ *   - getQuickSuggestions(type, log) — regex hinter (always available).
+ *   - isAvailable() — did initializeOpenAI find a key?
+ *
+ * If you're tempted to add a new OpenAI-direct feature here, first ask whether
+ * it should live in azureAgent.js instead. Duplicated conversion-side logic is
+ * how prompt drift happens — the no-fallback rule, copybook inlining, sibling
+ * signatures, JCL context etc. all live in ONE place (azureAgent.js) for a
+ * reason. Keep this file narrow.
  */
 
 const OpenAI = require('openai');
@@ -28,9 +47,12 @@ function initializeOpenAI() {
  * @param {string} cobolSource - The original COBOL source code
  * @param {string} errorLog - The error log from the conversion attempt
  * @param {string} errorType - Type of error (CONVERT_FAIL, COMPILE_FAIL, EXEC_FAIL)
+ * @param {object} [context] - Optional repo-level context (calledPrograms,
+ *        copybooks, programIdToJavaClass, copybookBodies). When provided the
+ *        analyst can reference real repo state rather than give generic advice.
  * @returns {Promise<object>} Analysis result with suggestions
  */
-async function analyzeConversionFailure(cobolSource, errorLog, errorType) {
+async function analyzeConversionFailure(cobolSource, errorLog, errorType, context = {}) {
     if (!openai) {
         return {
             success: false,
@@ -57,6 +79,41 @@ Common issues include:
 
 Always be specific and provide code examples when possible.`;
 
+    // Optional repo-context block — lets the analyst cite real copybooks / CALL
+    // targets / sibling classes instead of generic "make sure X exists" advice.
+    let contextBlock = '';
+    const calls = Array.isArray(context.calledPrograms) ? context.calledPrograms : [];
+    const copies = Array.isArray(context.copybooks) ? context.copybooks : [];
+    const pidMap = context.programIdToJavaClass || {};
+    const cpyBodies = context.copybookBodies || {};
+    if (calls.length || copies.length || Object.keys(pidMap).length) {
+        contextBlock = '\n\n**Repo Context:**\n';
+        if (calls.length) {
+            contextBlock += 'CALL targets:\n';
+            for (const name of calls) {
+                const javaClass = pidMap[name.toUpperCase()];
+                contextBlock += javaClass
+                    ? `- ${name} → ${javaClass} (in this conversion)\n`
+                    : `- ${name} → external, not in repo\n`;
+            }
+        }
+        if (copies.length) {
+            contextBlock += 'COPY targets:\n';
+            for (const name of copies) {
+                const key = name.toUpperCase();
+                contextBlock += cpyBodies[key]
+                    ? `- ${name} (source available below)\n`
+                    : `- ${name} (source NOT in repo)\n`;
+            }
+            for (const name of copies) {
+                const body = cpyBodies[name.toUpperCase()];
+                if (body) {
+                    contextBlock += `\n\`\`\`cobol copybook: ${name}\n${body}\n\`\`\`\n`;
+                }
+            }
+        }
+    }
+
     const userPrompt = `A COBOL program failed to convert to Java. Please analyze and provide suggestions.
 
 **Error Type:** ${errorType}
@@ -68,8 +125,8 @@ ${errorLog || 'No error log available'}
 
 **COBOL Source Code:**
 \`\`\`cobol
-${cobolSource.substring(0, 8000)}${cobolSource.length > 8000 ? '\n... (truncated)' : ''}
-\`\`\`
+${cobolSource}
+\`\`\`${contextBlock}
 
 Please provide:
 1. **Root Cause Analysis**: What is causing this conversion to fail?
@@ -109,82 +166,11 @@ Please provide:
     }
 }
 
-/**
- * Attempt to auto-fix a COBOL file for successful conversion
- * @param {string} cobolSource - The original COBOL source code
- * @param {string} errorLog - The error log from the conversion attempt
- * @returns {Promise<object>} Fixed code or error
- */
-async function autoFixCobolCode(cobolSource, errorLog) {
-    if (!openai) {
-        return {
-            success: false,
-            error: 'AI agent not initialized. Please configure your OpenAI API key in the .env file.'
-        };
-    }
-
-    const systemPrompt = `You are a COBOL code transformer. Your job is to modify COBOL source code to make it compatible with the opensourcecobol4j (cobj) compiler.
-
-Rules:
-1. Return ONLY the modified COBOL code, no explanations
-2. Preserve the original program logic
-3. Remove or stub out unsupported features (CICS, DB2, VSAM)
-4. Fix syntax issues that prevent compilation
-5. Add missing required divisions if absent
-6. Comment out COPY statements for missing copybooks with a note
-7. Keep the code as close to the original as possible
-
-If the code cannot be fixed, return the original code with comments explaining issues.`;
-
-    const userPrompt = `Fix this COBOL code to make it compatible with opensourcecobol4j:
-
-**Error:**
-\`\`\`
-${errorLog || 'Conversion failed'}
-\`\`\`
-
-**Original COBOL:**
-\`\`\`cobol
-${cobolSource}
-\`\`\`
-
-Return only the fixed COBOL code:`;
-
-    try {
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ],
-            temperature: 0.2,
-            max_tokens: 4000
-        });
-
-        let fixedCode = response.choices[0].message.content;
-
-        // Clean up markdown code blocks if present
-        fixedCode = fixedCode.replace(/^```cobol\n?/i, '').replace(/\n?```$/i, '');
-        fixedCode = fixedCode.replace(/^```\n?/, '').replace(/\n?```$/, '');
-
-        return {
-            success: true,
-            fixedCode: fixedCode.trim(),
-            model: response.model,
-            usage: {
-                promptTokens: response.usage.prompt_tokens,
-                completionTokens: response.usage.completion_tokens,
-                totalTokens: response.usage.total_tokens
-            }
-        };
-    } catch (error) {
-        console.error('AI Auto-fix Error:', error.message);
-        return {
-            success: false,
-            error: `AI auto-fix failed: ${error.message}`
-        };
-    }
-}
+// autoFixCobolCode removed — its only caller (/api/ai/fix endpoint) was
+// never wired to the frontend. If a COBOL-source auto-fix is needed in the
+// future, reintroduce it alongside the Java repair path (fixJavaCode in
+// azureAgent.js) so both sides of the conversion share the same retry /
+// truncation / context plumbing.
 
 /**
  * Get quick suggestions for common error patterns
@@ -265,7 +251,6 @@ function isAvailable() {
 module.exports = {
     initializeOpenAI,
     analyzeConversionFailure,
-    autoFixCobolCode,
     getQuickSuggestions,
     isAvailable
 };

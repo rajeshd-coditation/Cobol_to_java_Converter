@@ -933,6 +933,507 @@ body {
 }
 @media (max-width: 1280px) { .browser-grid { grid-template-columns: 220px 1fr 1fr; } }
 
+/* ── Maximize mode: Results browser fills the viewport ─────────────── */
+.browser-header-actions { display: flex; gap: 8px; align-items: center; }
+.browser-maximize-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px !important;
+    height: 30px !important;
+    font-size: 11px !important;
+    cursor: pointer;
+}
+.browser-maximize-btn:hover { background: rgba(117, 69, 255, 0.14) !important; }
+.browser-maximize-icon { font-size: 12px; line-height: 1; }
+.browser-download-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px !important;
+    height: 30px !important;
+    font-size: 11px !important;
+    cursor: pointer;
+}
+.browser-download-btn:hover { background: rgba(34, 197, 94, 0.14) !important; border-color: rgba(34, 197, 94, 0.35) !important; color: var(--c-success-light, #86efac) !important; }
+.browser-download-icon { font-size: 13px; line-height: 1; font-weight: 700; }
+body.theme-light .browser-download-btn:hover { background: #dcfce7 !important; color: #166534 !important; }
+
+/* "Fix with AI" button inside the Java pane header.
+   Uses the Coditation accent (#7c5cff) to match the theme, sits right-aligned
+   in the header row next to the Copy button (which uses the same shared flex
+   layout set on .pane-header.java-header below). */
+.pane-header.java-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-right: 8px;           /* keeps buttons from touching the pane border */
+}
+.pane-header.java-header .pane-title {
+    flex: 1 1 auto;
+    min-width: 0;                 /* lets the title truncate on small widths */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Button actions group — gives buttons a shared row on the right */
+.pane-header.java-header .fix-java-btn,
+.pane-header.java-header .copy-btn.copy-btn--inline {
+    flex: 0 0 auto;
+    order: 2;
+}
+.fix-java-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 12px !important;
+    height: 26px !important;
+    font-size: 11.5px !important;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    line-height: 1;
+    border-radius: 6px !important;
+    cursor: pointer;
+    /* Solid-fill primary treatment so it reads clearly on both light and
+       dark code-pane backgrounds — the previous translucent tint was too
+       subtle on the light Java header and disappeared visually. */
+    background: #7c5cff !important;
+    color: #ffffff !important;
+    border: 1px solid #6a4ee8 !important;
+    box-shadow: 0 1px 3px rgba(124, 92, 255, 0.35);
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 150ms, box-shadow 150ms, transform 100ms;
+}
+.fix-java-btn:hover {
+    background: #6a4ee8 !important;
+    color: #ffffff !important;
+    border-color: #5a3dc2 !important;
+    box-shadow: 0 2px 6px rgba(124, 92, 255, 0.50);
+    transform: translateY(-1px);
+}
+.fix-java-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(124, 92, 255, 0.35);
+}
+.fix-java-btn[disabled] {
+    opacity: 0.70;
+    cursor: wait;
+    transform: none;
+}
+.fix-java-icon {
+    font-size: 11px;
+    line-height: 1;
+    display: inline-block;
+}
+/* Dark-mode variant: slightly lighter surface + stronger glow, same white text */
+body:not(.theme-light) .fix-java-btn {
+    background: #7c5cff !important;
+    color: #ffffff !important;
+    border-color: #8a6dff !important;
+    box-shadow: 0 1px 4px rgba(124, 92, 255, 0.55);
+}
+body:not(.theme-light) .fix-java-btn:hover {
+    background: #8a6dff !important;
+    color: #ffffff !important;
+    border-color: #9980ff !important;
+    box-shadow: 0 2px 8px rgba(124, 92, 255, 0.70);
+}
+
+/* ─── Fix-with-AI progress panel ────────────────────────────────────────
+   Slide-out from the right edge while /api/fix-java streams step events.
+   Each step is a list item that fills in live as the server pushes events.
+   Keeps the user informed about the 10-30s repair without a silent spinner. */
+.fix-progress-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 380px;
+    max-width: 92vw;
+    height: 100vh;
+    background: var(--c-bg-raised, #ffffff);
+    border-left: 1px solid rgba(124, 92, 255, 0.25);
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    z-index: 9500;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 220ms ease-out;
+    font-family: 'Inter', system-ui, sans-serif;
+}
+.fix-progress-panel.open { transform: translateX(0); }
+body:not(.theme-light) .fix-progress-panel {
+    background: #141230;
+    border-left-color: rgba(124, 92, 255, 0.40);
+}
+.fix-progress-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid rgba(124, 92, 255, 0.18);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.fix-progress-header .title {
+    font-weight: 600;
+    font-size: 14px;
+    flex: 1;
+}
+.fix-progress-header .file {
+    font-size: 11px;
+    color: var(--c-muted, #888);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.fix-progress-close {
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--c-muted, #666);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.fix-progress-close:hover { background: rgba(0, 0, 0, 0.05); }
+.fix-progress-steps {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 18px;
+    margin: 0;
+    list-style: none;
+}
+.fix-progress-steps li {
+    padding: 8px 0;
+    font-size: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    line-height: 1.45;
+}
+body:not(.theme-light) .fix-progress-steps li {
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+.fix-progress-steps .ico {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    margin-top: 1px;
+}
+.fix-progress-steps .step-body { flex: 1; min-width: 0; }
+.fix-progress-steps .label { font-weight: 500; }
+.fix-progress-steps .meta {
+    display: block;
+    font-size: 10.5px;
+    color: var(--c-muted, #888);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    margin-top: 2px;
+}
+.fix-progress-steps li.running .ico { animation: fpSpin 1s linear infinite; }
+@keyframes fpSpin { to { transform: rotate(360deg); } }
+.fix-progress-steps li.done .ico { color: #22c55e; }
+.fix-progress-steps li.error .ico { color: #ef4444; }
+.fix-progress-footer {
+    padding: 12px 18px 16px;
+    border-top: 1px solid rgba(124, 92, 255, 0.18);
+    font-size: 11.5px;
+    color: var(--c-muted, #888);
+}
+.fix-progress-footer .compile-ok { color: #15803d; font-weight: 600; }
+.fix-progress-footer .compile-fail { color: #b91c1c; font-weight: 600; }
+
+/* Maximized view: one page-level scroll.
+   The section itself is the ONLY scrollable surface — panes don't have their
+   own scrollbars. Each pane grows to a reasonable max height, and when the
+   combined content exceeds the viewport the user scrolls the whole section
+   as a single page. Much easier to navigate than nested scroll regions. */
+body.browser-maximized {
+    overflow: hidden !important;  /* body doesn't scroll; the section does */
+}
+body.browser-maximized .browser-section {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    padding: 16px 20px 20px 20px;
+    background: var(--c-bg, #07061f);
+    box-sizing: border-box;
+    /* Single scrollable surface for the entire maximized UI */
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    display: block;
+}
+body.browser-maximized .browser-header {
+    position: sticky;
+    top: -16px;                /* stick under the section's top padding */
+    z-index: 10;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    margin: 0 0 12px 0;
+    background: var(--c-bg, #07061f);
+    border-bottom: 1px solid var(--c-border, rgba(255, 255, 255, 0.08));
+}
+body.theme-light.browser-maximized .browser-header { background: #ffffff; }
+
+body.browser-maximized #runOutputPanel {
+    /* Grows to its content — the outer section scrolls if needed */
+    max-height: none !important;
+    overflow: visible !important;
+    margin-bottom: 12px;
+}
+body.browser-maximized .browser-grid {
+    /* Let the grid be as tall as the tallest column needs. Outer section
+       scrolls; nothing here does. */
+    height: auto !important;
+    min-height: 60vh;
+    overflow: visible !important;
+    grid-template-columns: 280px 1fr 1fr;
+    align-items: stretch;
+}
+body.browser-maximized .browser-grid > * {
+    min-width: 0;
+    min-height: 0;
+}
+body.browser-maximized .browser-tree {
+    /* Tree keeps a soft cap so it doesn't dominate the view on huge repos */
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: sticky;
+    top: 70px;            /* sits below the sticky header */
+    align-self: start;
+}
+body.browser-maximized .browser-pane {
+    display: flex !important;
+    flex-direction: column;
+    overflow: visible !important;   /* no internal scroll */
+    height: auto;
+}
+body.browser-maximized .browser-pane > .pane-header {
+    position: sticky;
+    top: 70px;
+    z-index: 5;
+}
+body.browser-maximized .browser-pane > .accuracy-panel {
+    max-height: none !important;
+    overflow: visible !important;
+}
+body.browser-maximized .browser-pane > pre.browser-code {
+    /* Code pane grows with its content. The outer section provides the
+       single scrollbar. Horizontal overflow still scrolls locally since
+       pre preserves whitespace. */
+    max-height: none !important;
+    height: auto !important;
+    overflow-x: auto;
+    overflow-y: visible;
+    margin: 0;
+}
+
+/* Light-theme adjustments */
+body.theme-light.browser-maximized .browser-section {
+    background: #ffffff;
+}
+
+/* ── Accuracy panel above the Java code pane ───────────────────────
+   Replaces the old comment-block banner inside the code itself. */
+.accuracy-panel {
+    flex-shrink: 0;
+    padding: 10px 14px 12px 14px;
+    background: linear-gradient(180deg, #fff9ec 0%, #fff6e0 100%);
+    border-bottom: 1px solid #f3d98a;
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 12px;
+    color: #3d2e07;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 40%;
+    overflow-y: auto;
+}
+.accuracy-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    color: #8a5600;
+}
+.accuracy-panel-score {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: #ffe5a8;
+    color: #6a4100;
+    font-weight: 700;
+    font-size: 11px;
+}
+.accuracy-panel-score.good { background: #dcfce7; color: #166534; }
+.accuracy-panel-score.warn { background: #fef3c7; color: #92400e; }
+.accuracy-panel-score.poor { background: #fee2e2; color: #991b1b; }
+.accuracy-panel-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 11px;
+    color: #55451f;
+}
+.accuracy-panel-metrics span strong { color: #3d2e07; }
+.accuracy-panel-label {
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b4b0f;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.accuracy-panel-penalties {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.accuracy-panel-penalty {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(180, 110, 30, 0.18);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.accuracy-panel-penalty .pn-title {
+    font-weight: 600;
+    color: #8a5600;
+    display: block;
+    margin-bottom: 2px;
+}
+.accuracy-panel-penalty .pn-desc {
+    color: #4f3e18;
+}
+body.theme-dark .accuracy-panel,
+body:not(.theme-light) .accuracy-panel {
+    /* Darker surface so lighter inner text reads against it */
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.10) 0%, rgba(245, 158, 11, 0.04) 100%);
+    border-bottom-color: rgba(245, 158, 11, 0.35);
+    color: #f3e8c8;                                      /* primary panel text */
+}
+/* Inner elements — override their light-mode browns with high-contrast
+   warm-white variants so they're readable on the dark amber-tinted panel. */
+body:not(.theme-light) .accuracy-panel-header {
+    color: #ffd98a;                                      /* warm amber title */
+    font-weight: 600;
+}
+body:not(.theme-light) .accuracy-panel-score {
+    background: rgba(253, 224, 71, 0.18);
+    color: #fde68a;                                      /* bright amber chip */
+    border: 1px solid rgba(253, 224, 71, 0.35);
+}
+body:not(.theme-light) .accuracy-panel-score.good {
+    background: rgba(34, 197, 94, 0.18);
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.40);
+}
+body:not(.theme-light) .accuracy-panel-score.warn {
+    background: rgba(245, 158, 11, 0.22);
+    color: #fcd34d;
+    border-color: rgba(245, 158, 11, 0.50);
+}
+body:not(.theme-light) .accuracy-panel-score.poor {
+    background: rgba(239, 68, 68, 0.20);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.45);
+}
+body:not(.theme-light) .accuracy-panel-metrics { color: #e4d6ac; }
+body:not(.theme-light) .accuracy-panel-metrics span strong { color: #ffeccc; }
+body:not(.theme-light) .accuracy-panel-label {
+    color: #ffd98a;
+}
+body:not(.theme-light) .accuracy-panel-penalty {
+    background: rgba(0, 0, 0, 0.22);
+    border-color: rgba(245, 158, 11, 0.30);
+}
+body:not(.theme-light) .accuracy-panel-penalty .pn-title {
+    color: #ffd98a;
+}
+body:not(.theme-light) .accuracy-panel-penalty .pn-desc {
+    color: #ebddb4;                                      /* readable cream */
+}
+
+/* ── Run-compare verdict banner (AI-powered) ────────────────────────
+   Shown after /api/compare-runs returns. Color-coded by severity. */
+.run-diverge-banner {
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin: 8px 0;
+    line-height: 1.5;
+    border: 1px solid;
+}
+.run-diverge-banner .subtle { opacity: 0.75; font-weight: 400; }
+
+/* Default (info) */
+.run-diverge-banner,
+.run-diverge-info {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1e3a8a;
+}
+.run-diverge-banner strong,
+.run-diverge-info strong { color: #1e3a8a; }
+
+/* OK — match */
+.run-diverge-ok {
+    background: #dcfce7 !important;
+    border-color: #86efac !important;
+    color: #14532d !important;
+}
+.run-diverge-ok strong { color: #14532d !important; }
+
+/* Warning — partial / diverge */
+.run-diverge-warning {
+    background: #fef3c7 !important;
+    border-color: #fde68a !important;
+    color: #92400e !important;
+}
+.run-diverge-warning strong { color: #78350f !important; }
+
+/* Error — hard divergence */
+.run-diverge-error {
+    background: #fee2e2 !important;
+    border-color: #fecaca !important;
+    color: #991b1b !important;
+}
+.run-diverge-error strong { color: #7f1d1d !important; }
+
+/* Dark-theme variants */
+body:not(.theme-light) .run-diverge-info {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.35);
+    color: #bfdbfe;
+}
+body:not(.theme-light) .run-diverge-info strong { color: #dbeafe; }
+body:not(.theme-light) .run-diverge-ok {
+    background: rgba(34, 197, 94, 0.15) !important;
+    border-color: rgba(34, 197, 94, 0.35) !important;
+    color: #bbf7d0 !important;
+}
+body:not(.theme-light) .run-diverge-ok strong { color: #dcfce7 !important; }
+body:not(.theme-light) .run-diverge-warning {
+    background: rgba(245, 158, 11, 0.15) !important;
+    border-color: rgba(245, 158, 11, 0.35) !important;
+    color: #fde68a !important;
+}
+body:not(.theme-light) .run-diverge-warning strong { color: #fed7aa !important; }
+body:not(.theme-light) .run-diverge-error {
+    background: rgba(239, 68, 68, 0.15) !important;
+    border-color: rgba(239, 68, 68, 0.35) !important;
+    color: #fecaca !important;
+}
+body:not(.theme-light) .run-diverge-error strong { color: #fee2e2 !important; }
+
 .browser-tree {
     background: var(--c-surface-2);
     border: 1px solid var(--c-border);
@@ -1691,23 +2192,44 @@ body {
 .comparison-pane {
     background: rgba(7, 6, 31, 0.7) !important;
 }
+/* Comparison panes: solid light headers that match the light code-body background.
+   Use darker saturated text so labels are always readable. */
 .review-pane:nth-of-type(1) .pane-header,
-.comparison-pane:nth-of-type(1) .pane-header {
-    background: rgba(56, 189, 248, 0.10) !important;
-    border-bottom-color: rgba(56, 189, 248, 0.25) !important;
+.comparison-pane:nth-of-type(1) .pane-header,
+.comparison-pane .pane-header.cobol-header {
+    background: #e8f4fb !important;         /* solid light sky-blue */
+    border-bottom: 1px solid #bfdff2 !important;
 }
 .review-pane:nth-of-type(1) .pane-title,
-.comparison-pane:nth-of-type(1) .pane-title {
-    color: var(--c-teal-light) !important;
+.comparison-pane:nth-of-type(1) .pane-title,
+.comparison-pane .pane-header.cobol-header .pane-title {
+    color: #0c5c89 !important;               /* deep teal — readable on light */
+    font-weight: 600 !important;
 }
 .review-pane:nth-of-type(3) .pane-header,
-.comparison-pane:nth-of-type(3) .pane-header {
-    background: rgba(167, 139, 250, 0.10) !important;
-    border-bottom-color: rgba(167, 139, 250, 0.25) !important;
+.comparison-pane:nth-of-type(3) .pane-header,
+.comparison-pane .pane-header.java-header {
+    background: #efeafd !important;          /* solid light lavender */
+    border-bottom: 1px solid #d4c5f7 !important;
 }
 .review-pane:nth-of-type(3) .pane-title,
-.comparison-pane:nth-of-type(3) .pane-title {
-    color: var(--c-violet-light) !important;
+.comparison-pane:nth-of-type(3) .pane-title,
+.comparison-pane .pane-header.java-header .pane-title {
+    color: #5b3bbd !important;               /* deep violet — readable on light */
+    font-weight: 600 !important;
+}
+
+/* Code-body background: pure white with very subtle tint for the pane the user
+   is reading, so content stands out cleanly. */
+.comparison-pane pre.output-content,
+.comparison-pane pre.code-content {
+    background: #ffffff !important;
+    color: #1a1b2e !important;
+}
+.comparison-pane pre.output-content code,
+.comparison-pane pre.code-content code {
+    color: #1a1b2e !important;
+    background: transparent !important;
 }
 
 /* Discoverability hint: subtle "click me" tooltip on awaiting nodes */
@@ -1810,17 +2332,33 @@ body {
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    background: rgba(7, 6, 31, 0.6);
-    border: 1px solid var(--c-border);
-    color: var(--c-text-dim);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #e5e7eb;
     font-size: 16px;
     line-height: 1;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: background 120ms, color 120ms, border-color 120ms;
 }
-.run-close-btn:hover { color: var(--c-error-light); border-color: rgba(239, 68, 68, 0.5); }
+.run-close-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fecaca;
+    border-color: rgba(239, 68, 68, 0.5);
+}
+/* Light theme: inverted — dark cross on light background for visibility */
+body.theme-light .run-close-btn {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: #4b5563;
+}
+body.theme-light .run-close-btn:hover {
+    background: #fee2e2;
+    color: #b91c1c;
+    border-color: #fca5a5;
+}
 
 .run-output-grid {
     display: grid;
@@ -3493,6 +4031,27 @@ footer {
     backdrop-filter: blur(6px);
 }
 .copy-btn:hover { background: rgba(117, 69, 255, 0.3); color: #fff; }
+/* Inline variant: sits in a flex .pane-header next to other buttons
+   (e.g. "Fix with AI") instead of floating over the code surface. */
+.copy-btn.copy-btn--inline {
+    position: static;
+    top: auto;
+    right: auto;
+    height: 24px;
+    padding: 4px 10px;
+    font-size: 11px;
+    flex-shrink: 0;
+    backdrop-filter: none;
+}
+/* Ensure both COBOL and Java headers lay out their children as a flex row
+   so the inline Copy button sits beside the title / Fix-with-AI button. */
+.pane-header.cobol-header,
+.pane-header.java-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
 /* Light code panels: dark copy button */
 body.theme-light .copy-btn,
 .browser-pane .copy-btn,
@@ -4186,3 +4745,183 @@ body.theme-light .tree-file.selected .tree-file-name { color: #1a1b2e !important
     color: var(--c-text-mute) !important;
 }
 body.theme-light .tree-caret { color: #999 !important; }
+
+/* ══════════════════════════════════════════════════════════════════
+   Platform dialogs & toasts — replace browser-native alert/confirm/prompt
+   Works in both themes. Styled to match the app's glass-card aesthetic.
+   ══════════════════════════════════════════════════════════════════ */
+
+.toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 10000;
+    pointer-events: none;
+    max-width: calc(100vw - 32px);
+}
+.toast {
+    pointer-events: auto;
+    min-width: 280px;
+    max-width: 420px;
+    padding: 12px 14px 12px 14px;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #1a1b2e;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-left: 4px solid var(--c-accent, #7545ff);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    gap: 10px;
+    align-items: start;
+    animation: toast-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.toast.toast-leaving { animation: toast-out 160ms ease forwards; }
+.toast-info    { border-left-color: #3b82f6; }
+.toast-success { border-left-color: #16a34a; }
+.toast-warning { border-left-color: #f59e0b; }
+.toast-error   { border-left-color: #dc2626; }
+.toast-icon {
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--c-accent, #7545ff);
+    font-weight: 700;
+}
+.toast-info    .toast-icon { color: #3b82f6; }
+.toast-success .toast-icon { color: #16a34a; }
+.toast-warning .toast-icon { color: #b45309; }
+.toast-error   .toast-icon { color: #b91c1c; }
+.toast-message {
+    color: #1a1b2e;
+    min-width: 0;           /* lets the grid column actually shrink if needed */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;  /* honor \n from stripped-HTML messages */
+}
+.toast-close {
+    background: transparent;
+    border: 0;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 16px;
+    line-height: 1;
+}
+.toast-close:hover { color: #1a1b2e; }
+.toast-close:focus-visible { outline: 2px solid var(--c-accent, #7545ff); outline-offset: 2px; border-radius: 4px; }
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-out {
+    to { opacity: 0; transform: translateX(20px); }
+}
+
+/* In-app confirm/prompt dialog */
+.app-dialog {
+    width: 440px !important;
+    max-width: calc(100vw - 40px) !important;
+    height: auto !important;
+    max-height: 70vh !important;
+    background: #ffffff !important;
+    color: #1a1b2e !important;
+    border: 1px solid rgba(0, 0, 0, 0.10) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28) !important;
+    display: flex;
+    flex-direction: column;
+}
+.app-dialog .modal-header {
+    background: #f5f6fa !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+.app-dialog .modal-header h3 {
+    color: #1a1b2e !important;
+    font-weight: 600 !important;
+}
+.app-dialog-body {
+    padding: 18px 20px 4px 20px;
+    color: #1a1b2e;
+    font-size: 13.5px;
+    line-height: 1.55;
+}
+.app-dialog-body p { margin: 0 0 10px 0; color: #1a1b2e; }
+.app-dialog-input {
+    width: 100%;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    color: #1a1b2e;
+    background: #ffffff;
+    margin-top: 6px;
+    box-sizing: border-box;
+}
+.app-dialog-input:focus {
+    outline: none;
+    border-color: var(--c-accent, #7545ff);
+    box-shadow: 0 0 0 3px rgba(117, 69, 255, 0.18);
+}
+.app-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 14px 20px 18px 20px;
+    border-top: 1px solid #eef0f4;
+    background: #fafbfc;
+}
+.app-dialog-cancel {
+    background: #ffffff !important;
+    color: #1a1b2e !important;
+    border: 1px solid #d1d5db !important;
+}
+.app-dialog-cancel:hover { background: #f3f4f6 !important; }
+.app-dialog-ok {
+    background: var(--c-accent, #7545ff) !important;
+    color: #ffffff !important;
+    border: 1px solid var(--c-accent, #7545ff) !important;
+}
+.app-dialog-ok:hover { filter: brightness(1.08); }
+.app-dialog-ok.danger {
+    background: #dc2626 !important;
+    border-color: #dc2626 !important;
+}
+.app-dialog-ok.danger:hover { background: #b91c1c !important; }
+.app-dialog-cancel:focus-visible,
+.app-dialog-ok:focus-visible {
+    outline: 2px solid var(--c-accent, #7545ff) !important;
+    outline-offset: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Contrast fixes from UX audit (HIGH priority)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* #1: Disabled primary button — lift muted-text opacity so it's legible */
+.btn-pill.btn-primary:disabled,
+.btn-pill.btn-primary[disabled] {
+    color: #9ca3af !important;
+    background: rgba(117, 69, 255, 0.06) !important;
+    border-color: rgba(117, 69, 255, 0.18) !important;
+}
+.btn-pill.btn-stop:disabled,
+.btn-pill.btn-stop[disabled] {
+    color: rgba(252, 165, 165, 0.72) !important;
+}
+
+/* #4: Restore visible focus rings for keyboard users on pill buttons */
+.btn-pill:focus-visible {
+    outline: 2px solid var(--c-accent, #7545ff) !important;
+    outline-offset: 2px !important;
+}
+.close-btn:focus-visible {
+    outline: 2px solid var(--c-accent, #7545ff) !important;
+    outline-offset: 2px !important;
+}

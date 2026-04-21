@@ -82,6 +82,28 @@
                 }
             },
             {
+                /* Data files (SELECT … ASSIGN TO targets) — distinct shape/colour */
+                selector: 'node[type="data"]',
+                style: {
+                    'shape': 'cylinder',
+                    'width': 30,
+                    'height': 36,
+                    'background-color': '#b45309',
+                    'border-color': '#fde68a',
+                    'border-width': 2
+                }
+            },
+            {
+                /* Data-dependency edges — dashed amber to distinguish from call/copy */
+                selector: 'edge[kind="data"]',
+                style: {
+                    'line-color': '#b45309',
+                    'target-arrow-color': '#b45309',
+                    'line-style': 'dashed',
+                    'width': 1.5
+                }
+            },
+            {
                 selector: 'node.pending',
                 style: {
                     'background-color': '#1a1550',
