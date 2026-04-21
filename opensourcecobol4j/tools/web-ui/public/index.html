@@ -383,6 +383,12 @@
                             <span class="browser-hint">Click a file to view COBOL and Java side by side.</span>
                         </div>
                         <div class="browser-header-actions">
+                            <button type="button" id="retryFailedBtn" class="btn-pill btn-sm hidden"
+                                    onclick="retryFailedFiles()"
+                                    title="Start a new conversion covering only the files that failed this run"
+                                    aria-label="Retry failed files">
+                                Retry failed <span id="retryFailedCount" class="retry-count"></span>
+                            </button>
                             <button type="button" id="browserDownloadBtn" class="btn-pill btn-sm browser-download-btn"
                                     title="Download converted Java + manual-review guide as a zip"
                                     aria-label="Download conversion output">
@@ -634,9 +640,17 @@
         </div>
     </div>
 
+    <!-- Drawer toggle handle — always visible on the right edge, lives
+         OUTSIDE the drawer so it stays clickable when the drawer is slid
+         off-screen. Flips < / > based on drawer state. -->
+    <button id="drawerHandle" class="drawer-handle-fixed" type="button"
+            onclick="toggleRightDrawer()" aria-label="Toggle activity drawer"
+            title="Show activity drawer">
+        <span id="drawerHandleGlyph">&lt;</span>
+    </button>
+
     <!-- Right slide-out drawer: unified Details timeline -->
     <aside id="rightDrawer" class="right-drawer hidden">
-        <div class="drawer-handle" onclick="toggleRightDrawer()" title="Hide drawer">></div>
         <div class="drawer-inner">
             <div class="drawer-title-bar">
                 <span class="drawer-title">Details</span>

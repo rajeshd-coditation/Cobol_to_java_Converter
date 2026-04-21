@@ -888,10 +888,13 @@ body {
 .graph-canvas[data-state="empty"]::after { color: var(--c-text-mute); }
 @keyframes graphSpin { to { transform: translateX(-50%) rotate(360deg); } }
 
-/* KPI bar */
+/* KPI bar — 7 metric columns (Total, Converted, Success, Accuracy, Spread,
+   Tokens, Duration) + the Export button floats at the end. Previously 6
+   columns, which wrapped Duration to a second row once the histogram
+   cell was added (user-reported 2026-04-21). */
 .kpi-bar {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr) auto;
     gap: 12px;
     padding: 18px 22px;
     background: linear-gradient(135deg, rgba(117, 69, 255, 0.10) 0%, rgba(40, 28, 165, 0.05) 100%);
@@ -899,7 +902,8 @@ body {
     border-radius: var(--r-lg);
     backdrop-filter: blur(8px);
 }
-@media (max-width: 1024px) { .kpi-bar { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1280px) { .kpi-bar { grid-template-columns: repeat(4, 1fr) auto; } }
+@media (max-width: 768px)  { .kpi-bar { grid-template-columns: repeat(2, 1fr); } }
 .kpi { text-align: left; padding: 0 8px; border-left: 2px solid var(--c-border); }
 .kpi:first-child { border-left: none; }
 .kpi-value {
@@ -1049,6 +1053,17 @@ body.pane-expanded-java  .browser-pane[data-pane="java"]  .pane-expand-btn {
 
 /* ── Maximize mode: Results browser fills the viewport ─────────────── */
 .browser-header-actions { display: flex; gap: 8px; align-items: center; }
+/* "Retry failed (N)" — amber accent so it reads as a drawing-attention
+   action that's distinct from the primary Download. Inline count pill
+   reuses existing .btn-pill sizing. */
+#retryFailedBtn {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: #fbbf24;
+}
+#retryFailedBtn:hover { background: rgba(245, 158, 11, 0.22); color: #fff; }
+body.theme-light #retryFailedBtn { color: #b45309; background: rgba(245, 158, 11, 0.10); }
+.retry-count { opacity: 0.85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 .browser-maximize-btn {
     display: inline-flex !important;
     align-items: center;
@@ -2835,6 +2850,32 @@ body.theme-light .run-close-btn:hover {
     transition: background 200ms;
 }
 .drawer-handle:hover { background: rgba(117, 69, 255, 0.18); }
+
+/* New fixed-position handle that lives OUTSIDE the drawer and stays
+   visible regardless of open/closed state. Slides leftward when the
+   drawer opens so it sits flush with the drawer's left edge; slides
+   back to the viewport edge when closed. */
+.drawer-handle-fixed {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    width: 28px; height: 56px;
+    background: var(--c-bg-2);
+    border: 1px solid var(--c-border-strong);
+    border-right: none;
+    border-radius: 12px 0 0 12px;
+    color: var(--c-accent-light);
+    cursor: pointer;
+    font-size: 18px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    z-index: 405; /* above the drawer itself (z-index 400) so clicks land */
+    transition: right 320ms cubic-bezier(0.22, 0.61, 0.36, 1), background 200ms;
+}
+.drawer-handle-fixed.drawer-open { right: 460px; }
+.drawer-handle-fixed:hover { background: rgba(117, 69, 255, 0.18); }
+body.theme-light .drawer-handle-fixed { background: #f0f1f4; border-color: rgba(0, 0, 0, 0.10); color: #7545ff; }
 
 .right-drawer .review-chat-panel {
     background: transparent !important;

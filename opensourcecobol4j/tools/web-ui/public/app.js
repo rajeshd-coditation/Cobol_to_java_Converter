@@ -3087,6 +3087,77 @@ window.undoFix = undoFix;
 
 // Download the conversion output as a zip archive. The server streams it so
 // we just navigate the browser to the endpoint; it triggers a file save.
+/**
+ * Partial re-run — starts a fresh conversion covering only the files that
+ * FAILED in the current run. Reads the in-memory conversion report,
+ * filters to the failure statuses, repopulates the selection list, and
+ * calls actuallyStartConversion() with them.
+ *
+ * "Failed" = CONVERT_FAIL, COMPILE_FAIL, EXEC_FAIL, FAIL, COMPARE_FAIL
+ * plus REJECTED_BY_REVIEW (reviewer rejected but the AI did produce
+ * output — user might want to retry with a prompt tweak). Explicitly
+ * NOT: SKIPPED_* (intentional omissions), SUCCESS (obviously).
+ */
+async function retryFailedFiles() {
+    if (!currentConversionId) return;
+    try {
+        const r = await fetch(`/api/browser/${currentConversionId}`);
+        if (!r.ok) { toast('Could not load the current conversion report.', 'error'); return; }
+        const data = await r.json();
+        const FAIL_STATUSES = new Set(['CONVERT_FAIL', 'COMPILE_FAIL', 'EXEC_FAIL', 'FAIL', 'COMPARE_FAIL', 'REJECTED_BY_REVIEW']);
+        const failedFiles = (data.files || [])
+            .filter(f => FAIL_STATUSES.has(f.status))
+            .map(f => f.cobolPath || f.cobolSourcePath)
+            .filter(Boolean);
+        if (failedFiles.length === 0) {
+            toast('No failed files to retry.', 'info');
+            return;
+        }
+        // Look up the inputPath the current conversion is rooted at —
+        // /api/status surfaces it under result / top-level — so we can
+        // hand the same repo to the new conversion.
+        const st = await fetch(`/api/status/${currentConversionId}`).then(x => x.json()).catch(() => ({}));
+        const inputPath = (st && st.inputPath) || (st && st.result && st.result.outputDir)
+            || repoInput.value.trim();
+        if (!inputPath) {
+            toast('Could not determine the original repo path.', 'error');
+            return;
+        }
+        const ok = await confirmDialog(
+            `Retry ${failedFiles.length} failed file${failedFiles.length === 1 ? '' : 's'} in a new conversion?\n\n` +
+            `The current run stays intact; this starts fresh with just the failed files.`,
+            { title: 'Retry failed', okText: `Retry ${failedFiles.length}`, danger: false }
+        );
+        if (!ok) return;
+        // Hand off to the same code path a full conversion takes so we
+        // inherit review-mode handling, scan-overlay, etc.
+        try { await actuallyStartConversion(inputPath, failedFiles); }
+        catch (err) { toast('Retry failed: ' + err.message, 'error'); }
+    } catch (err) {
+        toast('Retry failed: ' + err.message, 'error');
+    }
+}
+window.retryFailedFiles = retryFailedFiles;
+
+/**
+ * Show/hide the "Retry failed" button based on whether the current
+ * conversion report has any failed files. Called from paintKpiBar (once
+ * the results view is active) so the count stays in sync.
+ */
+function updateRetryFailedButton(files) {
+    const btn = document.getElementById('retryFailedBtn');
+    const countEl = document.getElementById('retryFailedCount');
+    if (!btn) return;
+    const FAIL_STATUSES = new Set(['CONVERT_FAIL', 'COMPILE_FAIL', 'EXEC_FAIL', 'FAIL', 'COMPARE_FAIL', 'REJECTED_BY_REVIEW']);
+    const count = (files || []).filter(f => FAIL_STATUSES.has(f.status)).length;
+    if (count === 0) {
+        btn.classList.add('hidden');
+    } else {
+        btn.classList.remove('hidden');
+        if (countEl) countEl.textContent = '(' + count + ')';
+    }
+}
+
 async function downloadConversionOutput() {
     if (!currentConversionId) {
         toast('No active conversion to download yet.', 'warning');
@@ -3491,6 +3562,7 @@ async function paintKpiBar() {
         set('kpiDuration', duration < 60 ? duration + 's' : Math.floor(duration / 60) + 'm ' + (duration % 60) + 's');
         paintAccuracyHistogram(browser && browser.files);
         publishFileDataForTooltip(browser && browser.files, status);
+        updateRetryFailedButton(browser && browser.files);
         document.getElementById('kpiBar').classList.remove('hidden');
     } catch (err) {
         console.warn('KPI paint failed', err);
@@ -4237,8 +4309,18 @@ function toggleRightDrawer() {
     const btn = document.getElementById('drawerToggleBtn');
     if (!d) return;
     d.classList.toggle('hidden');
-    if (btn) btn.classList.toggle('active', !d.classList.contains('hidden'));
-    if (!d.classList.contains('hidden')) {
+    const isOpen = !d.classList.contains('hidden');
+    if (btn) btn.classList.toggle('active', isOpen);
+    // Flip the always-visible handle: `<` = open (click to close),
+    // `>` = closed (click to open). Mirrors the common drawer idiom.
+    const handle = document.getElementById('drawerHandle');
+    const glyph = document.getElementById('drawerHandleGlyph');
+    if (glyph) glyph.textContent = isOpen ? '>' : '<';
+    if (handle) {
+        handle.classList.toggle('drawer-open', isOpen);
+        handle.title = isOpen ? 'Hide activity drawer' : 'Show activity drawer';
+    }
+    if (isOpen) {
         // Reset attention badge when opened
         const badge = document.getElementById('drawerBadge');
         if (badge) { badge.classList.add('hidden'); badge.textContent = '0'; }
