@@ -176,6 +176,11 @@ const { buildConversionGraph } = require('./src/core/conversion-graph');
 const { parseJcl } = require('./src/scan/jcl-parser');
 const { validateRepoUrl } = require('./src/util/validate-repo-url');
 const { isLikelyTruncated } = require('./src/core/source-integrity');
+const {
+    splitAtProcedureDivision,
+    stitchJava,
+    isSplitEnabled: isDivisionalSplitEnabled
+} = require('./src/core/divisional-split');
 const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
 require('./src/routes/convert-local').mount(app, {
     activeConversions,
@@ -525,23 +530,39 @@ app.post('/api/convert-azure', async (req, res) => {
                     }
 
                     // Skip if file is too large for a single conversion pass.
-                    // The primary convert prompt sends the FULL COBOL source, so
-                    // a 200KB file ~ 65k input tokens. Past ~80k chars we're at
-                    // serious risk of blowing the deployment's context window —
-                    // three retries later we'd fail with a cryptic "AI response
-                    // truncated" error. Fail fast with a clear status instead.
-                    const MAX_COBOL_CHARS = 80000;
+                    // The primary convert prompt sends the FULL COBOL source,
+                    // so a 200KB file ~ 65k input tokens. Past MAX_COBOL_CHARS
+                    // (default 80k; env-overridable) we're at serious risk of
+                    // blowing the deployment's context window.
+                    //
+                    // When ENABLE_DIVISIONAL_SPLIT is set, attempt a two-pass
+                    // split at PROCEDURE DIVISION before giving up — converts
+                    // data + procedure separately and stitches the output.
+                    const MAX_COBOL_CHARS = parseInt(process.env.MAX_COBOL_CHARS || '80000', 10);
+                    let divisionalSplit = null;
                     if (cobolSource.length > MAX_COBOL_CHARS) {
-                        fileResult.status = 'error';
-                        fileResult.error = `Source is ${cobolSource.length} chars — exceeds ${MAX_COBOL_CHARS}-char cap for a single-pass conversion. Consider splitting the program or raising MAX_COBOL_CHARS if your deployment has a large context window.`;
-                        fileResult.reportEntry = {
-                            path: relativePath,
-                            source_path: cobolPath,
-                            java_status: 'SKIPPED_TOO_LARGE',
-                            error: fileResult.error,
-                            sourceBytes: cobolSource.length
-                        };
-                        return fileResult;
+                        if (isDivisionalSplitEnabled()) {
+                            divisionalSplit = splitAtProcedureDivision(cobolSource);
+                        }
+                        if (!divisionalSplit) {
+                            fileResult.status = 'error';
+                            const hint = isDivisionalSplitEnabled()
+                                ? ' Divisional split attempted but failed — no clean PROCEDURE DIVISION boundary detected.'
+                                : ' Set ENABLE_DIVISIONAL_SPLIT=1 to attempt a two-pass DATA/PROCEDURE split, or raise MAX_COBOL_CHARS for a larger-context deployment.';
+                            fileResult.error = `Source is ${cobolSource.length} chars — exceeds ${MAX_COBOL_CHARS}-char cap for a single-pass conversion.${hint}`;
+                            fileResult.reportEntry = {
+                                path: relativePath,
+                                source_path: cobolPath,
+                                java_status: 'SKIPPED_TOO_LARGE',
+                                error: fileResult.error,
+                                sourceBytes: cobolSource.length
+                            };
+                            return fileResult;
+                        }
+                        pushTimeline(relativePath, 'split', `Source is ${cobolSource.length} chars — splitting at PROCEDURE DIVISION`, {
+                            partABytes: divisionalSplit.partA.length,
+                            partBBytes: divisionalSplit.partB.length
+                        });
                     }
 
                     // --- Build conversion context so the AI can emit REAL Java calls
@@ -664,16 +685,73 @@ app.post('/api/convert-azure', async (req, res) => {
                             note: h.note
                         })));
                     const _tAI = Date.now();
-                    pushTimeline(relativePath, 'ai_call', 'Calling AI to generate Java');
-                    const conversionResult = await azureAgent.convertCobolToJava(cobolSource, 0, {
-                        calledPrograms,
-                        copybooks,
-                        programIdToJavaClass,
-                        copybookBodies,
-                        siblingSignatures: conversion.siblingSignatures,
-                        jclInvocations,
-                        reviewerFeedback
-                    });
+                    pushTimeline(relativePath, 'ai_call', divisionalSplit ? 'Calling AI (split: Part A — DATA)' : 'Calling AI to generate Java');
+                    let conversionResult;
+                    if (divisionalSplit) {
+                        // Two-pass convert — Part A first (data classes + skeletons),
+                        // then Part B (procedure bodies) with Part A's Java in the
+                        // context so the method bodies reference the right fields.
+                        const partAResult = await azureAgent.convertCobolToJava(divisionalSplit.partA, 0, {
+                            calledPrograms,
+                            copybooks,
+                            programIdToJavaClass,
+                            copybookBodies,
+                            siblingSignatures: conversion.siblingSignatures,
+                            jclInvocations,
+                            reviewerFeedback
+                        });
+                        if (!partAResult.success) {
+                            conversionResult = partAResult;
+                        } else {
+                            pushTimeline(relativePath, 'ai_call', 'Calling AI (split: Part B — PROCEDURE)');
+                            const partBResult = await azureAgent.convertCobolToJava(divisionalSplit.partB, 0, {
+                                calledPrograms,
+                                copybooks,
+                                programIdToJavaClass,
+                                copybookBodies,
+                                siblingSignatures: conversion.siblingSignatures,
+                                jclInvocations,
+                                reviewerFeedback,
+                                // Part B sees Part A's Java as a partial class
+                                // skeleton; frames it as "complete the method bodies"
+                                // via a synthetic copybook entry so the existing
+                                // copybookBodies plumbing surfaces it in the prompt.
+                                partialSkeleton: partAResult.javaCode
+                            });
+                            if (!partBResult.success) {
+                                conversionResult = partBResult;
+                            } else {
+                                // Stitch: Part A provides the class skeleton; Part B
+                                // provides the method bodies. Text-level substitution
+                                // only — deterministic, no second AI call.
+                                const stitched = stitchJava(partAResult.javaCode, partBResult.javaCode);
+                                pushTimeline(relativePath, 'stitch', `Stitched Part A + Part B`, {
+                                    partABytes: partAResult.javaCode.length,
+                                    partBBytes: partBResult.javaCode.length,
+                                    stitchedBytes: stitched.length
+                                });
+                                conversionResult = {
+                                    success: true,
+                                    javaCode: stitched,
+                                    usage: {
+                                        prompt_tokens:    (partAResult.usage?.prompt_tokens     || 0) + (partBResult.usage?.prompt_tokens     || 0),
+                                        completion_tokens:(partAResult.usage?.completion_tokens || 0) + (partBResult.usage?.completion_tokens || 0),
+                                        total_tokens:     (partAResult.usage?.total_tokens      || 0) + (partBResult.usage?.total_tokens      || 0)
+                                    }
+                                };
+                            }
+                        }
+                    } else {
+                        conversionResult = await azureAgent.convertCobolToJava(cobolSource, 0, {
+                            calledPrograms,
+                            copybooks,
+                            programIdToJavaClass,
+                            copybookBodies,
+                            siblingSignatures: conversion.siblingSignatures,
+                            jclInvocations,
+                            reviewerFeedback
+                        });
+                    }
                     pushTimeline(relativePath, 'ai_done', conversionResult.success ? 'AI returned Java' : 'AI conversion failed', {
                         ms: Date.now() - _tAI,
                         tokens: conversionResult.usage ? (conversionResult.usage.total_tokens || null) : null,

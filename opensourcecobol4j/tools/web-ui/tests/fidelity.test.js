@@ -538,6 +538,53 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 17a. Divisional splitter: cleaves at PROCEDURE DIVISION (§16) ───────
+test('splitAtProcedureDivision splits on the boundary and stitches method bodies back', () => {
+    const { splitAtProcedureDivision, stitchJava } = require('../src/core/divisional-split');
+
+    const big = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BIG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-AMT PIC 9(4).
+       PROCEDURE DIVISION.
+           MOVE 1 TO WS-AMT.
+           DISPLAY WS-AMT.
+           STOP RUN.
+`;
+    const split = splitAtProcedureDivision(big);
+    assert.ok(split, 'splitter should succeed on a source with PROCEDURE DIVISION');
+    assert.match(split.partA, /WORKING-STORAGE SECTION/, 'Part A keeps data division');
+    assert.doesNotMatch(split.partA, /MOVE 1 TO WS-AMT/,  'Part A strips real procedure body');
+    assert.match(split.partA, /PROCEDURE DIVISION\.\n\s*EXIT\./, 'Part A has a placeholder procedure to compile');
+    assert.match(split.partB, /PROGRAM-ID\. BIG/,         'Part B synthesizes an IDENTIFICATION header');
+    assert.match(split.partB, /MOVE 1 TO WS-AMT/,         'Part B carries the real procedure body');
+
+    // No-split case: content with no PROCEDURE DIVISION returns null.
+    assert.equal(splitAtProcedureDivision('IDENTIFICATION DIVISION. PROGRAM-ID. X.'), null);
+
+    // Stitch exercise — swap method body from Part B into Part A skeleton.
+    const a = `public class Big {
+    private int wsAmt;
+    public void run() {
+    }
+}`;
+    const b = `public class Big {
+    private int wsAmt;
+    public void run() {
+        wsAmt = 1;
+        System.out.println(wsAmt);
+    }
+}`;
+    const stitched = stitchJava(a, b);
+    assert.match(stitched, /wsAmt = 1;/, 'stitch pulled in Part B method body');
+    assert.match(stitched, /System\.out\.println\(wsAmt\);/, 'stitch preserved the println too');
+    // Unstitchable fallback — completely unrelated sources.
+    const fallback = stitchJava('class X {}', 'class Y { void go() {} }');
+    assert.match(fallback, /Part B Java \(unstitched/, 'falls back to append-with-comment when nothing matches');
+});
+
 // ─── 17b. Reviewer feedback threads into next file's conversion prompt ──
 test('convertCobolToJava emits a REVIEWER FEEDBACK block when context.reviewerFeedback is populated', () => {
     // Locks the §12 feedback-loop wiring: the prompt must reference
