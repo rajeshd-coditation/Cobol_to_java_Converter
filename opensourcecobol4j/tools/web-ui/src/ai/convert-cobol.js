@@ -277,7 +277,8 @@ MUST:
             const calls    = (context && Array.isArray(context.calledPrograms)) ? context.calledPrograms : [];
             const copies   = (context && Array.isArray(context.copybooks)) ? context.copybooks : [];
             const jclInvs  = (context && Array.isArray(context.jclInvocations)) ? context.jclInvocations : [];
-            if (calls.length || Object.keys(pidMap).length || copies.length || jclInvs.length) {
+            const feedback = (context && Array.isArray(context.reviewerFeedback)) ? context.reviewerFeedback : [];
+            if (calls.length || Object.keys(pidMap).length || copies.length || jclInvs.length || feedback.length) {
                 contextBlock = '\n\n=== CONTEXT ===\n';
                 if (calls.length) {
                     contextBlock += 'This COBOL program CALLs:\n';
@@ -338,6 +339,22 @@ MUST:
                         }
                     }
                     contextBlock += '  → For each SELECT/ASSIGN in the COBOL, use the DD NAME as the Java file path (e.g. `new FileReader("ACCTREC")`). Leave the DSN in a brief comment so the reader sees the mainframe origin.\n';
+                }
+                if (feedback.length) {
+                    // Reviewer-feedback threading — earlier files in this
+                    // batch were rejected or edited with notes. Surface the
+                    // notes so the model can avoid repeating the same
+                    // mistake. The reviewer note IS the target behavior
+                    // ("don't emit sample data", "match the fixed-width
+                    // output", "use BufferedReader not Files.lines") —
+                    // priming the model with it cheaply steers subsequent
+                    // conversions without a prompt rewrite.
+                    contextBlock += '\nREVIEWER FEEDBACK FROM EARLIER IN THIS BATCH — apply these corrections to THIS file:\n';
+                    for (const f of feedback) {
+                        const verb = f.action === 'reject' ? 'rejected' : 'edited after';
+                        contextBlock += `  - ${f.fileBasename} (${verb}): ${String(f.note).slice(0, 400)}\n`;
+                    }
+                    contextBlock += '  → Take these as hard constraints. Don\'t repeat the same mistake just because the reviewer didn\'t spell it out for this specific file.\n';
                 }
                 contextBlock += '===============\n';
             }

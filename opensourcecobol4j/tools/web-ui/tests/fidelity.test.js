@@ -538,6 +538,21 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 17b. Reviewer feedback threads into next file's conversion prompt ──
+test('convertCobolToJava emits a REVIEWER FEEDBACK block when context.reviewerFeedback is populated', () => {
+    // Locks the §12 feedback-loop wiring: the prompt must reference
+    // reviewer-notes text verbatim so the model can apply the correction
+    // to subsequent files in the batch. Same pattern as the other
+    // context-block prompt tests.
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'ai', 'convert-cobol.js'), 'utf-8');
+    assert.match(src, /REVIEWER FEEDBACK FROM EARLIER IN THIS BATCH/,
+        'prompt must carry the reviewer-feedback section header');
+    assert.match(src, /hard constraints/i,
+        'prompt must frame the notes as hard constraints, not suggestions');
+    assert.match(src, /context\.reviewerFeedback/,
+        'context key must be named reviewerFeedback — server processFile relies on this');
+});
+
 // ─── 17c. fix-cobol route: whole-word rewrite + backup lifecycle ───────
 // Loads the router into a scratch Express app + a fake conversions map
 // so we can exercise the real handler without a live server. Covers

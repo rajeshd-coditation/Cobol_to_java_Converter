@@ -647,6 +647,22 @@ app.post('/api/convert-azure', async (req, res) => {
                     // to real Java classes, copybooks surface real field definitions,
                     // sibling-class calls match their actual method signatures, and
                     // JCL-staged files use real DD names instead of guessed paths.
+                    //
+                    // Feedback loop: if earlier files in this batch were rejected
+                    // or edited during HITL review with a reviewer note, thread
+                    // those notes into the next file's context so the model can
+                    // avoid repeating the same mistake. We take up to the last 5
+                    // non-empty notes — more than that bloats the prompt without
+                    // adding signal (same mistake in 6+ files = prompt drift, not
+                    // individual feedback).
+                    const reviewerFeedback = ((conversion.reviewHistory || [])
+                        .filter(h => (h.action === 'reject' || h.action === 'edit') && h.note && h.fileId !== relativePath)
+                        .slice(-5)
+                        .map(h => ({
+                            fileBasename: (h.fileId || '').split('/').pop(),
+                            action: h.action,
+                            note: h.note
+                        })));
                     const _tAI = Date.now();
                     pushTimeline(relativePath, 'ai_call', 'Calling AI to generate Java');
                     const conversionResult = await azureAgent.convertCobolToJava(cobolSource, 0, {
@@ -655,7 +671,8 @@ app.post('/api/convert-azure', async (req, res) => {
                         programIdToJavaClass,
                         copybookBodies,
                         siblingSignatures: conversion.siblingSignatures,
-                        jclInvocations
+                        jclInvocations,
+                        reviewerFeedback
                     });
                     pushTimeline(relativePath, 'ai_done', conversionResult.success ? 'AI returned Java' : 'AI conversion failed', {
                         ms: Date.now() - _tAI,
