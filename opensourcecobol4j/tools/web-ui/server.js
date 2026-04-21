@@ -18,33 +18,11 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 // Determine which AI provider to use
 const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
 
-// ──────────────────────────────────────────────────────────────────────
-// File-backed logger. Writes to webui.log in this folder (gitignored) so
-// server activity survives restarts and we can grep failures offline.
-// Lines are JSON-per-line so it's easy to parse later. Console output
-// still happens via the existing console.log calls.
-// ──────────────────────────────────────────────────────────────────────
-const LOG_PATH = path.join(__dirname, 'webui.log');
-function log(category, msg, extra) {
-    const line = JSON.stringify({
-        t: new Date().toISOString(),
-        category,
-        msg,
-        ...(extra || {})
-    }) + '\n';
-    try { fs.appendFileSync(LOG_PATH, line); } catch {}
-}
-// Expose a log-tailing endpoint so the UI (or curl) can inspect it quickly.
-app.get('/api/logs', (req, res) => {
-    const n = Math.min(parseInt(req.query.n || '500', 10), 5000);
-    try {
-        const content = fs.readFileSync(LOG_PATH, 'utf-8');
-        const lines = content.trimEnd().split('\n');
-        res.type('text/plain').send(lines.slice(-n).join('\n'));
-    } catch (e) {
-        res.type('text/plain').send('No log file yet.');
-    }
-});
+// File-backed logger (src/util/logger.js). JSON-per-line to webui.log +
+// mounts the /api/logs tail endpoint.
+const { createLogger } = require('./src/util/logger');
+const { log, mountLogRoute } = createLogger(__dirname);
+mountLogRoute(app);
 log('server', 'startup');
 
 // ──────────────────────────────────────────────────────────────────────
@@ -84,25 +62,8 @@ process.on('unhandledRejection', (reason, promise) => {
     // running. If a rejection is fatal the next request will surface it.
 });
 
-// Classic Levenshtein edit distance. Used to suggest likely COBOL typos
-// (e.g. PRINT-REX vs PRINT-REC) when the compiler reports an undefined
-// identifier. Bails out early if the lengths differ by more than 2 —
-// we only care about distance <= 1, occasionally 2.
-function editDistance(a, b) {
-    a = String(a); b = String(b);
-    if (Math.abs(a.length - b.length) > 2) return 99;
-    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-    for (let i = 1; i <= a.length; i++) {
-        for (let j = 1; j <= b.length; j++) {
-            dp[i][j] = a[i - 1] === b[j - 1]
-                ? dp[i - 1][j - 1]
-                : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-        }
-    }
-    return dp[a.length][b.length];
-}
+// Classic Levenshtein edit distance → src/util/edit-distance.js
+const { editDistance } = require('./src/util/edit-distance');
 
 // Middleware
 // 2MB body cap — default is 100KB, which can trip on POST /api/convert-azure
@@ -124,112 +85,27 @@ function toPascalCase(str) {
         .join('');
 }
 
-// Normalize a Java source so its public class matches the file name.
-// The file on disk is named after the COBOL basename (PascalCase); `java <cls>`
-// requires the public class name to match. This handles:
-//   - AI returning a completely different class name (e.g. CardAuthorization
-//     instead of COPAUA0C) — detected from the `public class` declaration.
-//   - AI returning the COBOL basename verbatim (not PascalCase) — upper/lower
-//     case variants of the basename get rewritten.
-// Used by both the initial conversion path AND the auto-repair path so a fixed
-// Java file with a preserved-but-wrong class name still produces a runnable file.
-function normalizeClassName(javaCode, javaClassName, baseName) {
-    if (!javaCode) return javaCode;
-    let out = javaCode;
+// Java class-name normalization → src/core/normalize-class.js
+const { normalizeClassName } = require('./src/core/normalize-class');
 
-    // Step 1: if the declared public class name differs from the target, rewrite
-    // every reference (decl, ctor, new X(), type refs, static calls).
-    const classNameMatch = out.match(/public\s+class\s+(\w+)\s*\{/);
-    const aiGeneratedClassName = classNameMatch ? classNameMatch[1] : null;
-    if (aiGeneratedClassName && aiGeneratedClassName !== javaClassName) {
-        console.log(`   🔧 Fixing class name: ${aiGeneratedClassName} → ${javaClassName}`);
-        const rename = (pattern) => {
-            out = out.replace(pattern, (m, a, b) => `${a}${javaClassName}${b !== undefined ? b : ''}`);
-        };
-        rename(new RegExp(`(public\\s+class\\s+)${aiGeneratedClassName}(\\s*\\{)`, 'g'));
-        rename(new RegExp(`(class\\s+)${aiGeneratedClassName}(\\s*\\{)`, 'g'));
-        rename(new RegExp(`(public\\s+)${aiGeneratedClassName}(\\s*\\()`, 'g'));
-        rename(new RegExp(`(new\\s+)${aiGeneratedClassName}(\\s*\\()`, 'g'));
-        rename(new RegExp(`(^|[\\s,\\(])${aiGeneratedClassName}(\\s+\\w+\\s*[=;,\\)])`, 'gm'));
-        rename(new RegExp(`(^|[\\s\\(])${aiGeneratedClassName}(\\.\\w+)`, 'gm'));
-    }
+// Conversion checkpointing → src/persistence/checkpoint.js
+const {
+    CHECKPOINT_DIR,
+    checkpointPath,
+    saveCheckpoint: _persistSaveCheckpoint,
+    loadCheckpoints: _persistLoadCheckpoints
+} = require('./src/persistence/checkpoint');
 
-    // Step 2: rewrite all case-variant references to the basename itself.
-    // Catches things like `class CBL0001 {` or `new cbl0001()` that survived
-    // step 1 because the AI used the raw COBOL name as the class.
-    const variants = [baseName, baseName.toLowerCase(), baseName.toUpperCase()];
-    for (const variant of variants) {
-        out = out.replace(new RegExp(`(public\\s+class\\s+)${variant}(\\s*\\{)`, 'gi'), `$1${javaClassName}$2`);
-        out = out.replace(new RegExp(`(class\\s+)${variant}(\\s*\\{)`, 'gi'),            `$1${javaClassName}$2`);
-        out = out.replace(new RegExp(`(public\\s+)${variant}(\\s*\\()`, 'gi'),            `$1${javaClassName}$2`);
-        out = out.replace(new RegExp(`(new\\s+)${variant}(\\s*\\()`, 'gi'),               `$1${javaClassName}$2`);
-        out = out.replace(new RegExp(`(^|[\\s,\\(])${variant}(\\s+\\w+\\s*[=;,\\)])`, 'gim'), `$1${javaClassName}$2`);
-        out = out.replace(new RegExp(`(^|[\\s\\(])${variant}(\\.\\w+)`, 'gim'),               `$1${javaClassName}$2`);
-    }
-
-    return out;
-}
-
-// Store active conversions
+// In-memory conversion registry. Routes keep a stable reference.
 const activeConversions = new Map();
-const CHECKPOINT_DIR = path.join(os.tmpdir(), 'cobol_converter_checkpoints');
-fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
-// ─── Persistence: save/restore conversion state across restarts ──────────
-function checkpointPath(id) { return path.join(CHECKPOINT_DIR, `${id}.json`); }
+// Bind the activeConversions map to the persistence functions so callers can
+// use the old signatures: saveCheckpoint(id), loadCheckpoints().
+const saveCheckpoint = (id) => _persistSaveCheckpoint(activeConversions, id);
+const loadCheckpoints = () => _persistLoadCheckpoints(activeConversions);
 
-function saveCheckpoint(id) {
-    const conv = activeConversions.get(id);
-    if (!conv) return;
-    if (conv.status === 'completed' && !conv.completedAt) conv.completedAt = Date.now();
-    // Serialize everything EXCEPT Promises (pendingReview resolvers) and functions
-    const safe = {
-        status: conv.status,
-        cancelled: conv.cancelled,
-        logs: conv.logs,
-        result: conv.result,
-        useAzureAI: conv.useAzureAI,
-        reviewMode: conv.reviewMode,
-        reviewGlob: conv.reviewGlob,
-        reviewHistory: conv.reviewHistory,
-        tokens: conv.tokens,
-        risks: conv.risks,
-        postReview: conv.postReview,
-        graph: conv.graph,
-        fileStates: conv.fileStates,
-        fileTimeline: conv.fileTimeline,    // per-file phase history (for the
-                                            // slide-out panel — restored across
-                                            // restarts so past conversions stay
-                                            // inspectable).
-        currentFiles: conv.currentFiles,
-        inputPath: conv.inputPath,
-        startedAt: conv.startedAt,
-        completedAt: conv.completedAt
-    };
-    try {
-        fs.writeFileSync(checkpointPath(id), JSON.stringify(safe));
-    } catch {}
-}
-
-function loadCheckpoints() {
-    try {
-        const files = fs.readdirSync(CHECKPOINT_DIR).filter(f => f.endsWith('.json'));
-        for (const f of files) {
-            try {
-                const data = JSON.parse(fs.readFileSync(path.join(CHECKPOINT_DIR, f), 'utf-8'));
-                const id = f.replace('.json', '');
-                // Only restore completed conversions (can't resume in-flight ones — promises are lost)
-                if (data.status === 'completed') {
-                    data.pendingReview = {};
-                    activeConversions.set(id, data);
-                }
-            } catch {}
-        }
-        console.log(`   Restored ${activeConversions.size} completed conversion(s) from checkpoint`);
-    } catch {}
-}
-
-loadCheckpoints();
+const _restoredCount = loadCheckpoints();
+console.log(`   Restored ${_restoredCount} completed conversion(s) from checkpoint`);
 
 // API: Start conversion
 app.post('/api/convert', async (req, res) => {
@@ -296,22 +172,8 @@ app.post('/api/convert', async (req, res) => {
 });
 
 // API: Start conversion using Azure AI Agent
-// Convert a simple glob (* and **) to a RegExp anchored to the full string.
-// Only supports the subset we need: * = [^/]*  and  ** = .*
-function globToRegex(glob) {
-    if (!glob || typeof glob !== 'string') return null;
-    let re = '';
-    let i = 0;
-    while (i < glob.length) {
-        const c = glob[i];
-        if (c === '*' && glob[i + 1] === '*') { re += '.*'; i += 2; continue; }
-        if (c === '*')                         { re += '[^/]*'; i++; continue; }
-        if (c === '?')                         { re += '[^/]'; i++; continue; }
-        if ('\\^$+.()|{}[]'.includes(c))       { re += '\\' + c; i++; continue; }
-        re += c; i++;
-    }
-    try { return new RegExp('^' + re + '$', 'i'); } catch { return null; }
-}
+// Glob → RegExp → src/util/glob-regex.js
+const { globToRegex } = require('./src/util/glob-regex');
 
 // API: Cancel an in-flight conversion. Sets a flag the worker checks at batch boundaries.
 app.post('/api/cancel/:id', (req, res) => {
@@ -2701,66 +2563,8 @@ function buildManualReviewMd(files, conversionId) {
  * Intentionally forgiving — mainframe JCL has many dialects and line-
  * continuation quirks. We catch what we can and move on.
  */
-function parseJcl(content) {
-    if (!content) return null;
-    const lines = content.split(/\r?\n/);
-    const out = { jobName: null, steps: [], programs: new Set(), datasets: new Set(), procs: new Set() };
-    let currentStep = null;
-
-    const jobRe  = /^\/\/([A-Z0-9#@$]+)\s+JOB\b/i;
-    const stepRe = /^\/\/([A-Z0-9#@$]+)\s+EXEC\s+(.*)/i;
-    const ddRe   = /^\/\/([A-Z0-9#@$]+)\s+DD\s+(.*)/i;
-
-    for (let raw of lines) {
-        if (!raw) continue;
-        // Comments / instream data markers
-        if (raw.startsWith('//*') || raw.startsWith('/*')) continue;
-        if (!raw.startsWith('//')) continue;
-
-        let m;
-        if ((m = jobRe.exec(raw))) {
-            out.jobName = m[1];
-            continue;
-        }
-        if ((m = stepRe.exec(raw))) {
-            if (currentStep) out.steps.push(currentStep);
-            currentStep = { name: m[1], exec: {}, dds: [] };
-            const args = m[2];
-            const pgmM  = /PGM\s*=\s*([A-Z0-9#@$]+)/i.exec(args);
-            const procM = /PROC\s*=\s*([A-Z0-9#@$]+)/i.exec(args);
-            if (pgmM)  { currentStep.exec.pgm  = pgmM[1];  out.programs.add(pgmM[1].toUpperCase()); }
-            else if (procM) { currentStep.exec.proc = procM[1]; out.procs.add(procM[1].toUpperCase()); }
-            else {
-                // Bare EXEC PROCNAME (no keyword)
-                const bare = args.match(/^\s*([A-Z0-9#@$]+)/i);
-                if (bare) { currentStep.exec.proc = bare[1]; out.procs.add(bare[1].toUpperCase()); }
-            }
-            continue;
-        }
-        if ((m = ddRe.exec(raw))) {
-            if (!currentStep) continue;
-            const ddName = m[1];
-            const args = m[2];
-            const dsnM  = /DSN\s*=\s*([^,\s]+)/i.exec(args);
-            const dispM = /DISP\s*=\s*([A-Z0-9(),\s]+)/i.exec(args);
-            const sysoutM = /SYSOUT\s*=\s*\*/i.exec(args);
-            const ddEntry = {
-                name: ddName,
-                dsn:   dsnM ? dsnM[1] : null,
-                disp:  dispM ? dispM[1].trim() : null,
-                sysout: !!sysoutM
-            };
-            currentStep.dds.push(ddEntry);
-            if (ddEntry.dsn) out.datasets.add(ddEntry.dsn);
-            continue;
-        }
-    }
-    if (currentStep) out.steps.push(currentStep);
-    out.programs = [...out.programs];
-    out.datasets = [...out.datasets];
-    out.procs    = [...out.procs];
-    return out;
-}
+// JCL parser → src/scan/jcl-parser.js
+const { parseJcl } = require('./src/scan/jcl-parser');
 
 /**
  * API: Analyze a JCL file in the context of a conversion.
