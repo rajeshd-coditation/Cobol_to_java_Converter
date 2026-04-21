@@ -838,12 +838,20 @@ body {
     position: relative;
 }
 .graph-canvas.empty::before {
-    content: 'Graph will appear here once the repository is scanned…';
+    /* Multi-line explanation mirrors the "Select a file to view COBOL and
+       Java side by side" empty state copy pattern. Line 1 = what appears;
+       line 2 = what triggers it. `white-space: pre-line` lets us use \A
+       for the break without wrapping in a block element. */
+    content: 'Dependency graph will appear here.\AEnter a repo URL or pick a sample, then Convert to start.';
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
     color: var(--c-text-mute);
     font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+    white-space: pre-line;
+    max-width: 360px;
     pointer-events: none;
 }
 .graph-canvas[data-state]:not([data-state=""])::after {
@@ -1132,18 +1140,23 @@ body:not(.theme-light) .fix-progress-panel {
 }
 .fix-progress-header .file {
     font-size: 11px;
-    color: var(--c-muted, #888);
+    /* Light-mode default is fine; dark mode needs a brighter grey so the
+       filename doesn't fade out against the #141230 panel background. */
+    color: var(--c-text-mute, #888);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
+body:not(.theme-light) .fix-progress-header .file { color: #c2c0d8; }
 .fix-progress-close {
     background: transparent;
     border: 0;
     cursor: pointer;
     font-size: 18px;
-    color: var(--c-muted, #666);
+    color: var(--c-text-mute, #666);
     padding: 2px 6px;
     border-radius: 4px;
 }
+body:not(.theme-light) .fix-progress-close { color: #b8b6d0; }
+body:not(.theme-light) .fix-progress-close:hover { background: rgba(255, 255, 255, 0.08); }
 .fix-progress-close:hover { background: rgba(0, 0, 0, 0.05); }
 .fix-progress-steps {
     flex: 1;
@@ -1175,7 +1188,7 @@ body:not(.theme-light) .fix-progress-steps li {
 .fix-progress-steps .meta {
     display: block;
     font-size: 10.5px;
-    color: var(--c-muted, #888);
+    color: var(--c-text-mute, #888);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     margin-top: 2px;
 }
@@ -1187,10 +1200,15 @@ body:not(.theme-light) .fix-progress-steps li {
     padding: 12px 18px 16px;
     border-top: 1px solid rgba(124, 92, 255, 0.18);
     font-size: 11.5px;
-    color: var(--c-muted, #888);
+    color: var(--c-text-mute, #888);
 }
 .fix-progress-footer .compile-ok { color: #15803d; font-weight: 600; }
 .fix-progress-footer .compile-fail { color: #b91c1c; font-weight: 600; }
+/* Dark-mode compile status colors — light theme's forest-700 greens and
+   brick-700 reds are too low-contrast against the #141230 panel. Brighten
+   to the 400-range so they read at a glance without screaming. */
+body:not(.theme-light) .fix-progress-footer .compile-ok  { color: #4ade80; }
+body:not(.theme-light) .fix-progress-footer .compile-fail { color: #f87171; }
 
 /* Maximized view: one page-level scroll.
    The section itself is the ONLY scrollable surface — panes don't have their
@@ -1440,7 +1458,7 @@ body:not(.theme-light) .run-output-files {
 }
 .run-output-files-hint {
     font-size: 11px;
-    color: var(--c-muted, #888);
+    color: var(--c-text-mute, #888);
 }
 .run-output-files-hint code {
     font-size: 10.5px;
@@ -1467,7 +1485,7 @@ body:not(.theme-light) .run-output-files-hint code {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--c-muted, #666);
+    color: var(--c-text-mute, #666);
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
     padding-bottom: 4px;
 }
@@ -1477,7 +1495,7 @@ body:not(.theme-light) .run-output-files-side-label {
 }
 .run-output-files-empty {
     font-size: 11px;
-    color: var(--c-muted, #999);
+    color: var(--c-text-mute, #999);
     font-style: italic;
     padding: 6px 2px;
 }
@@ -1505,7 +1523,7 @@ body:not(.theme-light) .run-output-file {
 .run-output-file > summary::before {
     content: '▸';
     margin-right: 4px;
-    color: var(--c-muted, #888);
+    color: var(--c-text-mute, #888);
     transition: transform 120ms;
 }
 .run-output-file[open] > summary::before {
@@ -1522,7 +1540,7 @@ body:not(.theme-light) .run-output-file {
 }
 .run-output-file .of-size {
     font-size: 10.5px;
-    color: var(--c-muted, #888);
+    color: var(--c-text-mute, #888);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     flex-shrink: 0;
 }

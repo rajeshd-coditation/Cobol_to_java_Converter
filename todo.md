@@ -15,10 +15,8 @@ chosen), it lives in **[Decisions log](#decisions-log)** at the bottom.
 Tractable wins. Pick any one and ship.
 
 - [ ] **Fullscreen-single-pane.** Per-pane "Expand this pane" icon in the Results Browser so users can focus on just COBOL or just Java. Mirror of the existing repo-wide max button.
-- [ ] **Empty state improvements.** Empty graph / empty tree / "no AI configured" all currently show nothing or raw defaults — add explanatory copy matching the "Select a file to view COBOL and Java side by side" pattern we already have.
 - [ ] **Per-run cost readout.** We already track tokens per conversion; convert to USD via a hardcoded price table and show "This run cost ~$0.42" alongside the token count.
 - [ ] **Bookmark URL.** Pretty URL `/c/<conversionId>` that deep-links into the Results browser (rehydrate from checkpoint if the in-memory entry was evicted by §17.3 TTL).
-- [ ] **Dark-mode contrast audit.** Three specific panels flagged: progress panel (`--c-muted` on `#141230`), graph tooltip, COMPILE_FAIL details panel. Just tighten the CSS contrast values.
 - [ ] **AI toggle → settings cog.** Currently a compact pill in the header; move into a real settings menu where it belongs alongside future knobs (concurrency, budget cap, theme).
 - [ ] **Graph hover tooltip fields.** Currently just filename; add type + conversion duration + error text when present. Backend already has all three in `fileTimeline` / `fileStates`.
 - [ ] **Dictionary of known COBOL typo fixes.** Expand the `editDistance` hinter with a curated list (`PRINT-REX → PRINT-REC`, etc.) seen in real repos. Small data file + lookup before the edit-distance fuzzy match fires.
