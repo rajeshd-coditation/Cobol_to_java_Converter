@@ -32,7 +32,7 @@ const {
 const { autoFixJavaCode, detectTruncation } = require("./src/core/auto-fix-java");
 
 async function convertCobolToJava(cobolSource, retryCount = 0, context = {}) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return {
             success: false,
             error: 'Azure AI not initialized. Configure AZURE_OPENAI_* in .env file.'
@@ -439,7 +439,7 @@ MUST:
             success: true,
             javaCode,
             method: 'chat',
-            platform: azureConfig.isAIFoundry ? 'AI Foundry' : 'Azure OpenAI',
+            platform: (getConfig() && getConfig().isAIFoundry) ? 'AI Foundry' : 'Azure OpenAI',
             usage: capturedUsage
         };
     } catch (error) {
@@ -464,7 +464,7 @@ MUST:
  * Analyzes both COBOL source AND generated Java code for accurate output prediction
  */
 async function predictProgramOutput(cobolSource, javaCode) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return {
             success: false,
             error: 'Azure AI not initialized'
@@ -587,7 +587,7 @@ Your output: Total: 250`;
  * @param {Record<string,string>} [context.copybookBodies] name → .cpy source
  */
 async function analyzeConversionFailure(cobolSource, errorLog, errorType, context = {}) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return {
             success: false,
             error: 'Azure AI not initialized. Configure AZURE_OPENAI_* in .env file.'
@@ -664,7 +664,7 @@ const { scanForCobolFiles, scanForAllMainframeFiles } = require('./src/scan/cobo
  * Convert all COBOL files in a directory
  */
 async function convertDirectory(inputDir, outputDir, progressCallback) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return { success: false, error: 'Azure AI not initialized' };
     }
 
@@ -761,7 +761,7 @@ const { analyzeConversionAccuracy } = require("./src/core/accuracy-scorer");
  * @returns {Promise<{verdict:'match'|'partial'|'diverge', severity:'ok'|'info'|'warning'|'error', title:string, reasons:string[]}>}
  */
 async function compareRunOutputs(p) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return {
             verdict: 'unknown', severity: 'info',
             title: 'AI unavailable',
@@ -902,7 +902,7 @@ async function compareRunOutputs(p) {
  * Returns { success, javaCode, error, usage }
  */
 async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, cobolOutput, dependencies }) {
-    if (!azureConfig) {
+    if (!isAvailable()) {
         return { success: false, error: 'Azure AI not configured' };
     }
     if (!javaCode) {

@@ -13,6 +13,25 @@ const fs = require('node:fs');
 
 const azureAgent = require('../azureAgent');
 
+// Prompt-regression tests assert that certain rule strings live in the AI
+// prompts. Those prompts used to all live in azureAgent.js; as we split
+// them into src/ai/*.js feature modules this helper reads azureAgent.js +
+// every file under src/ai/ so the assertions stay stable regardless of
+// which module the prompt happens to be in. New prompt files are picked
+// up automatically — no test edits needed.
+function readAllPromptSources() {
+    const parts = [fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8')];
+    const aiDir = path.resolve(__dirname, '..', 'src', 'ai');
+    if (fs.existsSync(aiDir)) {
+        for (const name of fs.readdirSync(aiDir)) {
+            if (name.endsWith('.js')) {
+                parts.push(fs.readFileSync(path.join(aiDir, name), 'utf-8'));
+            }
+        }
+    }
+    return parts.join('\n// ---module boundary---\n');
+}
+
 // ─── Representative fixture snippets ──────────────────────────────────────
 const COBOL_FILE_IO = `
        IDENTIFICATION DIVISION.
@@ -206,7 +225,7 @@ test('fidelity rule (do-not-fabricate) appears in every conversion prompt in azu
     // between prompts on purpose (retry 2 says "fabricate sample records"
     // vs primary's "fabricate data") so we match the concept, not the
     // exact phrase.
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
 
     // Primary prompt — the full header must survive.
     assert.match(src, /DO NOT FABRICATE INPUT DATA/,
@@ -225,7 +244,7 @@ test('fidelity rule (do-not-fabricate) appears in every conversion prompt in azu
 
 // ─── 9. Dead-code regression: Agent-API path must stay gone ──
 test('Agent-API path stays deleted (no live references to convertWithAgent / AZURE_AGENT_ID)', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     // The function name may appear in the NOTE comment — but must NOT appear
     // as a function declaration or a callsite.
     assert.doesNotMatch(src, /async\s+function\s+convertWithAgent\s*\(/,
@@ -248,7 +267,7 @@ test('public/app.js SKIPPED_STATUSES includes SKIPPED_TOO_LARGE and SKIPPED_BUDG
 
 // ─── 11. Context assembly: copybookBodies flow through the prompt builder ──
 test('context.copybookBodies drives inline COPYBOOK blocks in the prompt', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     // The convertCobolToJava builder must emit "=== COPYBOOK X ===" headers
     // when copybookBodies is provided — this is what unblocks the AI from
     // guessing field names.
@@ -260,7 +279,7 @@ test('context.copybookBodies drives inline COPYBOOK blocks in the prompt', () =>
 
 // ─── 12. Context assembly: JCL invocations surface as a prompt section ──
 test('JCL invocations emit a prompt section with DD name → file path guidance', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     assert.match(src, /JCL invocations/i,
         'convertCobolToJava should emit a "JCL invocations" header when jclInvocations is present');
     // And the critical directive: use DD name as file path.
@@ -270,7 +289,7 @@ test('JCL invocations emit a prompt section with DD name → file path guidance'
 
 // ─── 13. Sibling signatures surface in the prompt when available ──
 test('sibling Java signatures show up under CALL targets when the map is populated', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     assert.match(src, /entry signature:/i,
         'prompt should annotate CALL targets with "entry signature:" when siblingSignatures[name] is set');
     assert.match(src, /context\.siblingSignatures/,
@@ -308,7 +327,7 @@ test('autoFixJavaCode removes illegal `throws` from for/while/if/switch/else/do 
 // before tokens get spent on a re-broken conversion.
 
 test('primary conversion prompt has COBOL ACCEPT EOF + default-zero rule', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     // ADDAMT.cobol repro: Java threw NumberFormatException / NullPointerException
     // on stdin input "q" or EOF. Rule: default to 0 + null-check.
     assert.match(src, /COBOL ACCEPT FROM SYSIN semantics/i,
@@ -320,7 +339,7 @@ test('primary conversion prompt has COBOL ACCEPT EOF + default-zero rule', () =>
 });
 
 test('repair (fixJavaCode) prompt carries ACCEPT + zero-pad rules', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     // These rules live in the repair system prompt so Fix-with-AI actually
     // repairs the two runtime bugs we observed (NPE on input, bare %d).
     assert.match(src, /DO NOT THROW on malformed STDIN input/i,
@@ -332,7 +351,7 @@ test('repair (fixJavaCode) prompt carries ACCEPT + zero-pad rules', () => {
 });
 
 test('primary prompt gives the zero-padding example', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'azureAgent.js'), 'utf-8');
+    const src = readAllPromptSources();
     // Full sample section + concrete example — rule must be discoverable.
     assert.match(src, /PIC 9\(N\) zero-padded display format/i,
         'primary prompt must carry the zero-padding section header');
