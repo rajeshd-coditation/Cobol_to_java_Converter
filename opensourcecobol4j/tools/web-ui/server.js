@@ -1753,6 +1753,9 @@ require('./src/routes/download').mount(app, { activeConversions, buildManualRevi
 
 // /api/fix-java → src/routes/fix-java.js
 require('./src/routes/fix-java').mount(app, { activeConversions, azureAgent });
+// /api/fix-diff/:id/:fileId + /api/unfix-java/:id/:fileId → paired recovery
+// endpoints, let the UI show the repair diff and roll back bad fixes.
+require('./src/routes/unfix-java').mount(app, { activeConversions, azureAgent });
 
 // API: AI-powered comparison of COBOL vs Java runtime output.
 // The frontend calls this AFTER /api/run returns, to get a semantic verdict

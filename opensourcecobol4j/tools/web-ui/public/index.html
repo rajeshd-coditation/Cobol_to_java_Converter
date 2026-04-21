@@ -386,6 +386,12 @@
                                     <span class="fix-java-icon"></span>
                                     <span class="fix-java-label">Fix with AI</span>
                                 </button>
+                                <button type="button" id="fixDiffBtn" class="btn-pill btn-sm hidden"
+                                        title="Show what changed between the pre-fix and current Java"
+                                        aria-label="Show fix diff">View fix diff</button>
+                                <button type="button" id="unfixJavaBtn" class="btn-pill btn-sm hidden"
+                                        title="Restore the pre-fix Java (deletes the .before-fix backup)"
+                                        aria-label="Undo the AI fix">Undo fix</button>
                             </div>
                             <pre id="browserJavaCode" class="browser-code"><code>Select a file from the tree to preview…</code></pre>
                         </div>

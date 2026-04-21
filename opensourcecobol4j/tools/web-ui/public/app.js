@@ -2307,6 +2307,26 @@ async function selectBrowserFile(file, el) {
                 : `Compile/run issue (${file.status}) — use AI to repair using the COBOL source, compile errors, and known dependencies.`;
         }
     }
+    // "View fix diff" + "Undo fix" show only when a .before-fix backup
+    // exists on disk — ask the server via /api/fix-diff (cheap, just stat
+    // + two file reads).
+    const diffBtn = document.getElementById('fixDiffBtn');
+    const unfixBtn = document.getElementById('unfixJavaBtn');
+    if (diffBtn) diffBtn.classList.add('hidden');
+    if (unfixBtn) unfixBtn.classList.add('hidden');
+    if (file && file.javaPath && currentConversionId) {
+        fetch(`/api/fix-diff/${currentConversionId}/${encodeURIComponent(file.cobolPath)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (!d || !d.hasBackup) return;
+                // Only show if this is still the file the user is looking at
+                // (selectBrowserFile may have advanced to a different file).
+                if (!currentBrowserFile || currentBrowserFile.cobolPath !== file.cobolPath) return;
+                if (diffBtn) diffBtn.classList.remove('hidden');
+                if (unfixBtn) unfixBtn.classList.remove('hidden');
+            })
+            .catch(() => {});
+    }
     // Show the terminal panel when a runnable file is selected
     const canRun = file.status === 'SUCCESS' && file.javaPath;
     const panel = document.getElementById('runOutputPanel');
@@ -2452,6 +2472,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // "Fix with AI" button — repair the currently-selected Java file.
     const fixBtn = document.getElementById('fixJavaBtn');
     if (fixBtn) fixBtn.addEventListener('click', fixSelectedJava);
+
+    // Paired recovery buttons — "View fix diff" + "Undo fix" — enabled only
+    // after a fix has been applied (we detect by asking the server whether
+    // a .before-fix backup exists).
+    const diffBtn = document.getElementById('fixDiffBtn');
+    if (diffBtn) diffBtn.addEventListener('click', showFixDiff);
+    const unfixBtn = document.getElementById('unfixJavaBtn');
+    if (unfixBtn) unfixBtn.addEventListener('click', undoFix);
 });
 
 // --- Unified node-click -> Results browser ---------------------------------
@@ -2857,6 +2885,105 @@ async function fixSelectedJava() {
         if (fixBtn) { fixBtn.disabled = false; if (labelEl) labelEl.textContent = 'Fix with AI'; }
     }
 }
+
+/**
+ * Show the pre-fix vs current Java side-by-side. Side-by-side (not unified
+ * diff) mirrors the code-comparison modal pattern and avoids pulling in a
+ * diff library — the existing `formatDiff` expects unified output.
+ */
+async function showFixDiff() {
+    if (!currentBrowserFile || !currentConversionId) return;
+    try {
+        const r = await fetch(`/api/fix-diff/${currentConversionId}/${encodeURIComponent(currentBrowserFile.cobolPath)}`);
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            toast(err.error || 'No fix diff available', 'warning');
+            return;
+        }
+        const data = await r.json();
+        if (!data.hasBackup) {
+            toast('No fix has been applied to this file yet.', 'info');
+            return;
+        }
+
+        // Reuse the existing code-comparison modal structure. Modal is
+        // created lazily the first time.
+        let modal = document.getElementById('fixDiffModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'fixDiffModal';
+            modal.className = 'modal hidden';
+            modal.innerHTML = `
+                <div class="modal-content modal-wide">
+                    <div class="modal-header">
+                        <h3>Fix diff — <span id="fixDiffTitle"></span></h3>
+                        <button class="modal-close" onclick="document.getElementById('fixDiffModal').classList.add('hidden')" aria-label="Close">x</button>
+                    </div>
+                    <div class="comparison-panes">
+                        <div class="comparison-pane">
+                            <div class="pane-header"><span class="pane-title">Before fix (.java.before-fix)</span></div>
+                            <pre class="browser-code"><code id="fixDiffBefore" class="language-java"></code></pre>
+                        </div>
+                        <div class="comparison-pane">
+                            <div class="pane-header"><span class="pane-title">After fix (current)</span></div>
+                            <pre class="browser-code"><code id="fixDiffAfter" class="language-java"></code></pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        document.getElementById('fixDiffTitle').textContent = currentBrowserFile.cobolPath;
+        document.getElementById('fixDiffBefore').textContent = data.before;
+        document.getElementById('fixDiffAfter').textContent = data.after;
+        // Prism re-highlight if available
+        if (window.Prism && Prism.highlightAllUnder) {
+            Prism.highlightAllUnder(modal);
+        }
+        modal.classList.remove('hidden');
+    } catch (err) {
+        toast('Failed to load fix diff: ' + (err.message || err), 'error');
+    }
+}
+window.showFixDiff = showFixDiff;
+
+/**
+ * Restore the pre-fix backup. Confirms first — destructive (deletes the
+ * backup and overwrites current Java). Server recompiles the restored code
+ * so the entry's status reflects reality after unfix.
+ */
+async function undoFix() {
+    if (!currentBrowserFile || !currentConversionId) return;
+    const ok = await confirmDialog(
+        `Restore the pre-fix version of ${currentBrowserFile.cobolPath.split('/').pop()}?\n\n` +
+        `The current Java will be overwritten and the .java.before-fix backup will be deleted.`,
+        { title: 'Undo AI fix', okText: 'Restore', danger: true }
+    );
+    if (!ok) return;
+    try {
+        const r = await fetch(`/api/unfix-java/${currentConversionId}/${encodeURIComponent(currentBrowserFile.cobolPath)}`, {
+            method: 'POST'
+        });
+        const data = await r.json();
+        if (!r.ok) {
+            toast(data.error || 'Unfix failed', 'error');
+            return;
+        }
+        // Refresh the Java pane so the user sees the restored code without a reload.
+        try {
+            await selectBrowserFile(currentBrowserFile, null);
+        } catch {}
+        // Let the user know whether the restored code still compiles.
+        const compileNote = data.compileStatus === 'ok'
+            ? 'Compiles cleanly.'
+            : (data.compileStatus === 'fail' ? 'Restored code has compile errors — see the status panel.' : '');
+        const accMsg = (typeof data.newAccuracy === 'number') ? ` Accuracy: ${data.newAccuracy}%.` : '';
+        toast(`Restored pre-fix Java.${accMsg} ${compileNote}`, 'success');
+    } catch (err) {
+        toast('Unfix failed: ' + (err.message || err), 'error');
+    }
+}
+window.undoFix = undoFix;
 
 // Download the conversion output as a zip archive. The server streams it so
 // we just navigate the browser to the endpoint; it triggers a file save.
