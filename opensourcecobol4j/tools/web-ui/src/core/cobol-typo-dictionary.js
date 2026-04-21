@@ -17,6 +17,9 @@
 const COBOL_TYPOS = {
     // COBOL Programming Course repo — PRINT-REC is declared, PRINT-REX is referenced
     'PRINT-REX': 'PRINT-REC',
+    // COBOL Programming Course CBL0009 — TLIMITED is declared but code
+    // references TLIMIT (edit distance 2, too far for fuzzy-match default).
+    'TLIMIT':   'TLIMITED',
     // CardDemo sample — ACCT-REC vs ACCTREC (hyphen drift)
     'ACCTREC':  'ACCT-REC',
     // Common COMP-3 typo — COMP3 without the hyphen doesn't parse

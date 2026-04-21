@@ -1874,7 +1874,15 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                                 const idRe = /^\s*(?:\d+\s+)?(?:FD|SD|\d{2})\s+([A-Z][A-Z0-9_-]*)/gim;
                                 let im;
                                 while ((im = idRe.exec(src)) !== null) idents.add(im[1].toUpperCase());
-                                const hit = [...idents].find(i => i !== bad && editDistance(i, bad.toUpperCase()) <= 1);
+                                // Threshold scales with identifier length: a
+                                // 3-char name off by 2 is probably a different
+                                // variable, but an 8-char name off by 2 is
+                                // almost always a typo (real case: TLIMIT vs
+                                // TLIMITED in COBOL Programming Course CBL0009
+                                // — 2 missing chars at the tail).
+                                const badU = bad.toUpperCase();
+                                const maxDist = badU.length >= 7 ? 2 : 1;
+                                const hit = [...idents].find(i => i !== badU && editDistance(i, badU) <= maxDist);
                                 if (hit) {
                                     typoHint = `\n\nHint: \`${bad}\` is not defined, but \`${hit}\` is — likely a typo in the source file. Edit the COBOL and change \`${bad}\` → \`${hit}\`.`;
                                     typoFix = { bad, suggestion: hit, source: 'edit-distance' };
