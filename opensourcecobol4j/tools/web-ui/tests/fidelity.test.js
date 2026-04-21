@@ -1186,3 +1186,108 @@ test('/api/resume returns alreadyComplete when no files remain non-terminal', as
         server.close();
     }
 });
+
+// ─── 22. Interactive run WebSocket — handshake + round-trip stdin ─────
+//
+// Pins the WS protocol shape: client receives `ready`, sends `stdin`,
+// receives `stdout` containing echoed input, receives `exit`. Uses a
+// trivial Java program that just echoes one line from stdin — skipped
+// when no JDK is on PATH so the deterministic test suite stays portable.
+test('interactive run WS — ready + stdin round-trip + exit for an Echo java class', async () => {
+    try {
+        require('child_process').execSync('javac -version', { stdio: ['ignore', 'ignore', 'ignore'] });
+    } catch {
+        return; // no JDK; skip gracefully
+    }
+
+    const http = require('http');
+    const express = require('express');
+    const WebSocket = require('ws');
+    const runWs = require('../src/routes/run-ws');
+
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ws-run-'));
+    const javaPath = path.join(tmp, 'Echo.java');
+    fs.writeFileSync(javaPath, `
+public class Echo {
+    public static void main(String[] args) throws Exception {
+        java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+        String line = br.readLine();
+        System.out.println("got:" + line);
+    }
+}
+`);
+
+    const activeConversions = new Map();
+    activeConversions.set('test-ws', {
+        status: 'completed',
+        result: { report: { files: [
+            { path: 'Echo.cbl', work_dir: tmp, java_path: javaPath }
+        ]}}
+    });
+
+    const app = express();
+    const srv = http.createServer(app);
+    runWs.mount(srv, { activeConversions });
+    srv.listen(0);
+    await new Promise(r => srv.once('listening', r));
+    const port = srv.address().port;
+
+    try {
+        const received = [];
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/run/test-ws/Echo.cbl`);
+
+        await new Promise((resolve, reject) => {
+            ws.on('message', (buf) => {
+                const msg = JSON.parse(buf.toString());
+                received.push(msg);
+                if (msg.type === 'ready') {
+                    ws.send(JSON.stringify({ type: 'stdin', data: 'hello\n' }));
+                }
+                if (msg.type === 'exit') resolve();
+            });
+            ws.on('error', reject);
+            setTimeout(() => reject(new Error('WS test timed out')), 20000);
+        });
+
+        const kinds = received.map(m => m.type);
+        assert.ok(kinds.includes('ready'), `missing ready frame; got ${kinds.join(', ')}`);
+        assert.ok(kinds.includes('exit'), `missing exit frame; got ${kinds.join(', ')}`);
+        const stdoutFrames = received.filter(m => m.type === 'stdout');
+        const combined = stdoutFrames.map(m => m.data).join('');
+        assert.ok(/got:hello/.test(combined), `expected 'got:hello' in stdout; got: ${JSON.stringify(combined)}`);
+    } finally {
+        srv.close();
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('interactive run WS — rejects unknown conversion id', async () => {
+    const http = require('http');
+    const express = require('express');
+    const WebSocket = require('ws');
+    const runWs = require('../src/routes/run-ws');
+
+    const activeConversions = new Map();
+    const app = express();
+    const srv = http.createServer(app);
+    runWs.mount(srv, { activeConversions });
+    srv.listen(0);
+    await new Promise(r => srv.once('listening', r));
+    const port = srv.address().port;
+
+    try {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/run/nope/foo.cbl`);
+        const received = [];
+        await new Promise((resolve, reject) => {
+            ws.on('message', (buf) => received.push(JSON.parse(buf.toString())));
+            ws.on('close', resolve);
+            ws.on('error', reject);
+            setTimeout(() => reject(new Error('timeout')), 5000);
+        });
+        const err = received.find(m => m.type === 'error');
+        assert.ok(err, `expected an error frame; got: ${JSON.stringify(received)}`);
+        assert.match(err.error, /not found/i);
+    } finally {
+        srv.close();
+    }
+});

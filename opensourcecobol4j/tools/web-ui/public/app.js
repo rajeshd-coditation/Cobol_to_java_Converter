@@ -4501,6 +4501,126 @@ function closeRunOutput() {
 window.runSelectedFile = runSelectedFile;
 window.closeRunOutput = closeRunOutput;
 
+// --- Interactive run (WebSocket-backed live terminal) --------------------
+// The spawnSync path (runSelectedFile / /api/run) feeds a fixed stdin and
+// captures stdout at exit. That's great for diff-against-COBOL but hides
+// what a menu program actually asks you. The interactive flow opens a WS
+// to /ws/run/:id/:fileId and streams both directions so you can walk the
+// program: type a choice, see the next prompt, type again. See
+// src/routes/run-ws.js for the protocol.
+let interactiveWs = null;
+
+function openInteractiveRun() {
+    if (!currentBrowserFile || !currentConversionId) {
+        showToast('Select a file first', 'error');
+        return;
+    }
+    const file = currentBrowserFile;
+    const modal = document.getElementById('interactiveRunModal');
+    const termCode = document.querySelector('#interactiveRunTerminal code');
+    const fileLabel = document.getElementById('interactiveRunFile');
+    const state = document.getElementById('interactiveRunState');
+    const stdinInput = document.getElementById('interactiveRunStdin');
+
+    if (fileLabel) fileLabel.textContent = file.cobolPath;
+    if (termCode) termCode.textContent = '';
+    if (state) { state.textContent = 'Connecting…'; state.className = 'interactive-state connecting'; }
+    if (stdinInput) { stdinInput.value = ''; stdinInput.disabled = true; }
+    if (modal) modal.classList.remove('hidden');
+
+    // Close any lingering previous session before opening a new one.
+    try { if (interactiveWs) interactiveWs.close(); } catch {}
+
+    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${scheme}://${window.location.host}/ws/run/${encodeURIComponent(currentConversionId)}/${encodeURIComponent(file.cobolPath)}`;
+    const ws = new WebSocket(url);
+    interactiveWs = ws;
+
+    const appendTerminal = (text, kind) => {
+        if (!termCode) return;
+        const span = document.createElement('span');
+        if (kind === 'stderr') span.className = 'term-stderr';
+        else if (kind === 'system') span.className = 'term-system';
+        span.textContent = text;
+        termCode.appendChild(span);
+        // Auto-scroll to bottom.
+        const pre = document.getElementById('interactiveRunTerminal');
+        if (pre) pre.scrollTop = pre.scrollHeight;
+    };
+
+    ws.addEventListener('open', () => {
+        if (state) { state.textContent = 'Starting…'; state.className = 'interactive-state connecting'; }
+    });
+    ws.addEventListener('message', (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'ready') {
+            if (state) { state.textContent = 'Running'; state.className = 'interactive-state running'; }
+            if (stdinInput) { stdinInput.disabled = false; stdinInput.focus(); }
+            appendTerminal('[program started]\n', 'system');
+        } else if (msg.type === 'stdout') {
+            appendTerminal(msg.data, 'stdout');
+        } else if (msg.type === 'stderr') {
+            appendTerminal(msg.data, 'stderr');
+        } else if (msg.type === 'exit') {
+            const pretty = msg.signal ? `signal=${msg.signal}` : `exit=${msg.code}`;
+            appendTerminal(`\n[process ended — ${pretty}]\n`, 'system');
+            if (state) { state.textContent = 'Finished'; state.className = 'interactive-state finished'; }
+            if (stdinInput) stdinInput.disabled = true;
+        } else if (msg.type === 'error') {
+            appendTerminal(`\n[error] ${msg.error}\n`, 'stderr');
+            if (state) { state.textContent = 'Error'; state.className = 'interactive-state error'; }
+        }
+    });
+    ws.addEventListener('close', () => {
+        if (state && state.textContent !== 'Finished') {
+            state.textContent = 'Closed';
+            state.className = 'interactive-state finished';
+        }
+        if (stdinInput) stdinInput.disabled = true;
+    });
+    ws.addEventListener('error', () => {
+        appendTerminal('\n[WebSocket error — is the server reachable?]\n', 'stderr');
+        if (state) { state.textContent = 'Error'; state.className = 'interactive-state error'; }
+    });
+}
+
+function sendInteractiveStdin() {
+    const input = document.getElementById('interactiveRunStdin');
+    if (!input || !interactiveWs || interactiveWs.readyState !== WebSocket.OPEN) return;
+    const raw = input.value;
+    input.value = '';
+    // Echo what we sent (most real terminals echo typed chars; pipes don't).
+    const termCode = document.querySelector('#interactiveRunTerminal code');
+    if (termCode) {
+        const span = document.createElement('span');
+        span.className = 'term-user-input';
+        span.textContent = raw + '\n';
+        termCode.appendChild(span);
+        const pre = document.getElementById('interactiveRunTerminal');
+        if (pre) pre.scrollTop = pre.scrollHeight;
+    }
+    try { interactiveWs.send(JSON.stringify({ type: 'stdin', data: raw + '\n' })); } catch {}
+}
+
+function killInteractiveRun() {
+    if (!interactiveWs || interactiveWs.readyState !== WebSocket.OPEN) return;
+    try { interactiveWs.send(JSON.stringify({ type: 'signal', signal: 'SIGTERM' })); } catch {}
+}
+
+function closeInteractiveRun() {
+    try { if (interactiveWs) interactiveWs.close(); } catch {}
+    interactiveWs = null;
+    const modal = document.getElementById('interactiveRunModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+window.openInteractiveRun = openInteractiveRun;
+window.sendInteractiveStdin = sendInteractiveStdin;
+window.killInteractiveRun = killInteractiveRun;
+window.closeInteractiveRun = closeInteractiveRun;
+
 // --- Dependency intelligence helpers -------------------------------------
 function gDeps() {
     return (window.cobolGraph && window.cobolGraph.rawGraph) || { nodes: [], edges: [] };

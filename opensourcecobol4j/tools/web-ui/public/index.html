@@ -447,6 +447,10 @@
                                     placeholder="stdin input (e.g. 1,4 or 1\\n100.50\\n4)"
                                     onkeydown="if(event.key==='Enter'){runSelectedFile()}">
                                 <button id="runBtn" class="btn-pill btn-primary btn-sm" onclick="runSelectedFile()">Run</button>
+                                <button id="runInteractiveBtn" class="btn-pill btn-ghost btn-sm" onclick="openInteractiveRun()"
+                                        title="Open a live terminal for the Java program — walk through menu prompts instead of pre-padding stdin">
+                                    Interactive
+                                </button>
                             </div>
                             <button class="run-close-btn" onclick="closeRunOutput()" title="Close">x</button>
                         </div>
@@ -707,6 +711,34 @@
             <div id="historyList" class="hidden"></div>
         </div>
     </aside>
+
+    <!-- Interactive run modal — live WebSocket terminal for the Java program.
+         Opens via the "Interactive" button in the Run panel. Streams stdout
+         as it arrives, accepts stdin line-by-line (Enter to submit).
+         Intentionally minimal — no xterm.js dependency, just a scrolling
+         pre tag + input line. Works for most COBOL menu programs. -->
+    <div id="interactiveRunModal" class="modal hidden">
+        <div class="modal-content glass-card interactive-run-modal">
+            <div class="modal-header">
+                <h3>Interactive run — <span id="interactiveRunFile">—</span></h3>
+                <div class="interactive-run-status">
+                    <span id="interactiveRunState" class="interactive-state idle">Idle</span>
+                </div>
+                <button class="close-btn" onclick="closeInteractiveRun()">&times;</button>
+            </div>
+            <div class="interactive-run-body">
+                <pre id="interactiveRunTerminal" class="interactive-terminal"><code></code></pre>
+                <div class="interactive-run-input-row">
+                    <input type="text" id="interactiveRunStdin" class="interactive-stdin"
+                           placeholder="Type input and press Enter…"
+                           autocomplete="off" spellcheck="false"
+                           onkeydown="if(event.key==='Enter'){sendInteractiveStdin()}">
+                    <button class="btn-pill btn-primary btn-sm" onclick="sendInteractiveStdin()">Send</button>
+                    <button class="btn-pill btn-ghost btn-sm" onclick="killInteractiveRun()" title="Send SIGTERM to the running program">Stop</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Graph hover tooltip -->
     <div id="graphTooltip" class="graph-tooltip"></div>

@@ -2098,8 +2098,13 @@ require('./src/routes/health').mount(app, { activeConversions, AI_PROVIDER, aiAg
 require('./src/routes/stats').mount(app, { activeConversions });
 
 
-// Start server
-app.listen(PORT, () => {
+// Start server — use http.createServer explicitly so we can attach a
+// WebSocket upgrade handler for the interactive-run route (ws/run/...).
+const http = require('http');
+const httpServer = http.createServer(app);
+require('./src/routes/run-ws').mount(httpServer, { activeConversions });
+
+httpServer.listen(PORT, () => {
     console.log('\n' + '='.repeat(50));
     console.log(' COBOL Converter UI starting...');
     console.log('='.repeat(50));
