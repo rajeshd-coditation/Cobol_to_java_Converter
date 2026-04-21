@@ -1,113 +1,5 @@
 // COBOL to Java Converter - Frontend Application
-
-// ==================================================================
-// Platform dialogs & toasts — replacement for native alert/confirm/prompt.
-// Why: browser-native dialogs say "localhost:3000 says…" and look jarring.
-// These match the app's visual language and live inside the page.
-// ==================================================================
-
-/**
- * Show an ephemeral toast notification.
- * @param {string} message
- * @param {'info'|'success'|'warning'|'error'} [type='info']
- * @param {number} [duration=4500] ms; 0 = sticky until dismissed
- */
-function toast(message, type = 'info', duration = 4500) {
-    const container = document.getElementById('toastContainer');
-    if (!container) return;
-    const icons = { info: 'i', success: 'OK', warning: '!', error: 'x' };
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
-    el.innerHTML = `
-        <span class="toast-icon">${icons[type] || 'i'}</span>
-        <span class="toast-message"></span>
-        <button class="toast-close" aria-label="Dismiss">x</button>
-    `;
-    el.querySelector('.toast-message').textContent = String(message);
-    const dismiss = () => {
-        if (el.classList.contains('toast-leaving')) return;
-        el.classList.add('toast-leaving');
-        setTimeout(() => el.remove(), 180);
-    };
-    el.querySelector('.toast-close').addEventListener('click', dismiss);
-    container.appendChild(el);
-    if (duration > 0) setTimeout(dismiss, duration);
-    return dismiss;
-}
-
-// Internal: open the shared dialog modal. Returns a Promise that resolves with
-// the user's choice (boolean for confirm, string|null for prompt).
-function _openDialog({ title, message, showInput, okText, cancelText, danger, defaultValue }) {
-    return new Promise(resolve => {
-        const modal = document.getElementById('appDialog');
-        if (!modal) { resolve(null); return; }
-        const titleEl  = document.getElementById('appDialogTitle');
-        const msgEl    = document.getElementById('appDialogMessage');
-        const inputEl  = document.getElementById('appDialogInput');
-        const okBtn    = document.getElementById('appDialogOkBtn');
-        const cancelBtn = document.getElementById('appDialogCancelBtn');
-
-        titleEl.textContent = title || 'Confirm';
-        msgEl.textContent = message || '';
-        okBtn.textContent = okText || 'OK';
-        cancelBtn.textContent = cancelText || 'Cancel';
-        okBtn.classList.toggle('danger', !!danger);
-
-        if (showInput) {
-            inputEl.classList.remove('hidden');
-            inputEl.value = defaultValue || '';
-        } else {
-            inputEl.classList.add('hidden');
-            inputEl.value = '';
-        }
-
-        modal.classList.remove('hidden');
-        // Focus input if prompt, else OK button
-        setTimeout(() => (showInput ? inputEl : okBtn).focus(), 30);
-
-        const close = (outcome) => {
-            modal.classList.add('hidden');
-            okBtn.removeEventListener('click', onOk);
-            cancelBtn.removeEventListener('click', onCancel);
-            modal.removeEventListener('click', onBackdrop);
-            document.removeEventListener('keydown', onKey);
-            inputEl.removeEventListener('keydown', onInputKey);
-            resolve(outcome);
-        };
-        const onOk = () => close(showInput ? (inputEl.value || '') : true);
-        const onCancel = () => close(showInput ? null : false);
-        const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
-        const onKey = (e) => {
-            if (e.key === 'Escape') onCancel();
-            else if (e.key === 'Enter' && !showInput) onOk();
-        };
-        const onInputKey = (e) => { if (e.key === 'Enter') onOk(); };
-
-        okBtn.addEventListener('click', onOk);
-        cancelBtn.addEventListener('click', onCancel);
-        modal.addEventListener('click', onBackdrop);
-        document.addEventListener('keydown', onKey);
-        inputEl.addEventListener('keydown', onInputKey);
-    });
-}
-
-/**
- * In-app confirm dialog. Returns Promise<boolean>.
- * Usage: if (!await confirmDialog('Cancel conversion?')) return;
- */
-function confirmDialog(message, { title = 'Confirm', okText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
-    return _openDialog({ title, message, showInput: false, okText, cancelText, danger });
-}
-
-/**
- * In-app prompt dialog. Returns Promise<string|null>.
- * Empty string means the user pressed OK but entered nothing.
- * Null means Cancel / Escape.
- */
-function promptDialog(message, { title = 'Input required', okText = 'OK', cancelText = 'Cancel', defaultValue = '' } = {}) {
-    return _openDialog({ title, message, showInput: true, okText, cancelText, danger: false, defaultValue });
-}
+// toast, confirmDialog, promptDialog → public/js/dialogs.js (loaded first).
 
 // DOM Elements
 const repoInput = document.getElementById('repoInput');
@@ -1535,27 +1427,7 @@ async function viewComparison(workDir, fileName) {
 }
 
 // Format diff output with color highlighting
-function formatDiff(diffText) {
-    if (!diffText) return '';
-
-    return diffText.split('\n').map(line => {
-        if (line.startsWith('<')) {
-            return `<span class="diff-remove">${escapeHtml(line)}</span>`;
-        } else if (line.startsWith('>')) {
-            return `<span class="diff-add">${escapeHtml(line)}</span>`;
-        } else if (line.startsWith('---') || line.startsWith('***') || line.match(/^\d/)) {
-            return `<span style="color: var(--text-muted)">${escapeHtml(line)}</span>`;
-        }
-        return escapeHtml(line);
-    }).join('\n');
-}
-
-// Escape HTML for safe display
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// formatDiff, escapeHtml → public/js/helpers.js
 
 // Close comparison modal
 function closeComparisonModal() {
@@ -1867,41 +1739,7 @@ async function analyzeWithAI(sourcePath, workDir, errorType, fileName) {
     }
 }
 
-// Simple markdown renderer
-function renderMarkdown(text) {
-    // Escape HTML
-    let html = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-
-    // Code blocks
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        return `<pre class="code-block ${lang}"><code>${code.trim()}</code></pre>`;
-    });
-
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-
-    // Bold
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-    // Headers
-    html = html.replace(/^#### (.+)$/gm, '<h5>$1</h5>');
-    html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
-    html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-
-    // Lists
-    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
-
-    // Line breaks
-    html = html.replace(/\n\n/g, '</p><p>');
-    html = html.replace(/\n/g, '<br>');
-
-    return `<p>${html}</p>`;
-}
+// renderMarkdown → public/js/helpers.js
 
 // Close AI modal
 function closeAiModal() {
@@ -2226,21 +2064,8 @@ function renderReviewHistory(history) {
     }).join('');
 }
 
-function escapeHtml(s) {
-    return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
+// escapeHtml, fmt → public/js/helpers.js
 window.bulkReview = bulkReview;
-
-// --- Token panel updater -------------------------------------------------
-function fmt(n) {
-    if (n == null) return '0';
-    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-    return String(n);
-}
 window.updateTokenPanel = function (tokens) {
     if (!tokens) return;
     const panel = document.getElementById('tokenPanel');
@@ -3371,34 +3196,7 @@ actuallyStartConversion = async function (...args) {
     return _origActuallyStart.apply(this, args);
 };
 
-// --- White-label + emoji-strip filter for streamed log lines -------------
-// Strips brand mentions AND any emoji symbols so the Stream tab is clean text.
-function whiteLabel(text) {
-    if (typeof text !== 'string') return text;
-    return text
-        .replace(/Powered by Azure AI Agent/gi, 'Powered by Coditation AI')
-        .replace(/Azure OpenAI/gi, 'Coditation AI')
-        .replace(/Azure AI Foundry/gi, 'Coditation AI')
-        .replace(/Azure AI/gi, 'Coditation AI')
-        .replace(/AI Foundry/gi, 'Coditation AI')
-        .replace(/OpenAI/gi, 'Coditation AI')
-        .replace(/\bAzure\b/g, 'Coditation')
-        .replace(/GnuCOBOL/gi, 'COBOL toolchain')
-        .replace(/\bcobj\b/g, 'compiler')
-        .replace(/\bcobc\b/g, 'compiler')
-        // Strip all emoji / pictographs / symbols
-        .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')   // misc symbols & pictographs
-        .replace(/[\u{1F600}-\u{1F64F}]/gu, '')   // emoticons
-        .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')   // transport & map
-        .replace(/[\u{2600}-\u{27BF}]/gu, '')     // misc symbols + dingbats
-        .replace(/[\u{1F100}-\u{1F1FF}]/gu, '')   // enclosed
-        .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // symbols extended-A
-        .replace(/[\u{2700}-\u{27BF}]/gu, '')     // dingbats
-        .replace(/\uFE0F/g, '')                   // variation selector
-        // Tighten "  whitespace" left behind from removed emoji
-        .replace(/[ \t]{2,}/g, ' ')
-        .replace(/^[ \t]+$/gm, '');
-}
+// whiteLabel → public/js/helpers.js
 window.whiteLabel = whiteLabel;
 
 // --- Active-file breadcrumb in header ------------------------------------
@@ -3430,23 +3228,7 @@ function updateReviewQueueBadge(awaitingCount) {
     }
 }
 
-// --- Toast (transient notifications) -------------------------------------
-// Legacy showToast — kept for compatibility with callers that pass rich HTML
-// (e.g. `<div class="toast-title">…</div><div class="toast-detail">…</div>`).
-// Forwards to the platform toast system but strips HTML to plain text so the
-// message lays out cleanly in the grid-based toast container.
-function showToast(message, kind) {
-    let text = String(message || '');
-    // Strip HTML: swap <br>/block tags for newlines, then drop other tags.
-    text = text
-        .replace(/<\/?(?:div|p|br|li)[^>]*>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-    const typeMap = { success: 'success', warning: 'warning', error: 'error', info: 'info' };
-    return toast(text, typeMap[kind] || 'info', 5500);
-}
+// showToast → public/js/dialogs.js
 window.showToast = showToast;
 
 // Wrap the existing graph state updates so the breadcrumb + queue badge update too
@@ -4669,17 +4451,7 @@ function hideReviewDiff() {
 window.showReviewDiff = showReviewDiff;
 window.hideReviewDiff = hideReviewDiff;
 
-// --- Theme toggle (light / dark) -----------------------------------------
-function applyTheme(theme) {
-    document.body.classList.toggle('theme-light', theme === 'light');
-    const icon = document.getElementById('themeIcon');
-    if (icon) icon.textContent = theme === 'light' ? '' : '';
-    localStorage.setItem('theme', theme);
-}
-function toggleTheme() {
-    const current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
-    applyTheme(current === 'light' ? 'dark' : 'light');
-}
+// applyTheme, toggleTheme → public/js/helpers.js
 window.toggleTheme = toggleTheme;
 // Restore saved theme on load
 (function () {
