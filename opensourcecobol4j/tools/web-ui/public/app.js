@@ -479,16 +479,14 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
                         openReviewModal(nodeData.id, nodeData.label);
                         return;
                     }
-                    // Open per-file timeline panel alongside (or before) code
-                    // comparison. While a file is still converting, the
-                    // timeline is the useful thing — code comparison would
-                    // show an empty Java pane. For completed files, we show
-                    // both: timeline + code.
-                    if (typeof openFileTimelinePanel === 'function') {
-                        openFileTimelinePanel(nodeData.id, nodeData.label);
-                    }
-                    if (typeof viewCodeComparison === 'function' && nodeData.path) {
-                        viewCodeComparison(nodeData.path, nodeData.label, nodeData.id);
+                    // Instead of a modal + right-panel combo, drive the
+                    // Results Browser directly: scroll to it, select the
+                    // clicked file in the tree (populates COBOL + Java
+                    // panes + accuracy banner + Fix-with-AI button), and
+                    // open the per-file timeline alongside it. One coherent
+                    // full-width view instead of stacked overlays.
+                    if (typeof showFileInBrowser === 'function') {
+                        showFileInBrowser(nodeData.id, nodeData.label);
                     }
                 },
                 onStateUpdate: (counts) => {
@@ -2779,6 +2777,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const fixBtn = document.getElementById('fixJavaBtn');
     if (fixBtn) fixBtn.addEventListener('click', fixSelectedJava);
 });
+
+// --- Unified node-click -> Results browser ---------------------------------
+// When a user clicks any node in the dependency graph, we drive the existing
+// Results Browser to that file and open the timeline beside it. This replaces
+// the old "modal + right-side slide-out" combo (which overlapped and hid the
+// underlying graph) with a single full-width view:
+//   [ tree | COBOL source | Java + accuracy + Fix-with-AI ]  + timeline sidebar.
+// The browser section is ALREADY the ideal layout — no point reinventing it
+// in a modal.
+async function showFileInBrowser(relPath, label) {
+    if (!currentConversionId || !relPath) return;
+    // Ensure the browser tree is loaded (no-op after first load).
+    if (typeof loadBrowser === 'function') await loadBrowser();
+
+    // Scroll to the browser section so it's in view.
+    const section = document.getElementById('browserSection');
+    if (section) {
+        section.classList.remove('hidden');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // Find the matching tree row. Tree rows are keyed by data-path = cobolPath.
+    // The row may not exist yet if the conversion is still mid-flight for
+    // this file -- retry briefly.
+    const selectRow = () => {
+        const row = document.querySelector(`.tree-file[data-path="${CSS.escape(relPath)}"]`);
+        if (!row) return false;
+        row.click();   // triggers selectBrowserFile via the existing delegated listener
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return true;
+    };
+    let tries = 0;
+    while (tries++ < 8 && !selectRow()) {
+        await new Promise(r => setTimeout(r, 250));
+    }
+
+    // Open the per-file phase timeline alongside the code panes.
+    if (typeof openFileTimelinePanel === 'function') {
+        openFileTimelinePanel(relPath, label);
+    }
+}
+window.showFileInBrowser = showFileInBrowser;
 
 // --- Per-file timeline slide-out (reuses .fix-progress-panel styling) ---
 // Clicked from any node in the graph. Shows the file's phase history
@@ -5553,8 +5593,8 @@ async function restoreSession() {
                             openReviewModal(nodeData.id, nodeData.label);
                             return;
                         }
-                        if (typeof viewCodeComparison === 'function' && nodeData.path) {
-                            viewCodeComparison(nodeData.path, nodeData.label, nodeData.id);
+                        if (typeof showFileInBrowser === 'function') {
+                            showFileInBrowser(nodeData.id, nodeData.label);
                         }
                     },
                     onStateUpdate: (counts) => {
