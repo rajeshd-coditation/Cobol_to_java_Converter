@@ -6,7 +6,6 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const archiver = require('archiver');
 const aiAgent = require('./aiAgent');
 const azureAgent = require('./azureAgent');
 
@@ -175,42 +174,12 @@ app.post('/api/convert', async (req, res) => {
 // Glob → RegExp → src/util/glob-regex.js
 const { globToRegex } = require('./src/util/glob-regex');
 
-// API: Cancel an in-flight conversion. Sets a flag the worker checks at batch boundaries.
-app.post('/api/cancel/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    if (conversion.status === 'completed') {
-        return res.json({ ok: true, alreadyCompleted: true });
-    }
-    conversion.cancelled = true;
-    // Resolve any pending HITL reviews so the worker doesn't deadlock waiting for them
-    if (conversion.pendingReview) {
-        for (const [fileId, item] of Object.entries(conversion.pendingReview)) {
-            try { item.resolve({ action: 'reject', note: 'Cancelled' }); } catch {}
-        }
-    }
-    res.json({ ok: true });
-});
+// /api/cancel/:id → src/routes/cancel.js
+require('./src/routes/cancel').mount(app, { activeConversions });
 
-// API: List bundled sample repos (portable, server-side resolved).
-app.get('/api/samples', (req, res) => {
-    const repoRoot = path.resolve(__dirname, '..', '..', '..');
-    const samples = [
-        {
-            id: 'small',
-            name: 'Small sample',
-            description: '~7 COBOL files + copybooks (auth subsystem)',
-            path: path.join(repoRoot, 'opensourcecobol4j', 'carddemo-app', 'app-authorization-ims-db2-mq')
-        },
-        {
-            id: 'carddemo',
-            name: 'Full CardDemo',
-            description: '~40 COBOL files (full mainframe demo app)',
-            path: path.join(repoRoot, 'opensourcecobol4j', 'carddemo-app')
-        }
-    ].filter(s => fs.existsSync(s.path));
-    res.json({ samples });
-});
+// Small self-contained routes → src/routes/misc.js
+// (samples, file-content, ai/provider, dependencies). Mounted after aiAgent
+// + azureAgent are required (see top of file).
 
 // API: Pre-conversion scan — clone (if needed), enumerate files, return for selection.
 // Caller then POSTs to /api/convert-azure with { repoUrl: <localPath>, selectedFiles: [...] }
@@ -1474,172 +1443,13 @@ app.post('/api/convert-azure', async (req, res) => {
     res.json({ conversionId, outputDir, useAzureAI: true });
 });
 
-// API: Get conversion status
-app.get('/api/status/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
+// /api/status/:id → src/routes/status.js
 
-    if (!conversion) {
-        return res.status(404).json({ error: 'Conversion not found' });
-    }
+// HITL review endpoints → src/routes/review.js
+require('./src/routes/review').mount(app, { activeConversions, saveCheckpoint, globToRegex });
 
-    res.json(conversion);
-});
-
-// API: HITL — fetch the pending review payload for a single file.
-app.get('/api/review/:id/:fileId(*)', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const item = conversion.pendingReview && conversion.pendingReview[req.params.fileId];
-    if (!item) return res.status(404).json({ error: 'No pending review for this file' });
-    res.json({
-        fileId: req.params.fileId,
-        cobolSource: item.cobolSource,
-        javaCode: item.javaCode,
-        queuedAt: item.queuedAt
-    });
-});
-
-// API: HITL — submit a review decision (approve / reject / edit).
-app.post('/api/review/:id/:fileId(*)', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const item = conversion.pendingReview && conversion.pendingReview[req.params.fileId];
-    if (!item) return res.status(404).json({ error: 'No pending review for this file' });
-
-    const { action, editedJava, note } = req.body || {};
-    if (!['approve', 'reject', 'edit'].includes(action)) {
-        return res.status(400).json({ error: 'action must be approve | reject | edit' });
-    }
-    item.resolve({ action, editedJava, note });
-    (conversion.reviewHistory ||= []).push({
-        fileId: req.params.fileId, action, at: Date.now(), note: note || null
-    });
-    saveCheckpoint(req.params.id);
-    res.json({ ok: true });
-});
-
-// API: HITL — toggle review mode at runtime.
-// Turning OFF auto-approves any in-flight pending reviews so the worker proceeds.
-// Turning ON means only *subsequent* files will pause — already-converted files are unaffected.
-app.post('/api/review-mode/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const { reviewMode, reviewGlob } = req.body || {};
-    const wasOn = !!conversion.reviewMode;
-    const nowOn = !!reviewMode;
-    conversion.reviewMode = nowOn;
-    if (typeof reviewGlob === 'string' || reviewGlob === null) {
-        conversion.reviewGlob = reviewGlob || null;
-        conversion.reviewGlobRe = globToRegex(conversion.reviewGlob);
-    }
-
-    // If turning OFF, drain the pending queue by auto-approving everything.
-    let drained = 0;
-    if (wasOn && !nowOn && conversion.pendingReview) {
-        for (const [fileId, item] of Object.entries(conversion.pendingReview)) {
-            if (!item || typeof item.resolve !== 'function') continue;
-            item.resolve({ action: 'approve', note: 'Auto-approved (review mode turned off)' });
-            (conversion.reviewHistory ||= []).push({
-                fileId, action: 'approve', at: Date.now(),
-                note: 'Auto-approved (review mode turned off)', auto: true
-            });
-            drained++;
-        }
-    }
-    saveCheckpoint(req.params.id);
-    res.json({ ok: true, reviewMode: nowOn, drained });
-});
-
-// API: HITL — list everything currently waiting on a human.
-app.get('/api/reviews/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const pending = Object.entries(conversion.pendingReview || {}).map(([fileId, item]) => ({
-        fileId,
-        queuedAt: item.queuedAt
-    }));
-    res.json({
-        pending,
-        history: conversion.reviewHistory || [],
-        reviewMode: !!conversion.reviewMode,
-        reviewGlob: conversion.reviewGlob || null
-    });
-});
-
-// API: HITL — bulk approve / reject everything currently pending.
-app.post('/api/reviews/:id/bulk', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const action = (req.body && req.body.action) || '';
-    if (!['approve', 'reject'].includes(action)) {
-        return res.status(400).json({ error: 'action must be approve | reject' });
-    }
-    const note = action === 'reject' ? 'Bulk rejected' : null;
-    const fileIds = Object.keys(conversion.pendingReview || {});
-    let count = 0;
-    for (const fileId of fileIds) {
-        const item = conversion.pendingReview[fileId];
-        if (!item) continue;
-        item.resolve({ action, note });
-        (conversion.reviewHistory ||= []).push({
-            fileId, action, at: Date.now(), note, bulk: true
-        });
-        count++;
-    }
-    res.json({ ok: true, count });
-});
-
-// API: HITL — review history (audit trail).
-app.get('/api/reviews/:id/history', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    res.json({ history: conversion.reviewHistory || [] });
-});
-
-// API: Live dependency graph + per-file state for the graph view.
-// Lightweight — returns nodes/edges once, then just states on subsequent polls.
-app.get('/api/graph/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) {
-        return res.status(404).json({ error: 'Conversion not found' });
-    }
-    if (!conversion.graph) {
-        // Scan hasn't built the graph yet
-        return res.json({ ready: false, status: conversion.status });
-    }
-    const includeGraph = req.query.full === '1';
-    // Optional: include one file's timeline (avoids shipping 30+ timelines
-    // on every poll — we only send the currently-inspected file's).
-    let timeline = null;
-    if (req.query.file && conversion.fileTimeline) {
-        timeline = conversion.fileTimeline[req.query.file] || [];
-    }
-    res.json({
-        ready: true,
-        status: conversion.status,
-        graph: includeGraph ? conversion.graph : undefined,
-        fileStates: conversion.fileStates,
-        currentFiles: conversion.currentFiles || [],
-        tokens: conversion.tokens || null,
-        risks: conversion.risks || null,
-        timeline
-    });
-});
-
-// API: Dedicated per-file timeline. Separate from /api/graph to keep poll
-// payloads small — the UI fetches this only when the user opens a node's
-// slide-out panel.
-app.get('/api/file-timeline/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const rel = req.query.file;
-    if (!rel) return res.status(400).json({ error: 'file (relative path) required' });
-    res.json({
-        file: rel,
-        timeline: (conversion.fileTimeline && conversion.fileTimeline[rel]) || [],
-        state: (conversion.fileStates && conversion.fileStates[rel]) || null
-    });
-});
+// /api/graph/:id, /api/file-timeline/:id → src/routes/graph.js
+require('./src/routes/graph').mount(app, { activeConversions });
 
 // API: Run a converted file's COBOL source + Java output side by side.
 // Body: { input?: string }   — optional custom stdin to feed both programs
@@ -2325,26 +2135,8 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
     res.json(result);
 });
 
-// API: Post-conversion sign-off — record human approval/rejection on a converted file.
-app.post('/api/post-review/:id/:fileId(*)', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    const { action, note } = req.body || {};
-    if (!['approve', 'reject', 'note'].includes(action)) {
-        return res.status(400).json({ error: 'action must be approve | reject | note' });
-    }
-    conversion.postReview = conversion.postReview || {};
-    conversion.postReview[req.params.fileId] = {
-        action, note: note || null, at: Date.now()
-    };
-    res.json({ ok: true });
-});
-
-app.get('/api/post-review/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    res.json({ postReview: conversion.postReview || {} });
-});
+// /api/post-review/:id/:fileId, /api/post-review/:id → src/routes/post-review.js
+require('./src/routes/post-review').mount(app, { activeConversions });
 
 // ----------------------------------------------------------------------
 // File classification for MANUAL_REVIEW.md
@@ -2566,183 +2358,13 @@ function buildManualReviewMd(files, conversionId) {
 // JCL parser → src/scan/jcl-parser.js
 const { parseJcl } = require('./src/scan/jcl-parser');
 
-/**
- * API: Analyze a JCL file in the context of a conversion.
- * Returns: { parsed, coverage: [ { program, converted, javaClass? } ], recommendation }
- */
-app.get('/api/jcl-analysis', (req, res) => {
-    const { conversionId, path: filePath } = req.query;
-    if (!filePath) return res.status(400).json({ error: 'path required' });
-    let source = '';
-    try { source = fs.readFileSync(filePath, 'utf-8'); }
-    catch (e) { return res.status(404).json({ error: 'JCL source not found' }); }
+// /api/jcl-analysis → src/routes/jcl.js
+require('./src/routes/jcl').mount(app, { activeConversions, parseJcl });
 
-    const parsed = parseJcl(source);
-    const result = { parsed, coverage: [], recommendation: null, source };
-
-    // Cross-reference JCL PGM= targets with converted Java classes if we know
-    // which conversion the user is viewing.
-    if (conversionId && activeConversions.has(conversionId) && parsed) {
-        const conversion = activeConversions.get(conversionId);
-        const reportFiles = (conversion.result && conversion.result.report && conversion.result.report.report && conversion.result.report.report.files)
-                          || (conversion.result && conversion.result.report && conversion.result.report.files)
-                          || [];
-        // Build a PROGRAM-ID / basename → java_path map
-        const pidMap = {};
-        const programIdRe = /^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)['"]?/im;
-        for (const f of reportFiles) {
-            if (!f.source_path) continue;
-            const base = path.basename(f.source_path, path.extname(f.source_path)).toUpperCase();
-            if (!pidMap[base]) pidMap[base] = { javaPath: f.java_path || null, status: f.java_status };
-            try {
-                const src = fs.readFileSync(f.source_path, 'utf-8');
-                const m = src.match(programIdRe);
-                if (m) {
-                    const pid = m[1].toUpperCase();
-                    if (!pidMap[pid]) pidMap[pid] = { javaPath: f.java_path || null, status: f.java_status };
-                }
-            } catch {}
-        }
-        for (const pgm of parsed.programs) {
-            const hit = pidMap[pgm];
-            result.coverage.push({
-                program: pgm,
-                converted: !!(hit && hit.status === 'SUCCESS'),
-                javaClass: hit && hit.javaPath ? path.basename(hit.javaPath, '.java') : null,
-                status: hit ? hit.status : 'NOT_IN_CONVERSION'
-            });
-        }
-    }
-
-    // Recommendation heuristic: pick a modern orchestration target based on job shape
-    if (parsed) {
-        const stepCount = parsed.steps.length;
-        const hasSort = parsed.steps.some(s => /SORT/i.test(s.exec.pgm || ''));
-        const hasDB2  = parsed.steps.some(s => /DSNMTV01|DSN/i.test(s.exec.pgm || ''));
-        if (hasDB2 || stepCount >= 3) {
-            result.recommendation = 'Spring Batch job (multi-step with chunk processing). Each JCL step becomes a Spring Batch Step; DD datasets map to ItemReaders/ItemWriters. Schedule via Quartz or Spring Scheduler.';
-        } else if (hasSort) {
-            result.recommendation = 'Spring Batch or Apache Beam pipeline — the SORT step is a natural fit for a GroupBy/Sort operator.';
-        } else {
-            result.recommendation = 'Shell script, Airflow DAG, or Kubernetes CronJob. Each EXEC step becomes a task; DD datasets map to input/output paths.';
-        }
-    }
-
-    res.json(result);
-});
-
-// ----------------------------------------------------------------------
-// Download — zip of the generated Java + a MANIFEST + (if present)
-// report.json and JCL analysis summary. Streams to the browser.
-// ----------------------------------------------------------------------
-app.get('/api/download/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    if (!conversion.result || !conversion.result.report) {
-        return res.status(400).json({ error: 'Conversion not complete — nothing to download yet.' });
-    }
-
-    const report = conversion.result.report;
-    const files = report.files || [];
-    const outputDir = conversion.result.outputDir || null;
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const zipName = `cobol-to-java-${req.params.id}-${stamp}.zip`;
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
-
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.on('warning', err => { if (err.code !== 'ENOENT') console.warn('zip warning', err); });
-    archive.on('error', err => { console.error('zip error', err); try { res.end(); } catch {} });
-    archive.pipe(res);
-
-    // 1. All generated Java files (from the report's java_path entries).
-    //    Preserve their relative path inside the zip under `java/`.
-    let javaCount = 0;
-    for (const f of files) {
-        if (!f.java_path || !fs.existsSync(f.java_path)) continue;
-        archive.file(f.java_path, { name: `java/${path.basename(f.java_path)}` });
-        javaCount++;
-    }
-
-    // 2. A human-readable MANIFEST.md — short summary of converted files
-    const manifest = [];
-    manifest.push(`# Conversion manifest`);
-    manifest.push('');
-    manifest.push(`Conversion ID: ${req.params.id}`);
-    manifest.push(`Generated: ${new Date().toISOString()}`);
-    manifest.push(`Total files in report: ${files.length}`);
-    manifest.push(`Generated Java files: ${javaCount}`);
-    manifest.push('');
-    manifest.push(`## Converted files`);
-    manifest.push('');
-    manifest.push(`| COBOL path | Status | Accuracy | Java class |`);
-    manifest.push(`|------------|--------|----------|------------|`);
-    const converted = files.filter(f => f.java_status === 'SUCCESS');
-    for (const f of converted) {
-        const acc = f.conversionAccuracy != null ? `${f.conversionAccuracy}%` : '—';
-        const javaClass = f.java_path ? path.basename(f.java_path, '.java') : '—';
-        manifest.push(`| \`${f.path}\` | ${f.java_status || '—'} | ${acc} | ${javaClass} |`);
-    }
-    manifest.push('');
-    const flagged = files.filter(f =>
-        f.accuracyBreakdown
-        && Array.isArray(f.accuracyBreakdown.semanticPenalties)
-        && f.accuracyBreakdown.semanticPenalties.length > 0
-    );
-    if (flagged.length > 0) {
-        manifest.push(`## Converted files needing manual review`);
-        manifest.push('');
-        for (const f of flagged) {
-            manifest.push(`### \`${f.path}\` — ${f.conversionAccuracy}% confidence`);
-            for (const p of f.accuracyBreakdown.semanticPenalties) {
-                manifest.push(`- **${p}**`);
-            }
-            manifest.push('');
-        }
-    }
-    archive.append(manifest.join('\n'), { name: 'MANIFEST.md' });
-
-    // 3. MANUAL_REVIEW.md — everything that was NOT converted to Java.
-    // Covers JCL, copybooks, data files, and ANY other artifact in the repo.
-    // Gives per-file recommendations so users know what to port, keep, drop,
-    // or review separately before the modernization is complete.
-    archive.append(buildManualReviewMd(files, req.params.id), { name: 'MANUAL_REVIEW.md' });
-
-    // 3. The raw report.json for tooling
-    archive.append(JSON.stringify(report, null, 2), { name: 'report.json' });
-
-    // 5. README for unzip users — points at MANIFEST + MANUAL_REVIEW
-    const readme = [
-        `# COBOL → Java conversion output`,
-        ``,
-        `This archive contains the Java code generated from a COBOL-to-Java`,
-        `conversion run, plus guidance on the remaining (non-COBOL) artifacts.`,
-        ``,
-        `Contents:`,
-        ``,
-        `- \`java/\` — generated Java sources (one file per converted program)`,
-        `- \`MANIFEST.md\` — converted files: status, accuracy scores, penalties`,
-        `- \`MANUAL_REVIEW.md\` — **non-converted** files: JCL, data, HTML, SQL,`,
-        `  other languages, etc. Each gets an action label (PORT / KEEP / REVIEW)`,
-        `  with a per-category recommendation for what to do next.`,
-        `- \`report.json\` — full structured report for tooling`,
-        ``,
-        `## Next steps`,
-        ``,
-        `1. Read \`MANIFEST.md\` for converted-file status.`,
-        `2. Read \`MANUAL_REVIEW.md\` — this is where the remaining modernization`,
-        `   work is listed (orchestration, UI, scripts, SQL, etc.). Modernization`,
-        `   is not complete until every item in there has a decision.`,
-        `3. To compile: drop \`java/*.java\` into your build (e.g. Maven/Gradle`,
-        `   \`src/main/java\`) and \`javac\` — all generated classes share the`,
-        `   default package.`,
-        ``
-    ].join('\n');
-    archive.append(readme, { name: 'README.md' });
-
-    archive.finalize();
-});
+// /api/download/:id → src/routes/download.js
+// Must be mounted here (not near the top) because buildManualReviewMd is
+// defined above and passed as a dep.
+require('./src/routes/download').mount(app, { activeConversions, buildManualReviewMd });
 
 // API: AI-powered Java repair. Gathers the full context (original COBOL,
 // current Java, compile errors, run outputs, dependency graph) and asks an
@@ -3023,78 +2645,8 @@ app.post('/api/compare-runs', async (req, res) => {
     }
 });
 
-// API: Results browser — list of cobol files + their generated java mapping.
-app.get('/api/browser/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-    if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
-    if (!conversion.result || !conversion.result.report) {
-        return res.json({ ready: false, status: conversion.status });
-    }
-    const reportFiles = conversion.result.report.files || [];
-    const files = reportFiles.map(f => ({
-        cobolPath: f.path,
-        cobolSourcePath: f.source_path,
-        javaPath: f.java_path || null,
-        workDir: f.work_dir || null,
-        status: f.java_status,
-        accuracy: f.conversionAccuracy != null ? f.conversionAccuracy : null,
-        // Semantic penalty list — what caused the accuracy drop (e.g. "File I/O
-        // simulated", "CICS simplified"). Used to render a tooltip on the badge.
-        penalties: (f.accuracyBreakdown && f.accuracyBreakdown.semanticPenalties) || [],
-        error: f.error || null
-    }));
-    res.json({
-        ready: true,
-        status: conversion.status,
-        files,
-        outputDir: conversion.result.outputDir,
-        postReview: conversion.postReview || {}
-    });
-});
-
-// API: Get converted files list
-app.get('/api/files/:id', (req, res) => {
-    const conversion = activeConversions.get(req.params.id);
-
-    if (!conversion || !conversion.result) {
-        return res.status(404).json({ error: 'Conversion not found or not complete' });
-    }
-
-    // List Java files in output directory
-    const javaDir = path.join(conversion.result.outputDir, 'java');
-    let javaFiles = [];
-
-    try {
-        if (fs.existsSync(javaDir)) {
-            javaFiles = fs.readdirSync(javaDir)
-                .filter(f => f.endsWith('.java'))
-                .map(f => ({
-                    name: f,
-                    path: path.join(javaDir, f)
-                }));
-        }
-    } catch (err) {
-        console.error('Error reading java directory:', err);
-    }
-
-    res.json({ files: javaFiles, ...conversion.result });
-});
-
-// API: Get file content
-app.get('/api/file-content', (req, res) => {
-    const filePath = req.query.path;
-
-    if (!filePath) {
-        return res.status(400).json({ error: 'File path required' });
-    }
-
-    try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        res.json({ content });
-    } catch (err) {
-        res.status(404).json({ error: 'File not found' });
-    }
-});
+// /api/browser/:id, /api/files/:id → src/routes/status.js
+// /api/file-content → src/routes/misc.js
 
 // API: Get comparison data (COBOL vs Java outputs)
 app.get('/api/comparison', (req, res) => {
@@ -3467,62 +3019,10 @@ const buildAnalysisContext = (conversionId, relativePath, cobolSource) =>
 // dependency/copybook context). Kept the diff small: call graph was dead code.
 // /api/azure/status was merged into /api/ai/provider (which the frontend uses).
 
-// API: Get current AI provider info
-app.get('/api/ai/provider', (req, res) => {
-    res.json({
-        provider: AI_PROVIDER,
-        openai: {
-            available: aiAgent.isAvailable()
-        },
-        azure: {
-            available: azureAgent.isAvailable(),
-            config: azureAgent.getConfig()
-        }
-    });
-});
-
-// API: Extract file dependencies (COPY and CALL statements)
-app.get('/api/dependencies', (req, res) => {
-    const filePath = req.query.path;
-
-    if (!filePath) {
-        return res.status(400).json({ error: 'File path required' });
-    }
-
-    try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const dependencies = {
-            copybooks: [],
-            programCalls: [],
-            hasRelationships: false
-        };
-
-        // Extract COPY statements (e.g., COPY 'FILENAME', COPY FILENAME, COPY FILENAME.)
-        const copyRegex = /COPY\s+['"]?([A-Z0-9_-]+)['"]?\s*\.?/gi;
-        let match;
-        while ((match = copyRegex.exec(content)) !== null) {
-            const copybookName = match[1].toUpperCase();
-            if (!dependencies.copybooks.includes(copybookName)) {
-                dependencies.copybooks.push(copybookName);
-            }
-        }
-
-        // Extract CALL statements (e.g., CALL 'PROGRAMNAME', CALL "PROGRAMNAME")
-        const callRegex = /CALL\s+['"]([A-Z0-9_-]+)['"]/gi;
-        while ((match = callRegex.exec(content)) !== null) {
-            const programName = match[1].toUpperCase();
-            if (!dependencies.programCalls.includes(programName)) {
-                dependencies.programCalls.push(programName);
-            }
-        }
-
-        dependencies.hasRelationships = dependencies.copybooks.length > 0 || dependencies.programCalls.length > 0;
-
-        res.json(dependencies);
-    } catch (err) {
-        res.status(404).json({ error: 'File not found or could not be read' });
-    }
-});
+// /api/ai/provider, /api/dependencies → src/routes/misc.js
+// Mount routes now that AI_PROVIDER / aiAgent / azureAgent are all in scope.
+require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent });
+require('./src/routes/status').mount(app, { activeConversions });
 
 
 // Start server
