@@ -14,7 +14,6 @@ chosen), it lives in **[Decisions log](#decisions-log)** at the bottom.
 
 Tractable wins. Pick any one and ship.
 
-- [ ] **AI toggle → settings cog.** Currently a compact pill in the header; move into a real settings menu where it belongs alongside future knobs (concurrency, budget cap, theme).
 
 ## Next — medium, clear value (2–5 hrs each)
 

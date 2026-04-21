@@ -167,6 +167,20 @@ async function checkAIStatus() {
         if (data.azure && data.azure.config && data.azure.config.deployment) {
             window.__aiDeployment = data.azure.config.deployment;
         }
+        // Populate the provider row in the settings menu.
+        const providerEl = document.getElementById('settingsAiProvider');
+        if (providerEl) {
+            if (data.azure && data.azure.available) {
+                providerEl.textContent = 'Azure • ' + (data.azure.config?.deployment || 'unknown');
+                providerEl.className = 'settings-value settings-value-ok';
+            } else if (data.openai && data.openai.available) {
+                providerEl.textContent = 'OpenAI';
+                providerEl.className = 'settings-value settings-value-ok';
+            } else {
+                providerEl.textContent = 'not configured';
+                providerEl.className = 'settings-value settings-value-warn';
+            }
+        }
 
         const aiStatusBadge = document.getElementById('aiStatusBadge');
         const azureToggleSection = document.getElementById('azureToggleSection');
@@ -2464,6 +2478,48 @@ window.onConversionComplete = function () {
  * WHOLE three-pane grid against the rest of the page); this is about
  * focusing on ONE of the two code panes.
  */
+/**
+ * Settings cog menu in the header (§9.3).
+ *
+ * Clicking the cog toggles a dropdown that hosts theme, AI provider
+ * status, and placeholders for future knobs (concurrency, budget).
+ * Outside-click and Escape both dismiss. Re-entrant: clicking the cog
+ * while the menu is open closes it.
+ */
+function toggleSettingsMenu(force) {
+    const menu = document.getElementById('settingsMenu');
+    const btn = document.getElementById('settingsBtn');
+    if (!menu) return;
+    const shouldOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !shouldOpen);
+    if (btn) btn.setAttribute('aria-expanded', String(shouldOpen));
+
+    // Bind the outside-click + Escape handlers only while open so we
+    // don't leak listeners across toggles.
+    if (shouldOpen) {
+        const onDocClick = (e) => {
+            const wrap = document.getElementById('settingsMenuWrap');
+            if (wrap && !wrap.contains(e.target)) {
+                toggleSettingsMenu(false);
+            }
+        };
+        const onKey = (e) => { if (e.key === 'Escape') toggleSettingsMenu(false); };
+        // Store refs on the menu so close can unbind.
+        menu.__docClick = onDocClick;
+        menu.__key = onKey;
+        // Defer to next tick so the click that opened the menu doesn't
+        // immediately close it.
+        setTimeout(() => document.addEventListener('click', onDocClick), 0);
+        document.addEventListener('keydown', onKey);
+    } else {
+        if (menu.__docClick) document.removeEventListener('click', menu.__docClick);
+        if (menu.__key)      document.removeEventListener('keydown', menu.__key);
+        menu.__docClick = null;
+        menu.__key = null;
+    }
+}
+window.toggleSettingsMenu = toggleSettingsMenu;
+
 function togglePaneExpand(which) {
     const body = document.body;
     const classes = ['pane-expanded-cobol', 'pane-expanded-java'];

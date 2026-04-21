@@ -3705,6 +3705,53 @@ body.theme-light .theme-toggle {
 }
 body.theme-light .theme-toggle:hover { background: rgba(117, 69, 255, 0.08) !important; color: #7545ff !important; }
 
+/* Settings menu (cog dropdown) — anchored to the cog button in the
+   header, positioned absolutely so it doesn't shift the header layout
+   on open. §9.3. */
+.settings-menu-wrap { position: relative; display: inline-block; }
+.settings-cog { font-size: 16px; line-height: 1; display: inline-block; transform: translateY(-1px); }
+.settings-menu {
+    position: absolute;
+    top: calc(100% + 8px); right: 0;
+    min-width: 240px;
+    padding: 8px 0;
+    background: #161030;
+    border: 1px solid var(--c-border-strong);
+    border-radius: var(--r-md);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+    z-index: 500;
+    font-size: 12.5px;
+}
+body.theme-light .settings-menu {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+.settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 8px 14px;
+    color: var(--c-text);
+}
+.settings-row + .settings-row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+body.theme-light .settings-row + .settings-row { border-top-color: rgba(0, 0, 0, 0.06); }
+.settings-label { color: var(--c-text-dim); font-weight: 500; }
+.settings-value { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+.settings-value-ok   { color: var(--c-success-light, #4ade80); }
+.settings-value-warn { color: var(--c-warning-light, #f59e0b); }
+.settings-value.muted { color: var(--c-text-mute); font-style: italic; }
+.settings-reserved { opacity: 0.6; cursor: not-allowed; }
+.settings-btn {
+    background: rgba(117, 69, 255, 0.12);
+    border: 1px solid rgba(117, 69, 255, 0.35);
+    color: var(--c-text);
+    border-radius: var(--r-sm);
+    padding: 4px 10px; font-size: 14px;
+    cursor: pointer;
+}
+.settings-btn:hover { background: rgba(117, 69, 255, 0.22); }
+body.theme-light .settings-btn { background: rgba(117, 69, 255, 0.08); color: #1a1b2e; }
+
 /* ─── Workflow stepper bar ────────────────────────────────────────────── */
 .workflow-bar {
     display: flex;

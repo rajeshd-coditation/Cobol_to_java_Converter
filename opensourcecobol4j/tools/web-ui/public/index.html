@@ -89,15 +89,42 @@
                     Activity
                     <span id="drawerBadge" class="drawer-badge hidden">0</span>
                 </button>
-                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark theme" id="themeToggleBtn">
-                    <span id="themeIcon"></span>
-                </button>
+                <!-- Settings cog — opens a dropdown with theme, AI provider
+                     status, and future knobs (concurrency, budget). Replaces
+                     the standalone theme button; the toggle lives inside the
+                     dropdown now. -->
+                <div class="settings-menu-wrap" id="settingsMenuWrap">
+                    <button class="theme-toggle" type="button"
+                            onclick="toggleSettingsMenu()"
+                            title="Settings" id="settingsBtn" aria-label="Settings" aria-haspopup="true" aria-expanded="false">
+                        <span class="settings-cog">⚙</span>
+                    </button>
+                    <div class="settings-menu hidden" id="settingsMenu" role="menu" aria-labelledby="settingsBtn">
+                        <div class="settings-row">
+                            <span class="settings-label">Theme</span>
+                            <button type="button" id="themeToggleBtn" class="settings-btn" onclick="toggleTheme()" title="Switch theme">
+                                <span id="themeIcon"></span>
+                            </button>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">AI provider</span>
+                            <span class="settings-value" id="settingsAiProvider">—</span>
+                        </div>
+                        <div class="settings-row settings-reserved" title="Coming soon">
+                            <span class="settings-label">Parallel workers</span>
+                            <span class="settings-value muted">5 (coming soon)</span>
+                        </div>
+                        <div class="settings-row settings-reserved" title="Coming soon">
+                            <span class="settings-label">Token budget</span>
+                            <span class="settings-value muted">unlimited (coming soon)</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="header-meta">
                 <!-- Hidden but kept for app.js compatibility -->
                 <div id="aiStatusBadge" class="hidden"></div>
-                <!-- Note: emoji icons removed across the UI for a cleaner typographic look -->
                 <div id="azureToggleSection" class="hidden">
                     <label><input type="checkbox" id="useAzureAI" checked></label>
                 </div>
