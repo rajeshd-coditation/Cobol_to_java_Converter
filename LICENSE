@@ -1,0 +1,32 @@
+# Licensing
+
+This repository contains code under two separate licenses.
+
+## Vendored upstream (`opensourcecobol4j/` tree)
+
+The `opensourcecobol4j/` directory is a vendored snapshot of
+[opensource COBOL 4J](https://github.com/opensourcecobol/opensourcecobol4j),
+including the CardDemo sample app under `carddemo-app/` and the `libcobj`
+Java runtime library.
+
+  * `libcobj/` — runtime library, **LGPL v3** (see `opensourcecobol4j/COPYING.LIB`)
+  * everything else under `opensourcecobol4j/` — **GPL v3** (see `opensourcecobol4j/COPYING`)
+
+Upstream commit + licensing details: `opensourcecobol4j/VENDORED.md`.
+
+## Converter tooling (`opensourcecobol4j/tools/web-ui/` + repo root)
+
+Everything we wrote — the web UI, the Express server, the AI conversion
+pipeline, scan/graph/run/review modules, and the supporting documentation —
+is intended to be used alongside the vendored runtime above. Because the
+web-UI tooling orchestrates GPL'd binaries via subprocess calls (`cobc`,
+`cobj`, the libcobj JAR) and does not statically link them, we treat the
+tooling as a separate work and distribute it under the same GPL v3
+terms as the upstream it depends on.
+
+If you redistribute this repository, ship the licenses above with it.
+
+## No warranty
+
+Provided "as is", without warranty of any kind. See the included license
+texts for full terms.

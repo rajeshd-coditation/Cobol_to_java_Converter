@@ -334,22 +334,73 @@ AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
 ```text
 cobol-to-java-converter/
 ├── README.md
-├── todo.md
+├── LICENSE                          # GPL v3 (inherits from vendored upstream)
+├── todo.md                          # Priority-ordered open work + decisions log
+├── session-notes.md                 # Living cross-session scratchpad
+├── run.sh                           # build / serve / stop / status / logs
 ├── .gitignore
-└── opensourcecobol4j/             # Vendored OpenSourceCobol4j base framework
-    ├── libcobj/                   # Java runtime library (upstream)
-    ├── carddemo-app/              # AWS CardDemo COBOL fixture
+├── .githooks/pre-commit             # Blocks .env, *.log, large files
+└── opensourcecobol4j/               # Vendored OpenSourceCobol4j base framework
+    ├── libcobj/                     # Java runtime library (upstream, LGPL)
+    ├── carddemo-app/                # AWS CardDemo COBOL fixture
+    ├── COPYING / COPYING.LIB        # GPL / LGPL license texts
+    ├── VENDORED.md                  # Upstream commit + vendoring notes
     └── tools/
         ├── cobol_repo_scanner.sh
-        └── web-ui/                # Node.js + Express web UI
-            ├── server.js
-            ├── aiAgent.js         # OpenAI helper (error analysis / autofix)
-            ├── azureAgent.js      # Azure AI Foundry conversion agent
-            ├── public/            # Static frontend assets
-            ├── docs/              # Project guides & reports
-            ├── package.json
-            └── .env.example
+        └── web-ui/                  # Node.js + Express web UI
+            ├── server.js            # Boot + 2 big inline routes (convert-azure + run)
+            ├── azureAgent.js        # ~50-line facade re-exporting src/
+            ├── aiAgent.js           # OpenAI-direct fallback (narrow, fallback only)
+            ├── package.json         # engines >=18
+            ├── .env.example
+            ├── docs/                # Project guides, setup, reports (md)
+            ├── tests/               # node --test suites (unit + live)
+            ├── public/              # Static frontend
+            │   ├── index.html
+            │   ├── app.js           # SPA (progressively modularized)
+            │   ├── graph.js         # Cytoscape dependency graph
+            │   ├── style.css
+            │   └── js/              # Extracted modules: helpers,
+            │                        #   dialogs, accuracy-panel, review-chat
+            └── src/                 # Server-side module tree
+                ├── ai/              # Prompts + transport
+                │   ├── azure-client.js        # HTTP + retries + DEBUG_PROMPTS
+                │   ├── convert-cobol.js       # Primary conversion prompt
+                │   ├── fix-java.js            # Repair prompt
+                │   ├── analyze-failure.js     # /api/ai/analyze
+                │   └── compare-runs.js        # /api/compare-runs verdict
+                ├── core/            # Deterministic pipeline helpers
+                │   ├── auto-fix-java.js       # Regex patches (A/B-tested net +ve)
+                │   ├── accuracy-scorer.js     # Semantic penalty scorer
+                │   ├── conversion-graph.js    # CALL/COPY/SELECT/CICS/SQL/IMS
+                │   ├── compile-gate-local.js  # cobj-path javac gate
+                │   ├── normalize-class.js     # Java class-name fixup
+                │   ├── parse-scanner-output.js
+                │   ├── manual-review.js       # MANUAL_REVIEW.md builder
+                │   ├── source-integrity.js    # Truncated-source detector
+                │   └── run/                   # /api/run helpers
+                │       ├── cobol-preprocess.js
+                │       ├── data-file-staging.js
+                │       └── list-output-files.js
+                ├── routes/          # HTTP surface (one module per endpoint family)
+                │   ├── scan-repo.js   convert-local.js   status.js
+                │   ├── graph.js       jcl.js             download.js
+                │   ├── review.js      post-review.js     compare.js
+                │   ├── ai-analyze.js  fix-java.js        unfix-java.js
+                │   ├── misc.js        cancel.js          health.js
+                │   └── stats.js
+                ├── scan/            # cobol-scanner, jcl-parser
+                ├── persistence/     # checkpoint (disk), active-conversions-ttl
+                └── util/            # pascal-case, edit-distance, glob-regex,
+                                     #   strip-ansi, logger, rate-limit,
+                                     #   validate-repo-url, analysis-context,
+                                     #   pascal-case
 ```
+
+**Onboarding map:** read `server.js` (boot + the two inline routes) → read
+`src/routes/*` for HTTP surface → read `src/core/*` and `src/ai/*` for the
+conversion pipeline. Each module is 30–250 lines with an explicit contract
+at the top.
 
 ---
 
