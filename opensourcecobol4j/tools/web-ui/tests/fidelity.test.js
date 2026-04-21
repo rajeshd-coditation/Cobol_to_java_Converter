@@ -1291,3 +1291,72 @@ test('interactive run WS — rejects unknown conversion id', async () => {
         srv.close();
     }
 });
+
+// ─── 23. Post-compile repair consolidation — prompt-reinforcement locks ──
+//
+// The autoFixJavaCode regex patches (src/core/auto-fix-java.js) include
+// several [ai-specific] patches that exist *because* the model kept
+// making specific mistakes (final-on-mutable fields, abstract-on-concrete,
+// throws-on-pure-string-helper, etc). Those patches are A/B-validated
+// net positive today (§24.2.1 in Decisions log), so we're NOT retiring
+// them yet. What we ARE doing is reinforcing the PRIMARY + REPAIR prompts
+// with the exact patterns those patches fix, so over time the patches
+// stop firing in measurement. When a patch stops firing across a broad
+// A/B, THEN we can retire it. These tests lock the prompt reinforcement
+// so a casual edit can't silently remove it.
+test('primary prompt explicitly bans final-on-mutable-fields (Fix 2f / 9-10 reinforcement)', () => {
+    const src = readAllPromptSources();
+    assert.match(src, /Do NOT mark a field \\?`final\\?` if ANY code path reassigns it/,
+        'primary prompt should tell AI to omit `final` on mutable fields');
+    assert.match(src, /WORKING-STORAGE variables are mutable by default/,
+        'primary prompt should explain WHY COBOL fields translate to non-final Java');
+});
+
+test('primary prompt bans final-on-parameters (Fix 26 reinforcement)', () => {
+    const src = readAllPromptSources();
+    assert.match(src, /Do NOT mark method parameters \\?`final\\?`/,
+        'primary prompt should ban `final` on method parameters');
+});
+
+test('primary prompt bans abstract-on-concrete-class (Fix 24 reinforcement)', () => {
+    const src = readAllPromptSources();
+    // Source is read raw from disk, so template-literal escaped backticks
+    // appear as literal backslash-backtick in the search string.
+    assert.match(src, /Do NOT mark a class \\?`abstract\\?` unless it declares \\?`abstract\\?` methods/,
+        'primary prompt should ban unnecessary `abstract` modifier');
+});
+
+test('primary prompt bans throws-IOException-on-pure-string helpers (Fix 2d reinforcement)', () => {
+    const src = readAllPromptSources();
+    assert.match(src, /Pure-string[\s\S]*helper methods[\s\S]*must NOT declare \\?`throws IOException\\?`/i,
+        'primary prompt should ban throws IOException on pure-string helpers');
+});
+
+test('primary prompt requires main() for programs with PROCEDURE DIVISION (Fix 6 reinforcement)', () => {
+    const src = readAllPromptSources();
+    assert.match(src, /If the COBOL has a PROCEDURE DIVISION[\s\S]*public static void[\s\S]*main/,
+        'primary prompt should require main() for every COBOL program');
+});
+
+test('primary prompt requires primitive field initialization (Fix 8 reinforcement)', () => {
+    const src = readAllPromptSources();
+    assert.match(src, /Every declared primitive field[\s\S]*must have a safe default/,
+        'primary prompt should require primitive fields to be initialized');
+});
+
+test('repair prompt carries the same reinforcement rules as primary', () => {
+    // Load fix-java.js directly so we're asserting on the REPAIR prompt
+    // specifically, not the combined pool (which would let the test pass
+    // if only the primary prompt had these rules).
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'ai', 'fix-java.js'), 'utf-8');
+    assert.match(src, /No `final` on instance fields.*reassigned/s,
+        'repair prompt must reinforce no-final-on-mutable-fields');
+    assert.match(src, /No `final` on method parameters/,
+        'repair prompt must reinforce no-final-on-parameters');
+    assert.match(src, /No `abstract` on a class unless it declares abstract methods/,
+        'repair prompt must reinforce abstract-only-when-needed');
+    assert.match(src, /Pure-string.*MUST NOT declare `throws IOException`/s,
+        'repair prompt must reinforce no-throws-on-pure-string-helpers');
+    assert.match(src, /If the COBOL has a PROCEDURE DIVISION.*main\(String\[\] args\)/s,
+        'repair prompt must ensure main() exists when PROCEDURE DIVISION present');
+});

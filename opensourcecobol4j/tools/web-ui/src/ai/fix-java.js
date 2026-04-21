@@ -81,7 +81,23 @@ async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, co
         '\n' +
         'Respect the same conventions as the original agent:\n' +
         '- One public class per file, no package declaration\n' +
-        '- No `final` on instance fields\n' +
+        '- No `final` on instance fields. If a field is reassigned anywhere\n' +
+        '  (constructor, method body, business logic), it MUST be non-final.\n' +
+        '  COBOL WORKING-STORAGE is mutable by default — generated fields\n' +
+        '  should be too. Remove `final` if a reassignment appears below.\n' +
+        '- No `final` on method parameters. It\'s legal but over-constrains.\n' +
+        '- No `abstract` on a class unless it declares abstract methods.\n' +
+        '  Converted COBOL programs are concrete; abstract-on-concrete is\n' +
+        '  a compile error for any caller trying to instantiate.\n' +
+        '- Pure-string / computational helper methods (no file, network, or\n' +
+        '  system I/O inside) MUST NOT declare `throws IOException`. Only\n' +
+        '  methods that actually call something throwing IOException may.\n' +
+        '- Initialize EVERY declared primitive / BigDecimal / String field\n' +
+        '  at declaration (int=0, double=0.0, boolean=false, BigDecimal.ZERO,\n' +
+        '  "" for String). Uninitialized-then-used fields cause NPE at run.\n' +
+        '- If the COBOL has a PROCEDURE DIVISION, ensure a `public static\n' +
+        '  void main(String[] args)` exists that instantiates the class and\n' +
+        '  calls the business-logic method. The class is unusable otherwise.\n' +
         '- No Scanner; no interactive input — use hardcoded demo values\n' +
         '- Initialize ALL variables at declaration\n' +
         '- Include all necessary imports (java.io.*, java.util.*, java.math.*)\n' +

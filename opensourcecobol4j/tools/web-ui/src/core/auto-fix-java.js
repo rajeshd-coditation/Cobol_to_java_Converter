@@ -83,6 +83,17 @@
  * Retirement candidates (if future prompt work makes the AI stop emitting
  * the pattern): 2b, 2e, 2f, 6, 8, 9-10, 24, 26. Keep universal + safety +
  * locked indefinitely.
+ *
+ * ───── Prompt reinforcement (2026-04-21) ─────────────────────────────
+ * The PRIMARY conversion prompt (src/ai/convert-cobol.js) and the REPAIR
+ * prompt (src/ai/fix-java.js) both now carry explicit bans for the
+ * patterns 2d/2f/6/8/9-10/11/24/26 fix (final-on-mutable-fields,
+ * final-on-parameters, abstract-on-concrete-class, throws-on-pure-string,
+ * missing-main, unset-primitives). These rules are locked via fidelity
+ * tests — see `primary prompt explicitly bans…` tests in §23 of the
+ * test file. The patches stay active as a belt-and-suspenders; when a
+ * future A/B (DISABLE_AUTOFIX=1) shows a particular [ai-specific] patch
+ * never fires across ≥ 20 representative files, retire it one at a time.
  */
 
 function autoFixJavaCode(javaCode) {

@@ -212,6 +212,29 @@ COMPILE-SAFE RULES (CRITICAL — the code MUST compile with plain javac):
 6. Every \`try-with-resources\` block must close cleanly: the enclosing
    method signature declares \`throws IOException\` OR the block is wrapped
    in an outer \`try { ... } catch (IOException e) { ... }\`.
+7. Do NOT mark a field \`final\` if ANY code path reassigns it. COBOL
+   WORKING-STORAGE variables are mutable by default — translate them as
+   plain (non-final) fields. Only use \`final\` on constants declared in the
+   COBOL source via \`88\`-level condition names or \`VALUE\` clauses that
+   are never MOVEd to later. When in doubt, omit \`final\`.
+8. Do NOT mark method parameters \`final\`. It's legal but over-constrains
+   the generated code and prevents in-place updates the converter often
+   needs. Parameters should be plain types.
+9. If the COBOL has a PROCEDURE DIVISION, generate a \`public static void
+   main(String[] args)\` that creates an instance of the class and calls
+   the business-logic method. The class is not useful without an entry
+   point — even single-procedure programs get a main().
+10. Do NOT mark a class \`abstract\` unless it declares \`abstract\` methods.
+    Converted COBOL programs are concrete — abstract on a class with all
+    concrete methods is a compile error in any caller that tries to
+    instantiate it.
+11. Pure-string / computational helper methods (no file / network / system
+    I/O inside) must NOT declare \`throws IOException\`. Only methods that
+    actually call something that throws IOException may declare it.
+12. Every declared primitive field (\`int\`, \`long\`, \`double\`, \`boolean\`,
+    \`BigDecimal\`) must have a safe default — \`0\`, \`0.0\`, \`false\`, or
+    \`BigDecimal.ZERO\`. Uninitialized BigDecimal / String fields cause
+    NullPointerException when used before assignment.
 
 CALL RESOLUTION (CRITICAL):
 - If a sibling Java class is listed in CONTEXT below for a COBOL PROGRAM-ID,
