@@ -26,14 +26,19 @@ Each of these is multi-hour and benefits from its own planning pass.
 
 - [ ] **Phase 3 refactor: extract `/api/convert-azure` worker and `/api/run` control flow.** Both are still inline in `server.js` (the ~1,800 remaining lines are almost entirely these two). The worker has shared closure state through a 30-step pipeline; not a mechanical extraction. Write an integration test first (we have `e2e.test.js` scaffolding), then extract `processFile` → `src/core/conversion-worker.js` one stage at a time.
 - [ ] **Phase 5 refactor: finish `public/app.js` split.** Four modules extracted (`helpers`, `dialogs`, `accuracy-panel`, `review-chat`); remaining candidates in rough priority order: browser-tree (~400 lines), run-modal (~240), review-modal (~200), AI-analyzer + baselines (~300), export (~40), session restore (~120). Each needs care with load order and monkey-patched globals.
-- [ ] **Phase 6: CSS cleanup.** `public/style.css` has ~3,400 lines of pre-v2 rules. Walk a real conversion, grep for selectors not hit, drop. Target: 4,927 → ~1,500.
+- [ ] **Phase 6: CSS cleanup.** `public/style.css` has ~3,400 lines of pre-v2 rules. Audit (2026-04-21) identified **26 safely-dead classes** with zero references across HTML + all JS (the full bundle: `coming-soon`, `review-chat-panel`, `chat-title/messages/actions/tabs`, `post-review-*`, `run-diverge-*`, `logs-details`, `details-tabs/tab/panel/files-list`, `run-output-panel/header`, `drawer-handle`, `run-input-field`, `hero-engine-img`, `theme-dark`, `accent`, `browser-actions`, `history-list-panel`, `toast-body`) spanning ~60 rules across the file. Risk of compound-selector regression means this deserves its own session with visual verification — NOT a mass `sed` delete. Target: 4,927 → ~1,500.
 - [ ] **True interactive terminal.** Replace `spawnSync` in `/api/run` with `node-pty` + WebSocket so users can walk through a menu program live instead of pre-padding stdin.
 - [ ] **Divisional splitting for oversized programs.** When truncation detector fires repeatedly, split DATA DIVISION + PROCEDURE DIVISION into separate AI calls and stitch the resulting class. Only build when real data shows a single file blows the context window.
 - [ ] **Resumable conversion.** Worker-state checkpoint (not just the final-report snapshot we have today) so a server crash mid-run picks up from last-completed wave. Non-trivial because of in-flight Promises.
-- [ ] **Responsive / mobile layout.** Current UI breaks below ~900px. Hamburger menu, stacked panes, tap targets sized for touch.
-- [ ] **Playwright UI smoke test.** Scan a sample repo, start conversion, wait for Results, click a file, hit Run, verify the banner renders. Heaviest because it needs the full Playwright install + CI wiring.
-- [ ] **Post-compile AI repair loop consolidation.** Decide: do we keep `autoFixJavaCode` regexes + Fix-with-AI as separate layers, or fold all deterministic Java corrections into the repair agent prompt? A/B data says regexes earn their keep today; revisit after prompt reinforcement work (see "Now" items on conversion prompt tuning).
 - [ ] **LangGraph.js port.** If the agent grows specialized stages (parser → translator → validator → optimizer) with branching. Replaces only the per-file conversion function inside `src/ai/convert-cobol.js`; Express server stays as-is.
+
+### Even later — low priority
+
+User-flagged as lowest priority (2026-04-21):
+
+- [ ] **Responsive / mobile layout.** Current UI breaks below ~900px. Hamburger menu, stacked panes, tap targets sized for touch. Demo workflow runs on desktop; mobile is a nice-to-have, not a blocker.
+- [ ] **Playwright UI smoke test.** Scan a sample repo, start conversion, wait for Results, click a file, hit Run, verify the banner renders. Heaviest because it needs the full Playwright install + CI wiring; existing `e2e.test.js` already covers the backend pipeline which is where regressions usually land.
+- [ ] **Post-compile AI repair loop consolidation.** Decide whether to keep `autoFixJavaCode` regexes + Fix-with-AI as separate layers, or fold deterministic corrections into the repair agent prompt. The **autoFixJavaCode audit matrix** (top of `src/core/auto-fix-java.js`) already classifies every patch as `[universal]` / `[ai-specific]` / `[safety]` / `[locked]` — use that as the retirement checklist. A/B data (§24.2.1) says regexes earn their keep today; revisit only after prompt reinforcement makes the `[ai-specific]` patches stop firing in measurement.
 
 ## Deferred / won't-do (explicitly parked)
 
