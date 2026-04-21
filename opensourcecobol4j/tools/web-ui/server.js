@@ -106,135 +106,32 @@ const loadCheckpoints = () => _persistLoadCheckpoints(activeConversions);
 const _restoredCount = loadCheckpoints();
 console.log(`   Restored ${_restoredCount} completed conversion(s) from checkpoint`);
 
-// API: Start conversion
-app.post('/api/convert', async (req, res) => {
-    const { repoUrl } = req.body;
-
-    if (!repoUrl || repoUrl.trim() === '') {
-        return res.status(400).json({ error: 'Repository URL or path is required' });
-    }
-
-    const conversionId = Date.now().toString();
-    const outputDir = path.join(os.tmpdir(), `cobol_output_${conversionId}`);
-
-    // Create output directory
-    fs.mkdirSync(outputDir, { recursive: true });
-
-    // Initialize conversion status
-    activeConversions.set(conversionId, {
-        status: 'running',
-        logs: [],
-        result: null,
-        startedAt: Date.now()
-    });
-
-    // Run the scanner script
-    const process = spawn('bash', [SCANNER_SCRIPT, repoUrl.trim(), outputDir], {
-        cwd: path.dirname(SCANNER_SCRIPT)
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    process.stdout.on('data', (data) => {
-        const text = data.toString();
-        stdout += text;
-        const conversion = activeConversions.get(conversionId);
-        if (conversion) {
-            conversion.logs.push(text);
-        }
-    });
-
-    process.stderr.on('data', (data) => {
-        stderr += data.toString();
-    });
-
-    process.on('close', (code) => {
-        const conversion = activeConversions.get(conversionId);
-        if (conversion) {
-            conversion.status = 'completed';
-            conversion.completedAt = Date.now();
-            conversion.result = parseOutput(stdout, outputDir);
-            // Compile-gate: cobj usually produces compilable Java, but assume
-            // nothing — flip any `SUCCESS` entry whose .java actually fails
-            // javac to COMPILE_FAIL with the real error, so the UI stops
-            // showing green on broken files. Matches the Azure path's gate.
-            try {
-                runCompileGateOnReport(conversion.result);
-            } catch (e) {
-                console.warn('Local-path compile-gate errored (non-fatal):', e.message);
-            }
-        }
-    });
-
-    res.json({ conversionId, outputDir });
-});
-
-// API: Start conversion using Azure AI Agent
 // Glob → RegExp → src/util/glob-regex.js
 const { globToRegex } = require('./src/util/glob-regex');
 
 // /api/cancel/:id → src/routes/cancel.js
 require('./src/routes/cancel').mount(app, { activeConversions });
 
+// /api/scan-repo → src/routes/scan-repo.js (pre-conversion file enumeration).
+require('./src/routes/scan-repo').mount(app, { azureAgent });
+
+// /api/convert → src/routes/convert-local.js (local `cobj` path — the Azure
+// AI path is /api/convert-azure, still inline below). Needs parseScannerOutput
+// + runCompileGateOnReport + stripAnsi, which all live in src/.
+const { parseScannerOutput } = require('./src/core/parse-scanner-output');
+const { stripAnsi } = require('./src/util/strip-ansi');
+const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
+require('./src/routes/convert-local').mount(app, {
+    activeConversions,
+    SCANNER_SCRIPT,
+    parseScannerOutput,
+    runCompileGateOnReport,
+    stripAnsi
+});
+
 // Small self-contained routes → src/routes/misc.js
 // (samples, file-content, ai/provider, dependencies). Mounted after aiAgent
 // + azureAgent are required (see top of file).
-
-// API: Pre-conversion scan — clone (if needed), enumerate files, return for selection.
-// Caller then POSTs to /api/convert-azure with { repoUrl: <localPath>, selectedFiles: [...] }
-app.post('/api/scan-repo', async (req, res) => {
-    const { repoUrl } = req.body || {};
-    if (!repoUrl || !repoUrl.trim()) {
-        return res.status(400).json({ error: 'Repository URL or path is required' });
-    }
-    try {
-        let inputPath = repoUrl.trim();
-        let cloned = false;
-        if (inputPath.startsWith('http') || inputPath.startsWith('git@')) {
-            const cloneDir = path.join(os.tmpdir(), `repo_scan_${Date.now()}`);
-            const { execSync } = require('child_process');
-            execSync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });
-            inputPath = cloneDir;
-            cloned = true;
-        }
-        if (!fs.existsSync(inputPath)) {
-            return res.status(404).json({ error: 'Path not found: ' + inputPath });
-        }
-
-        const allFiles = azureAgent.scanForAllMainframeFiles(inputPath);
-        const toEntry = (absPath, type) => {
-            const relPath = path.relative(inputPath, absPath);
-            let sizeBytes = 0;
-            try { sizeBytes = fs.statSync(absPath).size; } catch {}
-            return { path: relPath, sourcePath: absPath, type, sizeBytes };
-        };
-        const files = [
-            ...allFiles.cobolFiles.map(p => toEntry(p, 'cobol')),
-            ...allFiles.copybookFiles.map(p => toEntry(p, 'copybook')),
-            ...allFiles.jclFiles.map(p => toEntry(p, 'jcl')),
-            ...allFiles.dataFiles.map(p => toEntry(p, 'data')),
-            ...allFiles.otherFiles.map(p => toEntry(p, 'other'))
-        ];
-        const counts = {
-            cobol: allFiles.cobolFiles.length,
-            copybook: allFiles.copybookFiles.length,
-            jcl: allFiles.jclFiles.length,
-            data: allFiles.dataFiles.length,
-            other: allFiles.otherFiles.length,
-            total: files.length
-        };
-        res.json({
-            ok: true,
-            inputPath,
-            cloned,
-            counts,
-            files
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Scan failed: ' + err.message });
-    }
-});
 
 app.post('/api/convert-azure', async (req, res) => {
     const { repoUrl, reviewMode, reviewGlob, selectedFiles } = req.body;
@@ -2386,125 +2283,10 @@ require('./src/routes/compare').mount(app, { activeConversions, azureAgent });
 // /api/browser/:id, /api/files/:id → src/routes/status.js
 // /api/file-content → src/routes/misc.js
 
-// ANSI escape stripper → src/util/strip-ansi.js
-const { stripAnsi } = require('./src/util/strip-ansi');
-
-// Local-path compile-gate → src/core/compile-gate-local.js
-const { runCompileGateOnReport } = require('./src/core/compile-gate-local');
-
-// Parse scanner output
-function parseOutput(output, outputDir) {
-    // Try to read report.json
-    const reportPath = path.join(outputDir, 'report.json');
-    let report = null;
-
-    try {
-        if (fs.existsSync(reportPath)) {
-            const reportData = fs.readFileSync(reportPath, 'utf-8');
-            report = JSON.parse(reportData);
-        }
-    } catch (e) {
-        console.error('Error reading report.json:', e);
-    }
-
-    // Default result structure
-    const result = {
-        outputDir,
-        totalFiles: 0,
-        converted: 0,
-        skippedCopybook: 0,
-        skippedNoId: 0,
-        skippedError: 0,
-        convertedFiles: [],
-        skippedFiles: [],
-        errorFiles: [],
-        report: report // Include full report for advanced UI
-    };
-
-    if (report && report.summary) {
-        // Use data from JSON report
-        result.totalFiles = report.summary.total;
-        result.converted = (report.summary.matches || 0) + (report.summary.mismatches || 0) + (report.summary.success_java_only || 0); // Executed files
-        // Sum all failure types for total errors
-        result.skippedError = (report.summary.fail_conversion || 0) + (report.summary.fail_compile || 0) + (report.summary.fail_execution || 0);
-
-        // Count skips manualy from file list
-        let copybooks = 0;
-        let noIds = 0;
-
-        report.files.forEach(file => {
-            // Status mapping
-            if (file.java_status === 'SUCCESS' || file.java_status === 'COMPARE_FAIL' || file.compare === 'MATCH' || file.compare === 'MISMATCH') {
-                // It was converted and ran (or at least converted)
-                let statusIcon = '[ok]';
-                if (file.compare === 'MISMATCH') statusIcon = '[warn]';
-                if (file.compare === 'FAIL') statusIcon = '[error]';
-
-                result.convertedFiles.push(`${file.path} [${file.compare}]`);
-            } else if (file.java_status === 'SKIPPED_COPYBOOK') {
-                copybooks++;
-                result.skippedFiles.push(`${file.path} - Copybook`);
-            } else if (file.java_status === 'SKIPPED_NO_ID') {
-                noIds++;
-                result.skippedFiles.push(`${file.path} - No ID DIVISION`);
-            } else {
-                // Failures
-                result.errorFiles.push(`${file.path} - ${file.java_status}`);
-            }
-        });
-
-        result.skippedCopybook = copybooks;
-        result.skippedNoId = noIds;
-
-    } else {
-        // Fallback to log parsing (legacy)
-        const cleanOutput = stripAnsi(output);
-        const lines = cleanOutput.split('\n');
-
-        for (const line of lines) {
-            // Parse summary numbers
-            if (line.includes('Total files scanned:')) {
-                const match = line.match(/Total files scanned:\s*(\d+)/);
-                if (match) result.totalFiles = parseInt(match[1]);
-            }
-            if (line.includes('Successfully converted:')) {
-                const match = line.match(/Successfully converted:\s*(\d+)/);
-                if (match) result.converted = parseInt(match[1]);
-            }
-            if (line.includes('Skipped (copybooks):')) {
-                const match = line.match(/Skipped \(copybooks\):\s*(\d+)/);
-                if (match) result.skippedCopybook = parseInt(match[1]);
-            }
-            if (line.includes('Skipped (no ID DIV):')) {
-                const match = line.match(/Skipped \(no ID DIV\):\s*(\d+)/);
-                if (match) result.skippedNoId = parseInt(match[1]);
-            }
-            if (line.includes('Skipped (errors):')) {
-                const match = line.match(/Skipped \(errors\):\s*(\d+)/);
-                if (match) result.skippedError = parseInt(match[1]);
-            }
-
-            // Parse individual file results
-            if (line.includes('[OK]') && line.includes('Converted:')) {
-                const match = line.match(/Converted:\s*(.+)$/);
-                if (match) result.convertedFiles.push(match[1].trim());
-            }
-            if (line.includes('[SKIP]')) {
-                const match = line.match(/\[SKIP\]\s*(.+)$/);
-                if (match) result.skippedFiles.push(match[1].trim());
-            }
-            if (line.includes('[ERROR]') && !line.includes('Failed to clone repository')) {
-                const match = line.match(/\[ERROR\]\s*(.+)\s-\sConversion failed/);
-                if (match) {
-                    result.errorFiles.push(`${match[1].trim()} - Conversion Error`);
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
+// stripAnsi + runCompileGateOnReport are imported near the top of this file
+// (when convert-local is mounted). parseOutput was moved wholesale to
+// src/core/parse-scanner-output.js — its only caller was /api/convert,
+// which now lives in src/routes/convert-local.js.
 
 // ============================================
 // AI Agent API Endpoints
