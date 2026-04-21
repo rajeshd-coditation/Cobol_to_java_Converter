@@ -538,6 +538,41 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 19a. rate-limit middleware: per-IP sliding window (§18.4) ──────────
+test('createRateLimiter blocks an IP after N requests and resets after windowMs', () => {
+    const { createRateLimiter } = require('../src/util/rate-limit');
+    const limiter = createRateLimiter({ windowMs: 60_000, max: 3 });
+
+    // Minimal req/res stubs. `ip` is the only field the limiter reads.
+    const makeReq = (ip) => ({ ip });
+    let statusCode = 0, body = null;
+    const makeRes = () => ({
+        setHeader: () => {},
+        status(c) { statusCode = c; return this; },
+        json(b) { body = b; return this; }
+    });
+    let nextCalled = 0;
+    const next = () => { nextCalled++; };
+
+    const ip = '1.2.3.4';
+    // First 3 requests pass; 4th is blocked.
+    limiter(makeReq(ip), makeRes(), next); // 1
+    limiter(makeReq(ip), makeRes(), next); // 2
+    limiter(makeReq(ip), makeRes(), next); // 3
+    assert.equal(nextCalled, 3, 'first three requests should pass through');
+
+    statusCode = 0; body = null; nextCalled = 0;
+    limiter(makeReq(ip), makeRes(), next);
+    assert.equal(statusCode, 429, 'fourth request should be blocked with 429');
+    assert.equal(nextCalled, 0, 'next() must NOT be called on a blocked request');
+    assert.ok(body && /many/i.test(body.error), 'body should carry a user-readable error');
+
+    // Different IP gets its own budget.
+    nextCalled = 0;
+    limiter(makeReq('5.6.7.8'), makeRes(), next);
+    assert.equal(nextCalled, 1, 'a different IP should not inherit the first IPs exhausted budget');
+});
+
 // ─── 19b. buildConversionGraph: extended dependency types (§14) ─────────
 test('buildConversionGraph detects EXEC SQL INCLUDE / CICS LINK+XCTL / SEND MAP / IMS DLI', async () => {
     const { buildConversionGraph } = require('../src/core/conversion-graph');

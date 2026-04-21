@@ -72,6 +72,33 @@ const { editDistance } = require('./src/util/edit-distance');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Per-IP rate limiters for the AI-burning endpoints (§18.4). Applied as
+// route-specific middleware just before each handler mounts — avoids
+// rate-limiting GETs / static assets / non-AI routes.
+//
+// Budgets tuned to a single developer's local workflow (plenty of slack)
+// while blocking obvious automated abuse. For a public-facing deploy,
+// tighten these OR put a real API gateway in front (this guard is
+// single-process and won't survive a restart).
+const { createRateLimiter } = require('./src/util/rate-limit');
+const convertLimiter = createRateLimiter({
+    windowMs: 60_000, max: 10,  // 10 conversions/min per IP
+    message: 'Too many conversion requests. Conversions are token-heavy; please wait a minute.',
+    headerPrefix: 'RateLimit-Convert'
+});
+const aiLimiter = createRateLimiter({
+    windowMs: 60_000, max: 30,  // 30 AI calls/min per IP (fix-java + compare-runs + ai/analyze)
+    message: 'Too many AI requests. Please wait and try again.',
+    headerPrefix: 'RateLimit-AI'
+});
+// Attach BEFORE the route handlers bind, using app.use with a path prefix
+// so the limiter runs on match regardless of HTTP verb.
+app.use('/api/convert-azure', convertLimiter);
+app.use('/api/convert', convertLimiter);
+app.use('/api/fix-java', aiLimiter);
+app.use('/api/compare-runs', aiLimiter);
+app.use('/api/ai/analyze', aiLimiter);
+
 // Path to the scanner script
 const SCANNER_SCRIPT = path.join(__dirname, '..', 'cobol_repo_scanner.sh');
 
