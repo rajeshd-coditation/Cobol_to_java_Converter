@@ -2871,7 +2871,117 @@ document.addEventListener('DOMContentLoaded', () => {
     if (diffBtn) diffBtn.addEventListener('click', showFixDiff);
     const unfixBtn = document.getElementById('unfixJavaBtn');
     if (unfixBtn) unfixBtn.addEventListener('click', undoFix);
+
+    // Check for interrupted/resumable runs on boot and render the banner.
+    // Runs once on page load; users who don't have any interrupted runs
+    // never see the banner.
+    loadResumableRuns();
 });
+
+// --- Resumable runs banner -----------------------------------------------
+// Hit /api/conversions, filter to status==='interrupted', render a banner
+// with Resume buttons. Polls once on load; refreshes after a resume action
+// so the just-resumed run drops off the list.
+async function loadResumableRuns() {
+    const banner = document.getElementById('resumableBanner');
+    if (!banner) return;
+    try {
+        const r = await fetch('/api/conversions');
+        if (!r.ok) return;
+        const data = await r.json();
+        const interrupted = (data.conversions || [])
+            .filter(c => c.status === 'interrupted' && c.resumable && !c.resumedAs);
+        if (interrupted.length === 0) {
+            banner.classList.add('hidden');
+            banner.innerHTML = '';
+            return;
+        }
+        const rows = interrupted.map(c => {
+            const when = c.interruptedAt ? new Date(c.interruptedAt).toLocaleString()
+                        : c.startedAt ? new Date(c.startedAt).toLocaleString() : c.id;
+            const repo = (c.inputPath || '').split('/').slice(-2).join('/') || c.id;
+            const progress = c.fileCount > 0 ? `${c.successCount}/${c.fileCount} done` : '';
+            return `
+                <div class="resumable-row">
+                    <div class="resumable-info">
+                        <span class="resumable-title">${escapeHtml(repo)}</span>
+                        <span class="resumable-meta">Interrupted ${when}${progress ? ' · ' + progress : ''}</span>
+                    </div>
+                    <button class="btn-pill btn-primary resumable-btn" data-resume-id="${c.id}"
+                            title="Pick up where the interrupted run left off">Resume</button>
+                    <button class="btn-pill btn-ghost resumable-dismiss" data-dismiss-id="${c.id}"
+                            title="Dismiss — mark as no longer resumable">Dismiss</button>
+                </div>`;
+        }).join('');
+        banner.innerHTML = `
+            <div class="resumable-header">
+                ${interrupted.length} interrupted conversion${interrupted.length === 1 ? '' : 's'} can be resumed
+            </div>
+            <div class="resumable-body">${rows}</div>
+        `;
+        banner.classList.remove('hidden');
+
+        banner.querySelectorAll('[data-resume-id]').forEach(btn => {
+            btn.addEventListener('click', (e) => resumeConversion(e.currentTarget.getAttribute('data-resume-id')));
+        });
+        banner.querySelectorAll('[data-dismiss-id]').forEach(btn => {
+            btn.addEventListener('click', (e) => dismissResumable(e.currentTarget.getAttribute('data-dismiss-id')));
+        });
+    } catch {
+        // Silent — the banner is a soft feature; a failed /api/conversions
+        // call already shows elsewhere in the app.
+    }
+}
+window.loadResumableRuns = loadResumableRuns;
+
+async function resumeConversion(prevId) {
+    if (!prevId) return;
+    const banner = document.getElementById('resumableBanner');
+    try {
+        const batchSize = parseInt(document.getElementById('batchSizeSlider')?.value, 10) || undefined;
+        const r = await fetch(`/api/resume/${prevId}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ batchSize })
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            showToast(body.error || 'Resume failed', 'error');
+            return;
+        }
+        if (body.alreadyComplete) {
+            showToast('Interrupted run had no remaining files — marked complete.', 'info');
+            loadResumableRuns();
+            return;
+        }
+        showToast(`Resumed — processing ${body.remainingFiles} remaining file(s)`, 'success');
+        // Point the UI at the new conversion and start polling.
+        currentConversionId = body.conversionId;
+        try { localStorage.setItem('lastConversionId', body.conversionId); } catch {}
+        // Hide the banner now; it'll re-fetch if there are more.
+        if (banner) { banner.classList.add('hidden'); banner.innerHTML = ''; }
+        if (typeof pollStatus === 'function') pollStatus();
+    } catch (err) {
+        showToast(`Resume failed: ${err.message}`, 'error');
+    }
+}
+window.resumeConversion = resumeConversion;
+
+async function dismissResumable(prevId) {
+    if (!prevId) return;
+    // Server-side dismiss isn't strictly needed for history — just hide
+    // locally so the banner stops pestering. A reboot will re-surface it.
+    try {
+        const row = document.querySelector(`[data-resume-id="${prevId}"]`)?.closest('.resumable-row');
+        if (row) row.remove();
+        const banner = document.getElementById('resumableBanner');
+        if (banner && !banner.querySelector('.resumable-row')) {
+            banner.classList.add('hidden');
+            banner.innerHTML = '';
+        }
+    } catch {}
+}
+window.dismissResumable = dismissResumable;
 
 // --- Unified node-click -> Results browser ---------------------------------
 // When a user clicks any node in the dependency graph, we drive the existing

@@ -1097,6 +1097,49 @@ body.theme-light .download-menu { background: #fff; border-color: rgba(0, 0, 0, 
 .download-menu-hint { color: var(--c-text-mute); font-size: 10.5px; font-weight: 400; }
 .download-menu-hint code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; }
 
+/* Resumable-runs banner — sits between the workflow bar and the workspace.
+   Only shows when loadResumableRuns() finds interrupted conversions. Uses
+   an amber accent so it's visually distinct from success-path elements;
+   matches the `awaiting` palette used for HITL-pending states. */
+.resumable-banner {
+    margin: 10px 24px 0;
+    padding: 12px 16px;
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.05));
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: var(--r-md);
+    display: flex; flex-direction: column; gap: 8px;
+}
+body.theme-light .resumable-banner {
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.03));
+    border-color: rgba(245, 158, 11, 0.45);
+}
+.resumable-header {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--c-text, #e8e6f2);
+    letter-spacing: 0.01em;
+}
+.resumable-body { display: flex; flex-direction: column; gap: 6px; }
+.resumable-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--c-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--r-sm, 6px);
+}
+body.theme-light .resumable-row { background: rgba(0, 0, 0, 0.025); }
+.resumable-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.resumable-title {
+    font-size: 12.5px; font-weight: 500;
+    color: var(--c-text, #e8e6f2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.resumable-meta {
+    font-size: 11px;
+    color: var(--c-text-mute, #888);
+}
+.resumable-btn, .resumable-dismiss { padding: 4px 12px !important; font-size: 11px; }
+
 /* Orchestration tab — one card per JCL file, each step showing PGM=
    status (✓ converted / ⚠ status / ✗ not in conversion) + DD list.
    Designed to scan-read; details collapse/expand for focus. §15 */

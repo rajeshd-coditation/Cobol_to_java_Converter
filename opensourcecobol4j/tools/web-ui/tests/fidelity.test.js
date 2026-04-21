@@ -992,3 +992,197 @@ test('cleanupOldCheckpoints deletes checkpoints older than maxAgeMs', () => {
         try { fs.unlinkSync(freshPath); } catch {}
     }
 });
+
+// ─── 21. Resumable conversion — checkpoint + load + resume route ──────
+//
+// The resumability contract has three moving parts that a contributor
+// could break independently, so pin each:
+//   (a) saveCheckpoint persists the running-worker's resume fields
+//       (completedLevelIdx, levelPlan, fileStates, outputDir)
+//   (b) loadCheckpoints promotes `status: 'running'` records to
+//       `status: 'interrupted'` with resumable=true on reboot
+//   (c) /api/resume/:id filters out already-done files and calls the
+//       convert handler with a resumeState payload
+test('saveCheckpoint persists resume-relevant worker state', () => {
+    const { saveCheckpoint, CHECKPOINT_DIR, checkpointPath } = require('../src/persistence/checkpoint');
+    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+    const id = `resume-save-${Date.now()}`;
+    const activeConversions = new Map();
+    activeConversions.set(id, {
+        status: 'running',
+        fileStates: { 'a.cbl': 'done', 'b.cbl': 'active' },
+        completedLevelIdx: 2,
+        totalLevels: 5,
+        levelPlan: [['a.cbl'], ['b.cbl'], ['c.cbl']],
+        inputPath: '/tmp/foo',
+        outputDir: '/tmp/out',
+        batchSize: 3,
+        tokenBudget: 0,
+        startedAt: Date.now()
+    });
+    try {
+        saveCheckpoint(activeConversions, id);
+        const raw = JSON.parse(fs.readFileSync(checkpointPath(id), 'utf-8'));
+        assert.strictEqual(raw.status, 'running', 'status should round-trip');
+        assert.strictEqual(raw.completedLevelIdx, 2, 'completedLevelIdx must be on disk');
+        assert.strictEqual(raw.totalLevels, 5);
+        assert.ok(Array.isArray(raw.levelPlan) && raw.levelPlan.length === 3, 'levelPlan must be an array');
+        assert.strictEqual(raw.outputDir, '/tmp/out', 'outputDir must persist for resume to reuse it');
+        assert.deepStrictEqual(raw.fileStates, { 'a.cbl': 'done', 'b.cbl': 'active' });
+        assert.strictEqual(raw.batchSize, 3);
+    } finally {
+        try { fs.unlinkSync(checkpointPath(id)); } catch {}
+    }
+});
+
+test('loadCheckpoints promotes running → interrupted + sets resumable', () => {
+    const { loadCheckpoints, CHECKPOINT_DIR, checkpointPath } = require('../src/persistence/checkpoint');
+    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+    const runId = `resume-load-running-${Date.now()}`;
+    const doneId = `resume-load-done-${Date.now()}`;
+    fs.writeFileSync(checkpointPath(runId), JSON.stringify({
+        status: 'running', inputPath: '/tmp/r', outputDir: '/tmp/o',
+        fileStates: { 'a.cbl': 'done', 'b.cbl': 'active' },
+        startedAt: Date.now() - 60000
+    }));
+    fs.writeFileSync(checkpointPath(doneId), JSON.stringify({
+        status: 'completed', completedAt: Date.now() - 1000
+    }));
+    try {
+        const acs = new Map();
+        loadCheckpoints(acs);
+        const run = acs.get(runId);
+        const done = acs.get(doneId);
+        assert.ok(run, 'interrupted record should be rehydrated');
+        assert.strictEqual(run.status, 'interrupted', 'running → interrupted on reboot');
+        assert.strictEqual(run.resumable, true, 'resumable flag should be set');
+        assert.ok(typeof run.interruptedAt === 'number', 'interruptedAt timestamp should be populated');
+        assert.deepStrictEqual(run.pendingReview, {}, 'pendingReview should be reset (Promises cannot rehydrate)');
+        assert.ok(done, 'completed record should still rehydrate');
+        assert.strictEqual(done.status, 'completed');
+    } finally {
+        try { fs.unlinkSync(checkpointPath(runId)); } catch {}
+        try { fs.unlinkSync(checkpointPath(doneId)); } catch {}
+    }
+});
+
+test('/api/resume filters to non-terminal files and forwards resumeState', async () => {
+    const express = require('express');
+    const resumeRoute = require('../src/routes/resume');
+
+    // Stub convertAzureHandler — records what the resume route passes
+    // through, returns a fake conversionId.
+    let captured = null;
+    const stubHandler = async (req, res) => {
+        captured = req.body;
+        res.json({ conversionId: 'new-123', outputDir: req.body.resumeState.outputDir, useAzureAI: true });
+    };
+
+    const activeConversions = new Map();
+    activeConversions.set('old-abc', {
+        status: 'interrupted',
+        resumable: true,
+        inputPath: '/tmp/repo',
+        outputDir: '/tmp/out-old',
+        batchSize: 4,
+        reviewMode: true,
+        reviewGlob: '*.cbl',
+        fileStates: {
+            'p1.cbl': 'done',
+            'p2.cbl': 'skipped',
+            'p3.cbl': 'failed',
+            'p4.cbl': 'active',
+            'p5.cbl': 'awaiting_review',
+            'p6.cbl': 'queued'
+        },
+        result: { report: { files: [
+            { path: 'p1.cbl', java_status: 'SUCCESS', conversionAccuracy: 85 }
+        ]}},
+        siblingSignatures: { P1: ['run()'] },
+        fileTimeline: { 'p1.cbl': [{ step: 'done' }] },
+        reviewHistory: [{ fileId: 'p1', action: 'approve' }]
+    });
+    let checkpointed = false;
+    const saveCheckpoint = () => { checkpointed = true; };
+
+    const app = express();
+    app.use(express.json());
+    resumeRoute.mount(app, { activeConversions, convertAzureHandler: stubHandler, saveCheckpoint });
+
+    // Spin up on an ephemeral port
+    const server = app.listen(0);
+    await new Promise(r => server.once('listening', r));
+    const port = server.address().port;
+
+    try {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/resume/old-abc`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}'
+        });
+        assert.strictEqual(resp.status, 200);
+        const body = await resp.json();
+
+        assert.strictEqual(body.conversionId, 'new-123');
+        assert.strictEqual(body.resumedFrom, 'old-abc');
+        // 3 non-terminal files (p4, p5, p6) should be passed as selectedFiles
+        assert.strictEqual(body.remainingFiles, 3);
+
+        // Inspect what convertAzureHandler received
+        assert.ok(captured, 'stub handler should have been invoked');
+        assert.strictEqual(captured.repoUrl, '/tmp/repo');
+        assert.strictEqual(captured.reviewMode, true);
+        assert.strictEqual(captured.reviewGlob, '*.cbl');
+        assert.strictEqual(captured.batchSize, 4);
+        assert.strictEqual(captured.resumedFrom, 'old-abc');
+        // selectedFiles should only contain the 3 non-terminal files
+        assert.deepStrictEqual(captured.selectedFiles.sort(), ['p4.cbl', 'p5.cbl', 'p6.cbl']);
+        // resumeState should carry the full state for seeding
+        assert.strictEqual(captured.resumeState.outputDir, '/tmp/out-old');
+        assert.deepStrictEqual(captured.resumeState.fileStates, activeConversions.get('old-abc').fileStates);
+        assert.strictEqual(captured.resumeState.reportFiles.length, 1);
+        assert.deepStrictEqual(captured.resumeState.siblingSignatures, { P1: ['run()'] });
+
+        // The old record should have resumedAs wired and resumable cleared
+        const old = activeConversions.get('old-abc');
+        assert.strictEqual(old.resumedAs, 'new-123');
+        assert.strictEqual(old.resumable, undefined);
+        assert.strictEqual(checkpointed, true, 'saveCheckpoint should persist the link');
+    } finally {
+        server.close();
+    }
+});
+
+test('/api/resume returns alreadyComplete when no files remain non-terminal', async () => {
+    const express = require('express');
+    const resumeRoute = require('../src/routes/resume');
+
+    const activeConversions = new Map();
+    activeConversions.set('old-done', {
+        status: 'interrupted',
+        resumable: true,
+        inputPath: '/tmp/repo',
+        outputDir: '/tmp/out',
+        fileStates: { 'p1.cbl': 'done', 'p2.cbl': 'skipped' }
+    });
+    const saveCheckpoint = () => {};
+    const app = express();
+    app.use(express.json());
+    resumeRoute.mount(app, { activeConversions, convertAzureHandler: () => {}, saveCheckpoint });
+
+    const server = app.listen(0);
+    await new Promise(r => server.once('listening', r));
+    const port = server.address().port;
+    try {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/resume/old-done`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+        });
+        assert.strictEqual(resp.status, 200);
+        const body = await resp.json();
+        assert.strictEqual(body.alreadyComplete, true);
+        assert.strictEqual(body.remainingFiles, 0);
+        assert.strictEqual(activeConversions.get('old-done').status, 'completed');
+    } finally {
+        server.close();
+    }
+});

@@ -194,8 +194,8 @@ require('./src/routes/convert-local').mount(app, {
 // (samples, file-content, ai/provider, dependencies). Mounted after aiAgent
 // + azureAgent are required (see top of file).
 
-app.post('/api/convert-azure', async (req, res) => {
-    const { repoUrl, reviewMode, reviewGlob, selectedFiles } = req.body;
+const convertAzureHandler = async (req, res) => {
+    const { repoUrl, reviewMode, reviewGlob, selectedFiles, resumeState } = req.body;
 
     const urlCheck = validateRepoUrl(repoUrl);
     if (!urlCheck.ok) {
@@ -209,7 +209,12 @@ app.post('/api/convert-azure', async (req, res) => {
     }
 
     const conversionId = Date.now().toString();
-    const outputDir = path.join(os.tmpdir(), `azure_cobol_output_${conversionId}`);
+    // Resumed runs reuse the original outputDir so the Java files already
+    // written to disk in the interrupted attempt stay put — the worker only
+    // rewrites files it re-converts this time.
+    const outputDir = (resumeState && resumeState.outputDir)
+        ? resumeState.outputDir
+        : path.join(os.tmpdir(), `azure_cobol_output_${conversionId}`);
     const javaDir = path.join(outputDir, 'java');
 
     // Create output directories
@@ -219,14 +224,18 @@ app.post('/api/convert-azure', async (req, res) => {
     activeConversions.set(conversionId, {
         status: 'running',
         cancelled: false,
-        logs: [' Starting AI-powered conversion...\n'],
+        logs: [resumeState
+            ? ` Resuming conversion from ${resumeState.resumedFrom || 'previous run'}...\n`
+            : ' Starting AI-powered conversion...\n'],
         result: null,
         useAzureAI: true,
         reviewMode: !!reviewMode,
         reviewGlob: reviewGlob || null,
         reviewGlobRe: globToRegex(reviewGlob),
         pendingReview: {}, // fileId -> { cobolSource, javaCode, resolve, queuedAt }
-        reviewHistory: [], // [{ fileId, action, at, note? }]
+        reviewHistory: (resumeState && Array.isArray(resumeState.reviewHistory))
+            ? resumeState.reviewHistory.slice()
+            : [], // [{ fileId, action, at, note? }]
         tokens: { promptIn: 0, completionOut: 0, total: 0, calls: 0 },
         // Hard ceiling on total tokens for this conversion. 0 = no cap. Default
         // pulled from env var so demo runs can be kept cheap without a code
@@ -234,6 +243,15 @@ app.post('/api/convert-azure', async (req, res) => {
         // on all remaining files so the user gets a clean partial result
         // instead of runaway cost.
         tokenBudget: parseInt(process.env.MAX_TOKENS_PER_CONVERSION || '0', 10) || 0,
+        // Resume plumbing: if the client passed resumedFrom, carry it so the
+        // history UI can chain interrupted → new run.
+        resumedFrom: (resumeState && resumeState.resumedFrom)
+            || (req.body && req.body.resumedFrom)
+            || undefined,
+        completedLevelIdx: -1,
+        totalLevels: 0,
+        levelPlan: [],
+        outputDir,
         startedAt: Date.now()
     });
 
@@ -394,6 +412,64 @@ app.post('/api/convert-azure', async (req, res) => {
             conversion.fileStates     = graphBuild.fileStates;
             conversion.currentFiles   = [];
             conversion.inputPath      = inputPath;
+
+            // --- Resume seeding -----------------------------------------
+            // If this is a resumed run, replay state from the interrupted
+            // checkpoint onto the fresh worker: file states (so the wave
+            // loop skips already-done files), prior report rows (so the UI
+            // shows the carried-over accuracy numbers), and the sibling
+            // signatures cache (so callers in later waves don't regress
+            // after we skip re-converting their callees).
+            if (resumeState && typeof resumeState === 'object') {
+                if (resumeState.fileStates && typeof resumeState.fileStates === 'object') {
+                    // Only apply terminal states from the prior run — active /
+                    // awaiting_review can't resume (the Promises are gone) and
+                    // should re-enter the queue.
+                    const terminal = new Set(['done', 'skipped', 'failed']);
+                    let seeded = 0;
+                    for (const [k, v] of Object.entries(resumeState.fileStates)) {
+                        if (terminal.has(v) && k in conversion.fileStates) {
+                            conversion.fileStates[k] = v;
+                            seeded++;
+                        }
+                    }
+                    conversion.logs.push(`   Seeded ${seeded} file state(s) from prior run\n`);
+                }
+                if (Array.isArray(resumeState.reportFiles)) {
+                    // Pre-populate report rows and counters so the final
+                    // summary reflects prior successes. Dedupe by path —
+                    // we'll overwrite any prior entry if the resumed run
+                    // re-processes that file (stays in terminal state so
+                    // it's skipped; but defensively we dedupe anyway).
+                    const seenPaths = new Set();
+                    for (const entry of resumeState.reportFiles) {
+                        if (!entry || !entry.path || seenPaths.has(entry.path)) continue;
+                        seenPaths.add(entry.path);
+                        results.report.files.push(entry);
+                        if (entry.java_status === 'SUCCESS' || entry.java_status === 'JAVA_ONLY') {
+                            results.converted++;
+                            results.convertedFiles.push(`${entry.path} [AZURE_AI]`);
+                        } else if (entry.java_status === 'COMPILE_FAIL' ||
+                                   entry.java_status === 'CONVERT_FAIL' ||
+                                   entry.java_status === 'FAIL') {
+                            results.skippedError++;
+                            results.errorFiles.push(`${entry.path} - ${entry.error || 'carried forward'}`);
+                        } else if (entry.java_status === 'SKIPPED_NO_ID' ||
+                                   entry.java_status === 'SKIPPED_TOO_LARGE' ||
+                                   entry.java_status === 'SKIPPED_BUDGET' ||
+                                   entry.java_status === 'SKIPPED_CANCELLED') {
+                            results.skippedNoId++;
+                            results.skippedFiles.push(`${entry.path} - Skipped`);
+                        }
+                    }
+                }
+                if (resumeState.siblingSignatures && typeof resumeState.siblingSignatures === 'object') {
+                    conversion.siblingSignatures = Object.assign({}, resumeState.siblingSignatures);
+                }
+                if (resumeState.fileTimeline && typeof resumeState.fileTimeline === 'object') {
+                    conversion.fileTimeline = Object.assign({}, resumeState.fileTimeline);
+                }
+            }
 
 
             // Parallel processing configuration. User can override via the
@@ -1164,6 +1240,14 @@ app.post('/api/convert-azure', async (req, res) => {
             });
             conversion.logs.push(`\n Processing ${cobolFiles.length} files (deps first, parallel within level)...\n\n`);
 
+            // Persist the wave plan so a resume run can reconstruct it without
+            // re-stratifying (the graph already lives on disk via checkpoint,
+            // but the wave ordering is the resume contract).
+            conversion.totalLevels = levels.length;
+            conversion.levelPlan = levels.map(lvl => lvl.slice());
+            conversion.result = results; // partial; refreshed below
+            saveCheckpoint(conversionId);
+
             let completedCount = 0;
             for (let lvlIdx = 0; lvlIdx < levels.length; lvlIdx++) {
                 if (conversion.cancelled) {
@@ -1171,7 +1255,20 @@ app.post('/api/convert-azure', async (req, res) => {
                     break;
                 }
                 const levelRel = levels[lvlIdx];
-                const levelAbs = levelRel.map(r => absOfId.get(r));
+                // Resume semantics: skip files that already have a terminal
+                // state (done / skipped / failed) on the conversion record.
+                // A fresh run has none; a resumed run (cloned from an
+                // interrupted record) starts with those keys already set.
+                const terminal = new Set(['done', 'skipped', 'failed']);
+                const levelAbs = levelRel
+                    .filter(r => !terminal.has(conversion.fileStates[r]))
+                    .map(r => absOfId.get(r));
+                if (levelAbs.length === 0) {
+                    conversion.logs.push(` Level ${lvlIdx + 1}/${levels.length}: all files already processed — skipping\n`);
+                    conversion.completedLevelIdx = lvlIdx;
+                    saveCheckpoint(conversionId);
+                    continue;
+                }
                 conversion.logs.push(` Level ${lvlIdx + 1}/${levels.length}: ${levelAbs.length} file(s)\n`);
 
                 // Within a level, files have no inter-deps so we can fully parallelize.
@@ -1217,6 +1314,13 @@ app.post('/api/convert-azure', async (req, res) => {
                 }
 
                 conversion.logs.push(`    Progress: ${completedCount}/${cobolFiles.length} files (${Math.round(completedCount / cobolFiles.length * 100)}%)\n\n`);
+
+                // Wave-boundary checkpoint: completedLevelIdx names the last
+                // wave whose files all reached a terminal state. If the server
+                // crashes after this save, /api/resume can skip waves 0..N.
+                conversion.completedLevelIdx = lvlIdx;
+                conversion.result = results; // partial snapshot
+                saveCheckpoint(conversionId);
 
                 // Small pause between levels so the UI clearly shows the wave
                 if (lvlIdx + 1 < levels.length) {
@@ -1333,6 +1437,15 @@ app.post('/api/convert-azure', async (req, res) => {
     })();
 
     res.json({ conversionId, outputDir, useAzureAI: true });
+};
+app.post('/api/convert-azure', convertAzureHandler);
+
+// /api/resume/:id → src/routes/resume.js (reuses convertAzureHandler
+// with a resumeState payload built from the interrupted checkpoint)
+require('./src/routes/resume').mount(app, {
+    activeConversions,
+    convertAzureHandler,
+    saveCheckpoint
 });
 
 // /api/status/:id → src/routes/status.js

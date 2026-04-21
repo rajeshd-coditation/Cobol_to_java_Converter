@@ -37,6 +37,8 @@ function saveCheckpoint(activeConversions, id) {
         reviewGlob: conv.reviewGlob,
         reviewHistory: conv.reviewHistory,
         tokens: conv.tokens,
+        tokenBudget: conv.tokenBudget,
+        batchSize: conv.batchSize,
         risks: conv.risks,
         postReview: conv.postReview,
         graph: conv.graph,
@@ -47,6 +49,14 @@ function saveCheckpoint(activeConversions, id) {
                                             // inspectable).
         currentFiles: conv.currentFiles,
         inputPath: conv.inputPath,
+        outputDir: conv.outputDir,
+        // Resume state — populated at each wave boundary by the worker.
+        // If present and status==='interrupted' on load, /api/resume can
+        // restart the worker from the next wave without redoing finished files.
+        completedLevelIdx: conv.completedLevelIdx,
+        totalLevels: conv.totalLevels,
+        levelPlan: conv.levelPlan,          // [[relPath,...], ...] frozen plan
+        resumedFrom: conv.resumedFrom,
         startedAt: conv.startedAt,
         completedAt: conv.completedAt
     };
@@ -70,6 +80,18 @@ function loadCheckpoints(activeConversions) {
                 const data = JSON.parse(fs.readFileSync(path.join(CHECKPOINT_DIR, f), 'utf-8'));
                 const id = f.replace('.json', '');
                 if (data.status === 'completed') {
+                    data.pendingReview = {};
+                    activeConversions.set(id, data);
+                } else if (data.status === 'running') {
+                    // A status of 'running' on disk means the server was
+                    // killed/crashed mid-run. Promote to 'interrupted' so the
+                    // UI can offer a Resume action. The in-flight Promise
+                    // graph (pendingReview, worker closures) is gone; a
+                    // resume spins up a fresh worker that skips already-done
+                    // files.
+                    data.status = 'interrupted';
+                    data.resumable = true;
+                    data.interruptedAt = Date.now();
                     data.pendingReview = {};
                     activeConversions.set(id, data);
                 }

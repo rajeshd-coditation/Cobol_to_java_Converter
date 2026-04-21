@@ -208,6 +208,14 @@
             </div>
         </div>
 
+        <!-- Resumable-runs banner.
+             Populated by loadResumableRuns() on page load. Shows when the
+             server has one or more `status: interrupted` conversions from a
+             crashed/killed run — click Resume to re-enter the same repo and
+             pick up from the last completed wave, reusing the original
+             outputDir so already-converted Java stays on disk. -->
+        <div id="resumableBanner" class="resumable-banner hidden" role="region" aria-label="Resumable conversions"></div>
+
         <!-- Workspace: sidebar + main canvas -->
         <div class="workspace">
             <aside class="sidebar phase-hide" data-show-phases="analyze convert review results">

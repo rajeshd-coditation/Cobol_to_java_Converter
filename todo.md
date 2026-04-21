@@ -28,7 +28,6 @@ Each of these is multi-hour and benefits from its own planning pass.
 - [ ] **Phase 5 refactor: finish `public/app.js` split.** Four modules extracted (`helpers`, `dialogs`, `accuracy-panel`, `review-chat`); remaining candidates in rough priority order: browser-tree (~400 lines), run-modal (~240), review-modal (~200), AI-analyzer + baselines (~300), export (~40), session restore (~120). Each needs care with load order and monkey-patched globals.
 - [ ] **Phase 6: CSS cleanup.** `public/style.css` has ~3,400 lines of pre-v2 rules. Audit (2026-04-21) identified **26 safely-dead classes** with zero references across HTML + all JS (the full bundle: `coming-soon`, `review-chat-panel`, `chat-title/messages/actions/tabs`, `post-review-*`, `run-diverge-*`, `logs-details`, `details-tabs/tab/panel/files-list`, `run-output-panel/header`, `drawer-handle`, `run-input-field`, `hero-engine-img`, `theme-dark`, `accent`, `browser-actions`, `history-list-panel`, `toast-body`) spanning ~60 rules across the file. Risk of compound-selector regression means this deserves its own session with visual verification — NOT a mass `sed` delete. Target: 4,927 → ~1,500.
 - [ ] **True interactive terminal.** Replace `spawnSync` in `/api/run` with `node-pty` + WebSocket so users can walk through a menu program live instead of pre-padding stdin.
-- [ ] **Resumable conversion.** Worker-state checkpoint (not just the final-report snapshot we have today) so a server crash mid-run picks up from last-completed wave. Non-trivial because of in-flight Promises.
 - [ ] **LangGraph.js port.** If the agent grows specialized stages (parser → translator → validator → optimizer) with branching. Replaces only the per-file conversion function inside `src/ai/convert-cobol.js`; Express server stays as-is.
 
 ### Even later — low priority
@@ -118,6 +117,10 @@ No more "AI got a partial view" bugs from this class.
 - AI endpoints are per-IP rate-limited (10/min for convert, 30/min for fix/compare/analyze). Rate limiter is single-process; put a real WAF in front for public exposure.
 - `activeConversions` has a 2-hour TTL sweep + disk checkpoint GC at 7 days + log rotation at 10 MB × 5 archives.
 - Pre-commit hook at `.githooks/pre-commit` blocks `.env`, `*.log`, `node_modules/`, `graphify-out/`, and files ≥ 5 MB.
+
+### Resumable conversions — new-run-from-interrupted, not in-process revival
+
+When a server crash leaves a `status: 'running'` checkpoint on disk, boot promotes it to `'interrupted'` (see `src/persistence/checkpoint.js`). `POST /api/resume/:id` kicks off a **new** conversion that reuses the old `inputPath` + `outputDir` and seeds `fileStates` from the interrupted record so the wave loop skips every file that already reached a terminal state. We deliberately did NOT try to rehydrate the old worker's closures or in-flight Promises — pending HITL reviews are gone at crash time and there's no clean way to restart them. The contract is "we don't re-convert anything that already finished"; files that were mid-conversion or awaiting review at crash time get re-queued in the new run. Checkpoints now save after every wave (not just on completion) so the resume surface is at most one-wave-stale. The old record keeps `resumedAs: <newId>` so the UI can chain them.
 
 ### Vendored `opensourcecobol4j/`
 
