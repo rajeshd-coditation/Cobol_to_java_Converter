@@ -3329,6 +3329,86 @@ footer {
     transition: background 150ms;
 }
 .tl-event:hover { background: rgba(255, 255, 255, 0.03); }
+
+/* Group-by-file timeline view (§24.8) — replaces the flat stream with
+   one collapsible card per file. View toggle + filter chips sit at the
+   top of the drawer. */
+.tl-controls {
+    position: sticky; top: 0;
+    z-index: 2;
+    display: flex; flex-wrap: wrap;
+    gap: 10px 14px;
+    align-items: center;
+    padding: 8px 12px;
+    margin: -8px -12px 8px;
+    background: rgba(13, 12, 84, 0.92);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(6px);
+}
+body.theme-light .tl-controls { background: rgba(255, 255, 255, 0.96); border-bottom-color: rgba(0, 0, 0, 0.08); }
+
+.tl-view-toggle, .tl-filter-chips { display: flex; gap: 4px; }
+.tl-view-btn, .tl-filter-chip {
+    background: transparent;
+    border: 1px solid var(--c-border);
+    color: var(--c-text-dim);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 10.5px;
+    cursor: pointer;
+    transition: background 150ms, border-color 150ms, color 150ms;
+}
+.tl-view-btn:hover, .tl-filter-chip:hover { border-color: var(--c-accent-light); color: var(--c-text); }
+.tl-view-btn.active, .tl-filter-chip.active {
+    background: rgba(117, 69, 255, 0.18);
+    border-color: var(--c-accent-light);
+    color: var(--c-text);
+}
+
+.tl-group {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 0;
+    margin-bottom: 6px;
+    background: rgba(255, 255, 255, 0.015);
+}
+body.theme-light .tl-group { border-color: rgba(0, 0, 0, 0.08); background: rgba(0, 0, 0, 0.01); }
+
+.tl-group-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    cursor: pointer;
+    list-style: none;
+    /* Hide the default disclosure caret; we draw our own so the row
+       stays a clean one-liner. */
+}
+.tl-group-head::-webkit-details-marker { display: none; }
+.tl-group-head::before {
+    content: '▸';
+    color: var(--c-text-mute);
+    font-size: 10px;
+    transition: transform 180ms;
+    width: 10px;
+}
+.tl-group[open] .tl-group-head::before { transform: rotate(90deg); }
+
+.tl-group-name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    color: var(--c-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+.tl-group-count { color: var(--c-text-mute); font-size: 10px; }
+.tl-group-duration { color: var(--c-text-mute); font-size: 10px; font-variant-numeric: tabular-nums; }
+.tl-group-time { color: var(--c-text-mute); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.tl-group-events { padding: 4px 12px 10px 22px; }
+.tl-group-events .tl-event { padding: 4px 0; }
+
+.tl-state-pill.log { background: rgba(255, 255, 255, 0.08); color: var(--c-text-mute); }
 .tl-time {
     font-family: 'JetBrains Mono', 'Menlo', monospace;
     font-size: 9px;

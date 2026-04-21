@@ -4669,9 +4669,15 @@ let lastHistoryLength = 0;
 let timelineTimer = null;
 let prevFileStatesSnapshot = {};
 
-function tlPush(type, html) {
+// Activity view mode + filter state. Both persist across reloads via
+// localStorage so a user who prefers Grouped + Errors-only gets that
+// back on the next page load.
+let timelineViewMode = localStorage.getItem('tl_view') || 'grouped';
+let timelineFilter   = localStorage.getItem('tl_filter') || 'all';
+
+function tlPush(type, html, fileId) {
     const at = Date.now();
-    timelineEvents.push({ at, type, html });
+    timelineEvents.push({ at, type, html, fileId: fileId || null });
     renderTimeline();
     bumpDrawerBadge();
 }
@@ -4683,17 +4689,158 @@ function renderTimeline() {
         el.innerHTML = '<div class="empty-state">Activity will appear here once a conversion starts.</div>';
         return;
     }
-    // Show last 200 events max
-    const visible = timelineEvents.slice(-200);
-    el.innerHTML = visible.map(e => {
+    // Render the control strip once; reuse on subsequent updates.
+    const controls = `
+        <div class="tl-controls">
+            <div class="tl-view-toggle" role="tablist">
+                <button class="tl-view-btn ${timelineViewMode === 'grouped' ? 'active' : ''}" onclick="setTimelineView('grouped')">Grouped</button>
+                <button class="tl-view-btn ${timelineViewMode === 'stream'  ? 'active' : ''}" onclick="setTimelineView('stream')">Stream</button>
+            </div>
+            <div class="tl-filter-chips">
+                <button class="tl-filter-chip ${timelineFilter === 'all'       ? 'active' : ''}" onclick="setTimelineFilter('all')">All</button>
+                <button class="tl-filter-chip ${timelineFilter === 'inflight'  ? 'active' : ''}" onclick="setTimelineFilter('inflight')">In-flight</button>
+                <button class="tl-filter-chip ${timelineFilter === 'errors'    ? 'active' : ''}" onclick="setTimelineFilter('errors')">Errors</button>
+            </div>
+        </div>
+    `;
+    if (timelineViewMode === 'stream') {
+        el.innerHTML = controls + renderTimelineStream();
+    } else {
+        el.innerHTML = controls + renderTimelineGrouped();
+    }
+    // Grouped + stream views have opposite scroll affordances. Stream
+    // auto-scrolls to bottom (latest-line-first reading); grouped is
+    // user-navigable so we leave scroll alone.
+    if (timelineViewMode === 'stream') el.scrollTop = el.scrollHeight;
+}
+
+/**
+ * Flat stream view — the original rendering. Applies the current filter.
+ */
+function renderTimelineStream() {
+    const visible = filterTimelineEvents(timelineEvents).slice(-200);
+    return visible.map(e => {
         const time = new Date(e.at).toLocaleTimeString();
         return `<div class="tl-event tl-${e.type}">
             <span class="tl-time">${time}</span>
             <div class="tl-body">${e.html}</div>
         </div>`;
     }).join('');
-    el.scrollTop = el.scrollHeight;
 }
+
+/**
+ * Group-by-file view (§24.8). One collapsible row per file showing:
+ *   - latest state pill + duration since first event
+ *   - event count
+ *   Expand → full per-file history.
+ * Non-file-scoped events (raw log lines) collapse into a single
+ * "General" group at the top so they stay visible.
+ */
+function renderTimelineGrouped() {
+    const filtered = filterTimelineEvents(timelineEvents);
+    if (filtered.length === 0) {
+        return '<div class="empty-state">No events match the current filter.</div>';
+    }
+    // Group events by fileId (null → "General"). Preserve insertion
+    // order of first appearance so cards land in the order files
+    // started processing.
+    const byFile = new Map();
+    for (const e of filtered) {
+        const key = e.fileId || '__general__';
+        if (!byFile.has(key)) byFile.set(key, []);
+        byFile.get(key).push(e);
+    }
+
+    const cards = [];
+    // General (log) group first, if any.
+    if (byFile.has('__general__')) {
+        const events = byFile.get('__general__');
+        cards.push(renderTimelineGroupCard('General', events, null));
+        byFile.delete('__general__');
+    }
+    for (const [fileId, events] of byFile) {
+        cards.push(renderTimelineGroupCard(fileId, events, fileId));
+    }
+    return cards.join('');
+}
+
+function renderTimelineGroupCard(title, events, fileId) {
+    const last = events[events.length - 1];
+    const first = events[0];
+    const durationMs = last.at - first.at;
+    const duration = durationMs > 0
+        ? (durationMs < 1000 ? `${durationMs}ms` : durationMs < 60_000 ? `${Math.round(durationMs / 1000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.round((durationMs % 60_000) / 1000)}s`)
+        : '';
+    const latestTime = new Date(last.at).toLocaleTimeString();
+    // Extract the latest "state pill" out of the body if it exists so
+    // the collapsed header reads at a glance.
+    const latestLabel = last.html.match(/class="tl-state-pill (\w+)">([^<]+)</);
+    const latestPill = latestLabel
+        ? `<span class="tl-state-pill ${latestLabel[1]}">${escapeHtml(latestLabel[2])}</span>`
+        : `<span class="tl-state-pill log">latest</span>`;
+    const fileShort = fileId ? fileId.split('/').pop() : title;
+
+    const rows = events.map(e => {
+        const time = new Date(e.at).toLocaleTimeString();
+        return `<div class="tl-event tl-${e.type}">
+            <span class="tl-time">${time}</span>
+            <div class="tl-body">${e.html}</div>
+        </div>`;
+    }).join('');
+
+    return `
+        <details class="tl-group" ${events.length <= 3 ? 'open' : ''}>
+            <summary class="tl-group-head">
+                <span class="tl-group-name" title="${escapeHtml(fileId || title)}">${escapeHtml(fileShort)}</span>
+                ${latestPill}
+                <span class="tl-group-count">${events.length} event${events.length === 1 ? '' : 's'}</span>
+                ${duration ? `<span class="tl-group-duration">${duration}</span>` : ''}
+                <span class="tl-group-time">${latestTime}</span>
+            </summary>
+            <div class="tl-group-events">${rows}</div>
+        </details>`;
+}
+
+function filterTimelineEvents(events) {
+    if (timelineFilter === 'all') return events;
+    if (timelineFilter === 'errors') {
+        // Match on the classes we emit for failed / rejected / compile
+        // errors + any explicit error-marker text.
+        return events.filter(e =>
+            /tl-state-pill (failed|reject|compile-fail)|error/i.test(e.html));
+    }
+    if (timelineFilter === 'inflight') {
+        // In-flight = latest event for this file shows active / awaiting_review.
+        // Compute the LAST event per file; include only events belonging to
+        // files whose last event is in-flight. For unfiled (log) events we
+        // just include those when the conversion is still running.
+        const lastByFile = new Map();
+        for (const e of events) {
+            const key = e.fileId || '__general__';
+            lastByFile.set(key, e);
+        }
+        const inflightKeys = new Set();
+        for (const [k, e] of lastByFile) {
+            if (/tl-state-pill (active|awaiting_review)/.test(e.html)) inflightKeys.add(k);
+        }
+        return events.filter(e => inflightKeys.has(e.fileId || '__general__'));
+    }
+    return events;
+}
+
+function setTimelineView(mode) {
+    timelineViewMode = mode;
+    localStorage.setItem('tl_view', mode);
+    renderTimeline();
+}
+window.setTimelineView = setTimelineView;
+
+function setTimelineFilter(f) {
+    timelineFilter = f;
+    localStorage.setItem('tl_filter', f);
+    renderTimeline();
+}
+window.setTimelineFilter = setTimelineFilter;
 
 function resetTimeline() {
     timelineEvents = [];
@@ -4759,7 +4906,7 @@ function pollTimeline() {
                 label = state;
             }
 
-            tlPush('state', `<span class="tl-state-pill ${state}">${label}</span> <span class="tl-file-name">${escapeHtml(name)}</span>`);
+            tlPush('state', `<span class="tl-state-pill ${state}">${label}</span> <span class="tl-file-name">${escapeHtml(name)}</span>`, id);
         }
     }
     prevFileStatesSnapshot = { ...states };
@@ -4779,7 +4926,7 @@ function pollTimeline() {
                     const cls = h.action === 'approve' ? 'approve' : h.action === 'reject' ? 'reject' : 'edit';
                     const bulk = h.bulk ? ' (bulk)' : '';
                     const note = h.note ? ` — ${escapeHtml(h.note)}` : '';
-                    tlPush('review', `<span class="tl-review-action ${cls}">${h.action}${bulk}</span> <span class="tl-file-name">${escapeHtml(name)}</span>${note}`);
+                    tlPush('review', `<span class="tl-review-action ${cls}">${h.action}${bulk}</span> <span class="tl-file-name">${escapeHtml(name)}</span>${note}`, h.fileId);
                 }
             }
         } catch {}
