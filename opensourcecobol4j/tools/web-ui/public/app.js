@@ -3946,6 +3946,10 @@ async function runSelectedFile() {
                 cobolEl.parentElement.classList.remove('failed');
                 cobolMeta.textContent = `exit ${data.cobol.exitCode} - ${data.cobol.duration}ms`;
             }
+            // Render the one-click typo-fix affordance when the server
+            // has a structured suggestion — pairs with the text hint
+            // already in data.cobol.error.
+            renderCobolTypoFixButton(data.cobol.typoFix, file.cobolPath);
         }
         // Java pane
         if (data.java) {
@@ -3992,6 +3996,65 @@ async function runSelectedFile() {
 // stdout panes. Many COBOL programs write to files via WRITE rather than
 // DISPLAY to stdout; without this panel the Run view looks empty when the
 // program actually produced a real report.
+/**
+ * One-click COBOL typo fix. Shown under the COBOL pane when cobc flagged
+ * an undefined identifier and our hinter (curated dictionary or edit-
+ * distance) proposed a canonical replacement. Click → POST /api/fix-cobol
+ * → toast → re-Run so the user sees the fix land.
+ */
+function renderCobolTypoFixButton(typoFix, cobolPath) {
+    const panel = document.getElementById('runOutputPanel');
+    if (!panel) return;
+    panel.querySelectorAll('.cobol-typo-fix-bar').forEach(n => n.remove());
+    if (!typoFix || !typoFix.bad || !typoFix.suggestion) return;
+
+    const bar = document.createElement('div');
+    bar.className = 'cobol-typo-fix-bar';
+    const source = typoFix.source === 'dictionary'
+        ? 'known typo (vetted mapping)'
+        : 'suggested by fuzzy match against declared identifiers';
+    bar.innerHTML = `
+        <div class="cobol-typo-fix-text">
+            Suggested fix: <code>${escapeHtml(typoFix.bad)}</code> → <code>${escapeHtml(typoFix.suggestion)}</code>
+            <span class="cobol-typo-fix-source">(${escapeHtml(source)})</span>
+        </div>
+        <button class="btn-pill btn-sm cobol-typo-fix-apply">Apply &amp; re-run</button>
+    `;
+    bar.querySelector('.cobol-typo-fix-apply').addEventListener('click', async () => {
+        await applyCobolTypoFix(typoFix.bad, typoFix.suggestion, cobolPath);
+    });
+    panel.appendChild(bar);
+}
+
+async function applyCobolTypoFix(bad, suggestion, cobolPath) {
+    if (!currentConversionId || !cobolPath) return;
+    const ok = await confirmDialog(
+        `Rewrite every occurrence of \`${bad}\` to \`${suggestion}\` in ${cobolPath.split('/').pop()}?\n\n` +
+        `A backup is saved alongside the source; Undo from the Run panel afterwards.`,
+        { title: 'Apply COBOL fix', okText: 'Apply', danger: false }
+    );
+    if (!ok) return;
+    try {
+        const r = await fetch(`/api/fix-cobol/${currentConversionId}/${encodeURIComponent(cobolPath)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bad, suggestion })
+        });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+            toast('Fix failed: ' + (data.error || r.status), 'error');
+            return;
+        }
+        toast(`Rewrote ${data.replacements} occurrence${data.replacements === 1 ? '' : 's'}. Re-running…`, 'success');
+        // Re-run so the user sees whether the fix actually cleared the
+        // compile error. The stdin input is preserved (we don't touch it).
+        runSelectedFile();
+    } catch (err) {
+        toast('Fix failed: ' + err.message, 'error');
+    }
+}
+window.applyCobolTypoFix = applyCobolTypoFix;
+
 /**
  * Surface the effective stdin the server fed to both programs. The user
  * typed "1,4" and the server turned it into "1\n4\n4\n4\n4\nq\n0\nn\n"

@@ -1635,6 +1635,10 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     // usually enough to catch human typos like PRINT-REX vs
                     // PRINT-REC (real bug in the COBOL Programming Course repo).
                     let typoHint = '';
+                    // Structured version of the same finding so the UI can
+                    // render a one-click "Apply fix" button instead of
+                    // making the user edit the source by hand.
+                    let typoFix = null;
                     const undefMatch = /'([A-Z0-9_-]+)'\s+is\s+not\s+defined/i.exec(lastErr);
                     if (undefMatch) {
                         try {
@@ -1644,6 +1648,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                             const curated = lookupCobolTypo(bad);
                             if (curated) {
                                 typoHint = `\n\nKnown typo: \`${bad}\` should be \`${curated}\`. Edit the COBOL to use the canonical name.`;
+                                typoFix = { bad, suggestion: curated, source: 'dictionary' };
                                 log('cobol-compile', 'typo-hint', { bad, suggestion: curated, source: 'dictionary', file: reportFile.path });
                             } else {
                                 // Priority 2: fuzzy match against identifiers actually
@@ -1656,6 +1661,7 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                                 const hit = [...idents].find(i => i !== bad && editDistance(i, bad.toUpperCase()) <= 1);
                                 if (hit) {
                                     typoHint = `\n\nHint: \`${bad}\` is not defined, but \`${hit}\` is — likely a typo in the source file. Edit the COBOL and change \`${bad}\` → \`${hit}\`.`;
+                                    typoFix = { bad, suggestion: hit, source: 'edit-distance' };
                                     log('cobol-compile', 'typo-hint', { bad, suggestion: hit, source: 'edit-distance', file: reportFile.path });
                                 }
                             }
@@ -1670,7 +1676,9 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                     result.cobol = {
                         ok: false,
                         output: '',
-                        error: 'COBOL compile failed (tried all dialect/format combinations):\n' + lastErr + typoHint + modsNote
+                        error: 'COBOL compile failed (tried all dialect/format combinations):\n' + lastErr + typoHint + modsNote,
+                        // UI consumes this to render the one-click Apply-fix button.
+                        typoFix
                     };
                 } else if (compiled) {
                     log('cobol-compile', 'ok', {
@@ -1823,6 +1831,10 @@ require('./src/routes/fix-java').mount(app, { activeConversions, azureAgent });
 // /api/fix-diff/:id/:fileId + /api/unfix-java/:id/:fileId → paired recovery
 // endpoints, let the UI show the repair diff and roll back bad fixes.
 require('./src/routes/unfix-java').mount(app, { activeConversions, azureAgent });
+
+// COBOL-side typo fix: /api/fix-cobol/:id/:fileId applies a suggested
+// rewrite; /api/fix-cobol-diff + /api/unfix-cobol pair with it.
+require('./src/routes/fix-cobol').mount(app, { activeConversions });
 
 // API: AI-powered comparison of COBOL vs Java runtime output.
 // The frontend calls this AFTER /api/run returns, to get a semantic verdict

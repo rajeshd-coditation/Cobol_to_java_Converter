@@ -3409,6 +3409,36 @@ body.theme-light .tl-group { border-color: rgba(0, 0, 0, 0.08); background: rgba
 .tl-group-events .tl-event { padding: 4px 0; }
 
 .tl-state-pill.log { background: rgba(255, 255, 255, 0.08); color: var(--c-text-mute); }
+
+/* One-click COBOL typo fix bar, shown under the Run panel when cobc
+   emits "'X' is not defined" and our hinter proposes a replacement. */
+.cobol-typo-fix-bar {
+    margin: 8px 12px 0;
+    padding: 10px 12px;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 6px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-size: 12px;
+}
+.cobol-typo-fix-bar code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    padding: 1px 5px;
+    background: rgba(245, 158, 11, 0.18);
+    border-radius: 3px;
+    color: #fbbf24;
+}
+.cobol-typo-fix-text { flex: 1; color: var(--c-text); }
+.cobol-typo-fix-source { color: var(--c-text-mute); font-size: 11px; margin-left: 4px; }
+.cobol-typo-fix-apply {
+    background: rgba(245, 158, 11, 0.20);
+    border: 1px solid rgba(245, 158, 11, 0.55);
+    color: #fbbf24;
+}
+.cobol-typo-fix-apply:hover { background: rgba(245, 158, 11, 0.35); color: #fff; }
+body.theme-light .cobol-typo-fix-bar { background: rgba(245, 158, 11, 0.06); border-color: rgba(245, 158, 11, 0.30); }
+body.theme-light .cobol-typo-fix-bar code { color: #b45309; background: rgba(245, 158, 11, 0.12); }
+body.theme-light .cobol-typo-fix-apply { color: #b45309; }
 .tl-time {
     font-family: 'JetBrains Mono', 'Menlo', monospace;
     font-size: 9px;

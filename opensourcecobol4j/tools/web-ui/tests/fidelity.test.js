@@ -538,6 +538,87 @@ test('isLikelyTruncated flags sources with no exit marker and no trailing period
     assert.equal(isLikelyTruncated(okWithTrailingComment).truncated, false);
 });
 
+// ─── 17c. fix-cobol route: whole-word rewrite + backup lifecycle ───────
+// Loads the router into a scratch Express app + a fake conversions map
+// so we can exercise the real handler without a live server. Covers
+// rewrite correctness (whole-word, case-insensitive) + backup creation.
+test('fix-cobol applies whole-word rewrite and creates .before-fix backup', async () => {
+    const express = require('express');
+    const os = require('node:os');
+    const http = require('node:http');
+    const fixCobol = require('../src/routes/fix-cobol');
+
+    // Scratch source with a deliberate typo. The target identifier lives
+    // inside a longer one too (PRINT-REX-COUNTER) to prove the whole-word
+    // guard doesn't false-match that.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fix-cobol-'));
+    const src = path.join(tmp, 'TEST.cbl');
+    fs.writeFileSync(src, `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  PRINT-REX-COUNTER PIC 9(4).
+       PROCEDURE DIVISION.
+           MOVE 1 TO PRINT-REX.
+           MOVE 2 TO print-rex.
+           STOP RUN.
+`);
+
+    const conv = {
+        result: {
+            report: {
+                files: [{ path: 'TEST.cbl', source_path: src, java_status: 'COMPILE_FAIL' }]
+            }
+        }
+    };
+    const activeConversions = new Map([['c1', conv]]);
+
+    const app = express();
+    app.use(express.json());
+    fixCobol.mount(app, { activeConversions });
+    const server = app.listen(0);
+    const port = server.address().port;
+
+    const post = (body) => new Promise((resolve, reject) => {
+        const req = http.request({
+            hostname: '127.0.0.1', port, path: '/api/fix-cobol/c1/TEST.cbl',
+            method: 'POST', headers: { 'Content-Type': 'application/json' }
+        }, res => {
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data || '{}') }));
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify(body)); req.end();
+    });
+
+    try {
+        const r = await post({ bad: 'PRINT-REX', suggestion: 'PRINT-REC' });
+        assert.equal(r.status, 200);
+        assert.equal(r.body.ok, true);
+        assert.equal(r.body.replacements, 2, 'two PRINT-REX occurrences replaced (upper + lower case)');
+
+        const updated = fs.readFileSync(src, 'utf-8');
+        assert.match(updated, /MOVE 1 TO PRINT-REC\./, 'upper-case occurrence replaced');
+        assert.match(updated, /MOVE 2 TO PRINT-REC\./, 'lower-case occurrence replaced + normalized');
+        assert.match(updated, /PRINT-REX-COUNTER/,    'longer identifier PRESERVED (whole-word guard)');
+
+        assert.ok(fs.existsSync(src + '.before-fix'), 'backup file created');
+
+        // Bad identifier → 400
+        const bad = await post({ bad: 'has space', suggestion: 'x' });
+        assert.equal(bad.status, 400);
+
+        // Empty-string guards (regex failure)
+        const empty = await post({ bad: '', suggestion: 'PRINT-REC' });
+        assert.equal(empty.status, 400);
+    } finally {
+        server.close();
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 // ─── 18a. parseJcl: STEPLIB / JOBLIB → libraries[] (§14) ────────────────
 // Known gap: DD concatenations (multiple DSN= lines under the same DD
 // name via blank-named continuation lines) are NOT parsed today — the
