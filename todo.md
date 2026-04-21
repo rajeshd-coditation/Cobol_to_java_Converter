@@ -175,7 +175,7 @@ We already have `/api/jcl-analysis`; wire it into the product.
 - [x] **Log rotation.** _Done 2026-04-21. `src/util/logger.js` rotates at 10 MB, keeps webui.log.1 .. .5. Checked on every append (cheap stat)._
 - [x] **Memory hygiene for `activeConversions`.** _Done 2026-04-21. `src/persistence/active-conversions-ttl.js` sweeps every 5 min, evicts completed entries older than 2h. Running conversions never evicted. Disk checkpoint survives; deep-linked users rehydrate on request._
 - [x] **Checkpoint GC.** _Done 2026-04-21. `cleanupOldCheckpoints()` runs once at boot, prunes entries older than 7 days based on the checkpoint's own completedAt/startedAt (not filesystem mtime)._
-- [ ] **`run.sh logs`** command — tail the webui.log.
+- [x] **`run.sh logs`** command — _Done 2026-04-21. `./run.sh logs [N]` tails the webui.log (default 200 lines, follow mode). Graceful "no log yet" message when the server hasn't been started._
 - [x] **Token/accuracy telemetry endpoint.** _Done 2026-04-21. `/api/stats` (src/routes/stats.js) rolls up every in-memory conversion: conversions count, files by status, avg/median accuracy, fail rate (successes / real attempts — skipped statuses excluded from denominator), tokens per conversion + per file + total calls, avg/median duration._
 - [x] **Health endpoint.** _Done 2026-04-21. `/api/health` returns uptime, activeConversions breakdown, AI availability, tmpdir. Safe to expose for k8s liveness probes._
 
@@ -257,10 +257,8 @@ azureAgent.js dropped from 2255 → 53 lines (a pure re-export facade). Full lay
 - Latent bug fixed: 8 `azureConfig` references survived the azure-client extraction and would have thrown ReferenceError on first call; replaced with `isAvailable()` / `getConfig()`.
 - Tests scan azureAgent.js + every file under src/ai/ via `readAllPromptSources()` so prompt-regression assertions stay stable across future splits.
 
-### 22.6 Move or rename `context.md`
-Two INFERRED `rationale_for` edges cite `context.md` as design rationale for real product decisions (Coditation white-labeling, dialog replacement). If `context.md` is living session notes, that's a stability mismatch — specs shouldn't cite scratchpads.
-- [ ] Decide: durable doc → move to `docs/context.md` with a clear "design rationale" header.
-- [ ] Ephemeral → rename to `session-notes.md` and optionally gitignore.
+### 22.6 Move or rename `context.md` — DONE 2026-04-21
+Renamed `context.md` → `session-notes.md`. The file's own header self-identifies as "Living document for picking up work between sessions" — that's scratchpad, not spec. The graphify `rationale_for` citations were INFERRED (the extractor guessed from proximity), not load-bearing. Updated internal self-reference; not gitignored since history is useful.
 
 ### Not worth acting on (recorded for completeness)
 - 22 weakly-connected API endpoints (routes have ≤1 graph edge). Not a bug; SPA calls them via `fetch('/api/…')` strings the extractor can't tie to route handlers. Cosmetic; defer unless we add many more endpoints.

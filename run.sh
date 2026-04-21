@@ -11,6 +11,7 @@ set -euo pipefail
 #   ./run.sh clean        # clean Gradle build artifacts
 #   ./run.sh stop         # stop the running web UI server
 #   ./run.sh status       # check if server is running
+#   ./run.sh logs [N]     # tail the webui.log (default last 200 lines)
 # ──────────────────────────────────────────────
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -126,6 +127,21 @@ clean() {
     info "Clean complete."
 }
 
+# ── Tail the webui log ───────────────────────
+# The file-backed logger writes JSON-per-line to webui.log; this is a
+# convenience wrapper for `tail` that handles both "no log yet" and a
+# custom line count. §17.5.
+logs() {
+    local n="${1:-200}"
+    local LOG="$WEBUI_DIR/webui.log"
+    if [ ! -f "$LOG" ]; then
+        warn "No log file yet at $LOG. Start the server first with './run.sh serve'."
+        return 1
+    fi
+    info "Tailing last $n lines of $LOG (Ctrl-C to stop)"
+    tail -n "$n" -f "$LOG"
+}
+
 # ── Main ─────────────────────────────────────
 check_deps
 
@@ -135,12 +151,13 @@ case "${1:-all}" in
     stop)   stop ;;
     status) status ;;
     clean)  clean ;;
+    logs)   logs "${2:-200}" ;;
     all)
         build
         serve
         ;;
     *)
-        echo "Usage: $0 {build|serve|stop|status|clean|all}"
+        echo "Usage: $0 {build|serve|stop|status|clean|logs|all}"
         exit 1
         ;;
 esac

@@ -22,7 +22,7 @@ The product is being prepared for a **customer / sales demo**, so the UX priorit
 cobol-to-java-converter/
 ├── README.md                # Overview, install, run
 ├── todo.md                  # All work items, including the active redesign
-├── context.md               # ← this file
+├── session-notes.md         # ← this file
 ├── opensource/              # Vendored OpenSourceCobol4j (currently shows as deleted in git status — needs restore)
 └── opensourcecobol4j/       # Note: README references this name, but actual dir is `opensource/`. Naming is inconsistent (todo item).
     └── tools/
