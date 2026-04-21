@@ -33,6 +33,56 @@
  * the patches disabled. The patches are net-positive despite the "too
  * much regex" feel. Revisit when repair convergence improves enough to
  * amortize the retry cost.
+ *
+ * ───── Audit matrix (2026-04-21) ─────────────────────────────────────
+ * Every fix is tagged inline with one of these categories so future
+ * maintainers know whether it's safe to retire:
+ *
+ *   [universal]    — JDK-level correctness. Stays regardless of which
+ *                    model emits the code. Example: import java.math.BigDecimal;
+ *                    when BigDecimal is referenced. Safe to keep forever.
+ *   [ai-specific]  — Patches a mistake a specific model class kept making.
+ *                    Candidate for retirement if prompt tightening makes
+ *                    the mistake stop. Verify with a DISABLE_AUTOFIX A/B
+ *                    before removing.
+ *   [safety]       — Defensive removal / neutering of unsupported
+ *                    constructs (Scanner, package statements) that the
+ *                    single-file compile gate can't handle. Stays as
+ *                    long as the single-file compile path does.
+ *   [locked]       — Has an explicit regression test in fidelity.test.js
+ *                    (test numbers noted). Changes here need the test
+ *                    updated or deleted.
+ *
+ *   Fix  1–2   [universal]  BigDecimal / RoundingMode imports
+ *   Fix  2b    [ai-specific] auto-add throws Exception on try-with-resources I/O methods
+ *   Fix  2c    [ai-specific][locked #14] strip illegal throws on for/while/if/switch/do
+ *   Fix  2d    [ai-specific][locked #15] strip throws IOException from pure-string helpers
+ *   Fix  2e    [ai-specific] propagate throws from callee to caller
+ *   Fix  2f    [ai-specific] strip final from static fields that are later reassigned
+ *   Fix  3–4   [safety]     strip Scanner — single-file compile can't handle stdin
+ *   Fix  6     [ai-specific] synthesize a main() that calls business logic
+ *   Fix  7     [safety]     demote duplicate `public class` to `class`
+ *   Fix  8     [ai-specific] initialize declared-but-unset primitives
+ *   Fix  9–10  [ai-specific] strip final from instance fields assigned later
+ *   Fix 11–14  [universal]  ArrayList/List/Map/HashMap/File I/O imports
+ *   Fix 15     [ai-specific] fix unclosed string literals (basic detection)
+ *   Fix 16     [safety]     pad unbalanced braces at EOF
+ *   Fix 17     [universal]  dedup import statements
+ *   Fix 18–21  [universal]  Arrays/Date/LocalDate/DecimalFormat/NumberFormat/Pattern/Matcher imports
+ *   Fix 22     [safety]     strip package statements (single-file compile)
+ *   Fix 23     [universal]  FileNotFoundException import
+ *   Fix 24     [ai-specific] strip `abstract` on concrete classes
+ *   Fix 25     [universal]  Collections import
+ *   Fix 26     [ai-specific] strip `final` on method parameters
+ *   Fix 27     [universal]  repair common typos (pubic → public, etc.)
+ *   Fix 28–29  [universal]  Optional / Stream imports
+ *   Fix 30     [safety]     collapse ;; → ;
+ *   Fix 31     [universal]  ChronoField import
+ *   Fix 32     [safety]     strip stale Scanner.close() calls (pairs with Fix 3/4)
+ *
+ * Retirement candidates (if future prompt work makes the AI stop emitting
+ * the pattern): 2b, 2e, 2f, 6, 8, 9-10, 24, 26. Keep universal + safety +
+ * locked indefinitely.
  */
 
 function autoFixJavaCode(javaCode) {
@@ -54,8 +104,8 @@ function autoFixJavaCode(javaCode) {
         }
     }
 
-    // Fix 2b: auto-add `throws Exception` to methods that use try-with-
-    // resources for I/O. The implicit close() on BufferedReader etc.
+    // Fix 2b [ai-specific]: auto-add `throws Exception` to methods that
+    // use try-with-resources for I/O. The implicit close() on BufferedReader etc.
     // throws IOException; without the declaration javac fails with
     // "unreported exception IOException; must be caught or declared".
     // Wide-net by design: main()'s try/catch already catches Exception
@@ -80,7 +130,7 @@ function autoFixJavaCode(javaCode) {
         });
     }
 
-    // Fix 2c: strip ILLEGAL `throws` clauses. AI sometimes emits
+    // Fix 2c [ai-specific][locked: test #14]: strip ILLEGAL `throws` clauses. AI sometimes emits
     // `for (...) throws IOException {`, `while (...) throws {`, etc.
     // `throws` is only legal on method signatures. Both the initial
     // converter and the repair agent replicated this mistake, so
@@ -92,7 +142,7 @@ function autoFixJavaCode(javaCode) {
         fixedCode = fixedCode.replace(/\b(else|do)\s+throws\s+[\w.,\s]+(?=\s*\{)/g, '$1');
     }
 
-    // Fix 2d: strip `throws IOException` from pure-string helper methods
+    // Fix 2d [ai-specific][locked: test #15]: strip `throws IOException` from pure-string helper methods
     // that don't do I/O. AI sometimes decorates `static String repeatChar`
     // with `throws IOException` and then callsites like
     // `static final String FIELD = repeatChar(' ', 60);` fail with

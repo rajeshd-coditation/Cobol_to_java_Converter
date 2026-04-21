@@ -19,7 +19,6 @@ Tractable wins. Pick any one and ship.
 
 Good single-session work. Each delivers a coherent feature.
 
-- [ ] **Audit + retire unnecessary `autoFixJavaCode` patches.** For each of the ~32 regex fixes, document the AI mistake it patches + whether the mistake has recurred recently. Retire patches whose tests pass without them after prompt improvements. **A/B data from §decisions below says patches are net positive — don't delete on aesthetics alone.**
 
 ## Later — bigger lifts, need design first
 
