@@ -2366,7 +2366,7 @@ function renderTreeNode(node, parentPath, depth) {
         const fullPath = parentPath ? parentPath + '/' + name : name;
         html += `<div class="tree-folder">
             <div class="tree-folder-label" style="padding-left:${depth * 12}px">
-                <span class="tree-caret"></span>
+                <span class="tree-caret">▾</span>
                 <span class="tree-folder-name">${escapeHtml(name)}</span>
             </div>
             <div class="tree-folder-children">

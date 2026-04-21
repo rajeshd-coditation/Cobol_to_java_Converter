@@ -5398,7 +5398,9 @@ body.theme-light .run-input-compact::placeholder { color: #aaa; }
    ═══════════════════════════════════════════════════════════════════════ */
 #kpiBar.kpi-bar {
     display: grid !important;
-    grid-template-columns: repeat(6, 1fr) auto !important;
+    /* 7 KPI cells (Total, Converted, Success, Avg accuracy, Accuracy spread,
+       LLM tokens, Duration) + auto for Export button = 8 tracks total. */
+    grid-template-columns: repeat(7, 1fr) auto !important;
     gap: 0 !important;
     padding: 16px 20px !important;
     min-height: 72px !important;
@@ -5407,6 +5409,11 @@ body.theme-light .run-input-compact::placeholder { color: #aaa; }
     border: 1px solid #e5e7eb !important;
     border-radius: 12px !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+}
+/* Narrower screens: drop the histogram cell so everything still fits. */
+@media (max-width: 1280px) {
+    #kpiBar.kpi-bar { grid-template-columns: repeat(6, 1fr) auto !important; }
+    #kpiBar #kpiAccuracyDistCell { display: none !important; }
 }
 #kpiBar .kpi {
     text-align: center !important;
@@ -5431,13 +5438,16 @@ body.theme-light .run-input-compact::placeholder { color: #aaa; }
     color: #888 !important;
     text-transform: uppercase !important;
 }
-/* Per-tile colors: dark, readable values on white background */
+/* Per-tile colors: dark, readable values on white background.
+   Order: 1=Total, 2=Converted, 3=Success, 4=Avg accuracy,
+          5=Accuracy spread (histogram cell — no .kpi-value inside),
+          6=LLM tokens, 7=Duration. */
 #kpiBar .kpi:nth-child(1) .kpi-value { color: #374151 !important; } /* total - gray */
 #kpiBar .kpi:nth-child(2) .kpi-value { color: #16a34a !important; } /* converted - green */
 #kpiBar .kpi:nth-child(3) .kpi-value { color: #7c3aed !important; } /* success rate - violet */
 #kpiBar .kpi:nth-child(4) .kpi-value { color: #d97706 !important; } /* accuracy - amber */
-#kpiBar .kpi:nth-child(5) .kpi-value { color: #0284c7 !important; } /* tokens - sky */
-#kpiBar .kpi:nth-child(6) .kpi-value { color: #374151 !important; } /* duration - gray */
+#kpiBar .kpi:nth-child(6) .kpi-value { color: #0284c7 !important; } /* tokens - sky */
+#kpiBar .kpi:nth-child(7) .kpi-value { color: #374151 !important; } /* duration - gray */
 /* Export button */
 #kpiBar .kpi-export-btn {
     color: #555 !important;
@@ -5503,12 +5513,19 @@ body.theme-light .tree-badge.noid { background: #f5f6fa; color: #999; border-col
 body.theme-light .tree-file-name { color: #333 !important; }
 body.theme-light .tree-file.selected .tree-file-name { color: #1a1b2e !important; }
 
-/* Tree caret: visible in both themes */
+/* Tree caret: visible in both themes. The dark-mode default (c-text-mute
+   ~ #8c89a8 on #141230) hit only ~3:1 contrast which is barely visible on
+   bolded folder rows. Bumped to c-text-mute-strong equivalent (#b8b4d8)
+   so the triangle reads clearly against the dark panel. */
 .tree-caret {
     font-size: 10px !important;
-    color: var(--c-text-mute) !important;
+    color: rgba(200, 195, 230, 0.85) !important;
+    width: 12px !important;
+    display: inline-block !important;
+    text-align: center !important;
+    margin-right: 2px !important;
 }
-body.theme-light .tree-caret { color: #999 !important; }
+body.theme-light .tree-caret { color: #555 !important; }
 
 /* ══════════════════════════════════════════════════════════════════
    Platform dialogs & toasts — replace browser-native alert/confirm/prompt
