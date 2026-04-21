@@ -86,8 +86,10 @@ const {
     CHECKPOINT_DIR,
     checkpointPath,
     saveCheckpoint: _persistSaveCheckpoint,
-    loadCheckpoints: _persistLoadCheckpoints
+    loadCheckpoints: _persistLoadCheckpoints,
+    cleanupOldCheckpoints
 } = require('./src/persistence/checkpoint');
+const { startActiveConversionsTTL } = require('./src/persistence/active-conversions-ttl');
 
 // In-memory conversion registry. Routes keep a stable reference.
 const activeConversions = new Map();
@@ -99,6 +101,20 @@ const loadCheckpoints = () => _persistLoadCheckpoints(activeConversions);
 
 const _restoredCount = loadCheckpoints();
 console.log(`   Restored ${_restoredCount} completed conversion(s) from checkpoint`);
+
+// One-shot GC of checkpoint files > 7 days old. Keeps the /tmp directory
+// bounded without a cron — the server itself is the trigger.
+const _gc = cleanupOldCheckpoints();
+if (_gc.deleted > 0) {
+    console.log(`   Pruned ${_gc.deleted} checkpoint(s) older than 7 days (${_gc.scanned} scanned)`);
+}
+
+// Periodic eviction of completed in-memory conversions (§17.3). Disk
+// state survives via the existing checkpoint; users who deep-link back
+// to an evicted conversion will get rehydrated on next request.
+startActiveConversionsTTL(activeConversions, {
+    onEvict: (id) => console.log(`[ttl] Evicted completed conversion ${id} from memory`)
+});
 
 // Glob → RegExp → src/util/glob-regex.js
 const { globToRegex } = require('./src/util/glob-regex');
@@ -1769,6 +1785,7 @@ require('./src/routes/ai-analyze').mount(app, { aiAgent, azureAgent, buildAnalys
 // Mount routes now that AI_PROVIDER / aiAgent / azureAgent are all in scope.
 require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent, activeConversions });
 require('./src/routes/status').mount(app, { activeConversions });
+require('./src/routes/health').mount(app, { activeConversions, AI_PROVIDER, aiAgent, azureAgent });
 
 
 // Start server

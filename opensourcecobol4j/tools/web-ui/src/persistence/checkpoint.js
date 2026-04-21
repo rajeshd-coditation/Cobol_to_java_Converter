@@ -79,9 +79,47 @@ function loadCheckpoints(activeConversions) {
     return activeConversions.size;
 }
 
+/**
+ * Delete checkpoint files older than `maxAgeMs`. Called once at server
+ * boot to keep `$TMPDIR/cobol_converter_checkpoints/` from growing
+ * unbounded — covers §17.4.
+ *
+ * Age is measured from the conversion's `completedAt` (or `startedAt`
+ * for orphans that never finished) rather than the file mtime, so we
+ * don't evict old runs just because the filesystem touched them.
+ *
+ * @param {number} [maxAgeMs=7*24*3600_000]  default: 7 days
+ * @returns {{ scanned: number, deleted: number }}
+ */
+function cleanupOldCheckpoints(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+    const now = Date.now();
+    let scanned = 0, deleted = 0;
+    let files = [];
+    try { files = fs.readdirSync(CHECKPOINT_DIR).filter(f => f.endsWith('.json')); }
+    catch { return { scanned, deleted }; }
+
+    for (const f of files) {
+        scanned++;
+        const full = path.join(CHECKPOINT_DIR, f);
+        let when = 0;
+        try {
+            const data = JSON.parse(fs.readFileSync(full, 'utf-8'));
+            when = data.completedAt || data.startedAt || 0;
+        } catch {
+            // Unreadable file → use mtime so we still clean up corrupt stubs.
+            try { when = fs.statSync(full).mtimeMs; } catch {}
+        }
+        if (when && (now - when) > maxAgeMs) {
+            try { fs.unlinkSync(full); deleted++; } catch {}
+        }
+    }
+    return { scanned, deleted };
+}
+
 module.exports = {
     CHECKPOINT_DIR,
     checkpointPath,
     saveCheckpoint,
-    loadCheckpoints
+    loadCheckpoints,
+    cleanupOldCheckpoints
 };

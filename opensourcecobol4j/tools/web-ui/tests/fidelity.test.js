@@ -461,3 +461,49 @@ test('validateRepoUrl accepts http(s), git@, and local paths', () => {
     assert.equal(r.ok, true, `should accept path: ${goodPath}`);
     assert.equal(r.kind, 'path');
 });
+
+// ─── 19. activeConversions TTL: evicts old completed, keeps running ─────
+test('sweepOnce evicts old completed conversions but never running ones', () => {
+    const { sweepOnce } = require('../src/persistence/active-conversions-ttl');
+    const now = Date.now();
+    const TTL = 60_000; // 1 minute
+    const map = new Map();
+    // Old completed — should evict
+    map.set('old-completed', { status: 'completed', completedAt: now - 5 * 60_000 });
+    // Old but still running — must keep (evicting would orphan the worker's writes)
+    map.set('old-running',   { status: 'running',   startedAt:   now - 5 * 60_000 });
+    // Recent completed — keep
+    map.set('fresh',         { status: 'completed', completedAt: now - 30_000 });
+
+    const evicted = sweepOnce(map, TTL);
+    assert.equal(evicted, 1, 'exactly one old completed entry should evict');
+    assert.ok(!map.has('old-completed'), 'old completed should be gone');
+    assert.ok(map.has('old-running'),    'running must survive regardless of age');
+    assert.ok(map.has('fresh'),          'fresh completed must survive');
+});
+
+// ─── 20. cleanupOldCheckpoints: deletes old JSON files ──────────────────
+test('cleanupOldCheckpoints deletes checkpoints older than maxAgeMs', () => {
+    const os = require('node:os');
+    const { cleanupOldCheckpoints, CHECKPOINT_DIR } = require('../src/persistence/checkpoint');
+    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+
+    const oldId = `ttl-test-old-${Date.now()}`;
+    const freshId = `ttl-test-fresh-${Date.now()}`;
+    const oldPath   = path.join(CHECKPOINT_DIR, `${oldId}.json`);
+    const freshPath = path.join(CHECKPOINT_DIR, `${freshId}.json`);
+    try {
+        // Write one "old" checkpoint (completedAt: 10 days ago) and one "fresh"
+        fs.writeFileSync(oldPath,   JSON.stringify({ status: 'completed', completedAt: Date.now() - 10 * 24 * 3600 * 1000 }));
+        fs.writeFileSync(freshPath, JSON.stringify({ status: 'completed', completedAt: Date.now() - 60_000 }));
+
+        const result = cleanupOldCheckpoints(7 * 24 * 3600 * 1000);
+        assert.ok(result.deleted >= 1, `expected at least 1 deletion, got ${result.deleted}`);
+        assert.ok(!fs.existsSync(oldPath),   'old checkpoint should be deleted');
+        assert.ok(fs.existsSync(freshPath),  'fresh checkpoint must survive');
+    } finally {
+        // Cleanup
+        try { fs.unlinkSync(oldPath); } catch {}
+        try { fs.unlinkSync(freshPath); } catch {}
+    }
+});
