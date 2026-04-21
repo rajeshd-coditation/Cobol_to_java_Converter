@@ -47,6 +47,32 @@ function median(sorted) {
 function mount(app, deps) {
     const { activeConversions } = deps;
 
+    // Minimal list of every in-memory conversion for the Compare
+    // dropdown. Ordered newest-first — same sort the browser already
+    // uses for checkpoint rehydration. Per-entry shape is
+    // intentionally thin (id, status, startedAt, completedAt, inputPath,
+    // file counts) to keep the payload small regardless of how many
+    // conversions are cached.
+    app.get('/api/conversions', (req, res) => {
+        const rows = [];
+        for (const [id, c] of activeConversions) {
+            if (!c) continue;
+            const files = (c.result && c.result.report && c.result.report.files) || [];
+            rows.push({
+                id,
+                status: c.status,
+                startedAt: c.startedAt || null,
+                completedAt: c.completedAt || null,
+                inputPath: c.inputPath || null,
+                fileCount: files.length,
+                successCount: files.filter(f => f.java_status === 'SUCCESS').length,
+                totalTokens: (c.tokens && c.tokens.total) || 0
+            });
+        }
+        rows.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        res.json({ conversions: rows });
+    });
+
     app.get('/api/stats', (req, res) => {
         let completed = 0, inFlight = 0, cancelled = 0;
         let totalFiles = 0;

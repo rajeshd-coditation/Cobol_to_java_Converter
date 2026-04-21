@@ -20,7 +20,6 @@ Tractable wins. Pick any one and ship.
 Good single-session work. Each delivers a coherent feature.
 
 - [ ] **Audit + retire unnecessary `autoFixJavaCode` patches.** For each of the ~32 regex fixes, document the AI mistake it patches + whether the mistake has recurred recently. Retire patches whose tests pass without them after prompt improvements. **A/B data from §decisions below says patches are net positive — don't delete on aesthetics alone.**
-- [ ] **Compare two conversions side-by-side.** Same repo, different AI / prompt versions. Useful for A/B-testing prompt changes (we've done this ad-hoc via `DISABLE_AUTOFIX=1` already). UI: pick two conversion IDs from a dropdown, render per-file accuracy diff + token diff.
 
 ## Later — bigger lifts, need design first
 

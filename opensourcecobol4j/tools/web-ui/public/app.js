@@ -2638,6 +2638,152 @@ window.onConversionComplete = function () {
  * Outside-click and Escape both dismiss. Re-entrant: clicking the cog
  * while the menu is open closes it.
  */
+/**
+ * Compare-two-conversions A/B tool (§21). Opens a modal with two
+ * conversion pickers; fetching /api/browser for both and rendering a
+ * per-file diff shows which files got better / worse / changed status
+ * between the two runs. Useful for A/B testing prompt changes (we've
+ * done this ad-hoc via DISABLE_AUTOFIX already — this productizes it).
+ *
+ * Diff shape per file:
+ *   - status delta: A-status → B-status (colored if changed)
+ *   - accuracy delta: A-acc% → B-acc% (green if up, red if down, muted
+ *     if same)
+ *   - penalty set delta: summarized as a count + first-3 differences
+ *
+ * Files present in only one conversion are shown with the other side
+ * blank + a "only in A/B" marker.
+ */
+async function openCompareConversions() {
+    let modal = document.getElementById('compareConversionsModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'compareConversionsModal';
+        modal.className = 'modal hidden';
+        modal.innerHTML = `
+            <div class="modal-content modal-wide">
+                <div class="modal-header">
+                    <h3>Compare conversions</h3>
+                    <button class="modal-close" onclick="document.getElementById('compareConversionsModal').classList.add('hidden')" aria-label="Close">x</button>
+                </div>
+                <div class="modal-body" style="padding: 1rem 1.25rem;">
+                    <div class="compare-pickers">
+                        <label>A:
+                            <select id="compareConvA"><option value="">— pick a conversion —</option></select>
+                        </label>
+                        <label>B:
+                            <select id="compareConvB"><option value="">— pick a conversion —</option></select>
+                        </label>
+                        <button class="btn-pill btn-sm btn-primary" onclick="runCompareConversions()">Compare</button>
+                    </div>
+                    <div id="compareConvResult" class="compare-result">
+                        <p class="empty-state">Pick two conversions above and click Compare.</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    // Populate both dropdowns from /api/conversions. Newest-first;
+    // format each option with a short repoUrl + file count + timestamp
+    // so picking the right one is unambiguous.
+    try {
+        const r = await fetch('/api/conversions');
+        if (r.ok) {
+            const data = await r.json();
+            const opts = ['<option value="">— pick a conversion —</option>'];
+            for (const c of data.conversions) {
+                const when = c.startedAt ? new Date(c.startedAt).toLocaleString() : c.id;
+                const repo = (c.inputPath || '').split('/').slice(-2).join('/') || c.id;
+                opts.push(`<option value="${c.id}">${when} — ${repo} (${c.successCount}/${c.fileCount})</option>`);
+            }
+            document.getElementById('compareConvA').innerHTML = opts.join('');
+            document.getElementById('compareConvB').innerHTML = opts.join('');
+            // Default A to the current conversion so the common case
+            // (compare current vs previous) is one click.
+            if (currentConversionId) {
+                document.getElementById('compareConvA').value = currentConversionId;
+            }
+        }
+    } catch {}
+    modal.classList.remove('hidden');
+}
+window.openCompareConversions = openCompareConversions;
+
+async function runCompareConversions() {
+    const idA = document.getElementById('compareConvA').value;
+    const idB = document.getElementById('compareConvB').value;
+    const result = document.getElementById('compareConvResult');
+    if (!idA || !idB || idA === idB) {
+        result.innerHTML = '<p class="empty-state">Pick two different conversions.</p>';
+        return;
+    }
+    result.innerHTML = '<p class="empty-state">Loading…</p>';
+    try {
+        const [aResp, bResp] = await Promise.all([
+            fetch(`/api/browser/${idA}`),
+            fetch(`/api/browser/${idB}`)
+        ]);
+        const aData = await aResp.json();
+        const bData = await bResp.json();
+
+        // Index by cobolPath — the stable cross-conversion key.
+        const aByPath = new Map((aData.files || []).map(f => [f.cobolPath, f]));
+        const bByPath = new Map((bData.files || []).map(f => [f.cobolPath, f]));
+        const allPaths = new Set([...aByPath.keys(), ...bByPath.keys()]);
+
+        // Aggregate: how many changed status, accuracy sum delta.
+        let changedStatus = 0, accImproved = 0, accRegressed = 0;
+        const rows = [...allPaths].sort().map(p => {
+            const a = aByPath.get(p);
+            const b = bByPath.get(p);
+            const aStatus = a ? (a.status || '—') : '(missing)';
+            const bStatus = b ? (b.status || '—') : '(missing)';
+            const aAcc = a && typeof a.accuracy === 'number' ? a.accuracy : null;
+            const bAcc = b && typeof b.accuracy === 'number' ? b.accuracy : null;
+            const statusChanged = aStatus !== bStatus;
+            if (statusChanged) changedStatus++;
+            let accDelta = '';
+            if (aAcc != null && bAcc != null) {
+                const d = bAcc - aAcc;
+                if (d > 0) { accDelta = `+${d}`; accImproved++; }
+                else if (d < 0) { accDelta = `${d}`; accRegressed++; }
+                else accDelta = '±0';
+            }
+            const accCls = accDelta.startsWith('+') ? 'up' : accDelta.startsWith('-') ? 'down' : 'flat';
+            return `
+                <tr>
+                    <td class="compare-file">${escapeHtml((p || '').split('/').pop())}</td>
+                    <td class="${statusChanged ? 'compare-changed' : ''}">${escapeHtml(aStatus)}</td>
+                    <td class="${statusChanged ? 'compare-changed' : ''}">${escapeHtml(bStatus)}</td>
+                    <td>${aAcc != null ? aAcc + '%' : '—'}</td>
+                    <td>${bAcc != null ? bAcc + '%' : '—'}</td>
+                    <td class="compare-delta compare-delta-${accCls}">${accDelta}</td>
+                </tr>`;
+        }).join('');
+
+        result.innerHTML = `
+            <div class="compare-summary">
+                ${allPaths.size} file${allPaths.size === 1 ? '' : 's'} compared.
+                <strong>${changedStatus}</strong> changed status,
+                <strong class="compare-delta-up">${accImproved}</strong> accuracy ↑,
+                <strong class="compare-delta-down">${accRegressed}</strong> accuracy ↓.
+            </div>
+            <div class="compare-table-wrap">
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>File</th><th>A status</th><th>B status</th><th>A acc</th><th>B acc</th><th>Δ</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (err) {
+        result.innerHTML = `<p class="empty-state">Compare failed: ${escapeHtml(err.message)}</p>`;
+    }
+}
+window.runCompareConversions = runCompareConversions;
+
 function toggleSettingsMenu(force) {
     const menu = document.getElementById('settingsMenu');
     const btn = document.getElementById('settingsBtn');
