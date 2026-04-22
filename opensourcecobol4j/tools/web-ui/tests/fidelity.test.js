@@ -867,6 +867,76 @@ test('compareRunOutputs prompt: fileName anchor + structured verdict shape', () 
         'return-type contract must enumerate severity values');
 });
 
+test('compareRunOutputs: empty-stdout-with-output-file plumbs file content through to the AI', async () => {
+    // Behavior test, not a prompt-string regex. We stub the transport and
+    // assert that when the caller passes cobolOutputFiles, the output
+    // file's name and content actually reach the model as part of the
+    // user prompt. The SEMANTIC decision ("this is match, not
+    // divergence") is left to the AI at runtime — pinning exact prompt
+    // wording is both brittle and misses the point: what matters is
+    // that the AI has what it needs to make that call.
+    const azureClientPath = require.resolve('../src/ai/azure-client');
+    const compareRunsPath = require.resolve('../src/ai/compare-runs');
+    // Fresh require — don't use a cached module that captured the real
+    // makeOpenAIRequest. Bust both caches so the monkey-patch survives.
+    delete require.cache[azureClientPath];
+    delete require.cache[compareRunsPath];
+
+    const azureClient = require('../src/ai/azure-client');
+    const originalIsAvailable = azureClient.isAvailable;
+    const originalMakeRequest = azureClient.makeOpenAIRequest;
+
+    let captured = null;
+    azureClient.isAvailable = () => true;
+    azureClient.makeOpenAIRequest = async (messages) => {
+        captured = messages;
+        return { choices: [{ message: { content: JSON.stringify({
+            verdict: 'match', severity: 'ok',
+            title: 'Equivalent output (COBOL via PRTLINE)',
+            reasons: ['COBOL wrote PRTLINE; Java printed same rows on stdout.']
+        }) }}] };
+    };
+
+    try {
+        const { compareRunOutputs } = require('../src/ai/compare-runs');
+        const fileBody = 'Financial Report for Year 2026 Month 04\nACCT 10000001 $188.74\nACCT 10000002 $3,188.33\n…totals $23,004,207.47';
+        const result = await compareRunOutputs({
+            cobolOutput: '[no output]',
+            javaOutput:  'Processed 45 records\nTotals = $23,004,207.47',
+            cobolExit: 0, javaExit: 0,
+            fileName: 'CBL0009.cobol',
+            cobolOutputFiles: [{ name: 'PRTLINE', bytes: fileBody.length, contentPreview: fileBody }],
+            javaOutputFiles: []
+        });
+
+        assert.strictEqual(result.verdict, 'match');
+        assert.ok(captured, 'makeOpenAIRequest must have been invoked');
+
+        // Behavior assertion: the user prompt must carry the file's NAME
+        // and CONTENT so the AI can reason about it. How the prompt
+        // labels the section is a prompt-engineering detail we don't
+        // pin down here.
+        const userPrompt = captured.find(m => m.role === 'user').content;
+        assert.ok(userPrompt.includes('PRTLINE'),
+            'output file name must reach the AI');
+        assert.ok(userPrompt.includes('Financial Report') && userPrompt.includes('23,004,207.47'),
+            'output file content must reach the AI so it can compare against Java stdout');
+
+        // And the system prompt must steer the AI in the right direction
+        // for the empty-stdout-plus-file case — checked by a broad keyword
+        // presence rather than an exact string.
+        const systemPrompt = captured.find(m => m.role === 'system').content;
+        assert.ok(/write/i.test(systemPrompt), 'system prompt should mention WRITE/file-output behavior');
+        assert.ok(/PRTLINE|REPORT/i.test(systemPrompt), 'system prompt should cite at least one common output-file name as an example');
+    } finally {
+        azureClient.isAvailable = originalIsAvailable;
+        azureClient.makeOpenAIRequest = originalMakeRequest;
+        // Flush the monkey-patched copy so later tests get clean state.
+        delete require.cache[require.resolve('../src/ai/azure-client')];
+        delete require.cache[require.resolve('../src/ai/compare-runs')];
+    }
+});
+
 test('compareRunOutputs prompt: source + code included for semantic reasoning', () => {
     // Comparator gets both sides of source when available so it can
     // tell "different numeric result but same DISPLAY statement"

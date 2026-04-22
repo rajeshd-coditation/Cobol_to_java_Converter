@@ -50,6 +50,13 @@ const { isAvailable, makeOpenAIRequest } = require('./azure-client');
  * @param {string} [p.javaCode] - optional generated Java source. Same rationale
  *        as cobolSource — lets the comparator verify the Java actually implements
  *        what the COBOL intended, not just that both produced similar strings.
+ * @param {Array<{name:string,bytes:number,contentPreview:string}>} [p.cobolOutputFiles]
+ *        Files the COBOL program wrote via WRITE (PRTLINE, REPORT, REPOUT, etc).
+ *        Many mainframe programs emit zero stdout — all output goes to files.
+ *        When present, the comparator treats file content as the canonical
+ *        COBOL output to compare against Java stdout.
+ * @param {Array<{name:string,bytes:number,contentPreview:string}>} [p.javaOutputFiles]
+ *        Java-side equivalent — files the generated Java wrote during the run.
  * @returns {Promise<{verdict:'match'|'partial'|'diverge', severity:'ok'|'info'|'warning'|'error', title:string, reasons:string[]}>}
  */
 async function compareRunOutputs(p) {
@@ -110,6 +117,18 @@ async function compareRunOutputs(p) {
         '  "COBOL unrunnable locally — Java behavior acceptable" with a' +
         '  reason that a DB2/CICS/IMS-capable environment is needed for a' +
         '  true runtime comparison.\n' +
+        '- COBOL stdout "(empty)" or "[no output]" while the COBOL program' +
+        '  exits 0 and produced a non-empty output FILE (PRTLINE, REPORT,' +
+        '  REPOUT, etc — see the "=== COBOL OUTPUT FILES ===" section below):' +
+        '  this is EXPECTED mainframe behavior. Many COBOL programs only use' +
+        '  WRITE to a file, never DISPLAY. Treat the FILE CONTENT as the' +
+        '  canonical COBOL output for the comparison — diff it against Java' +
+        '  stdout (and/or Java output files if the generated Java also wrote' +
+        '  to files). Do NOT call this "no output" or "divergent" just because' +
+        '  COBOL stdout is empty. If the file content matches the business' +
+        '  intent of what Java printed (record count, totals, formatted rows),' +
+        '  verdict="match". Mention the output file by name in the reasons so' +
+        '  the user knows where to look.\n' +
         '- Treat as DIVERGENT: different numeric results, different control flow' +
         '  where BOTH actually ran, one side simulating (mock/sample/stub) while' +
         '  the other is real business logic, one side loading an external module' +
@@ -139,7 +158,24 @@ async function compareRunOutputs(p) {
         (p.cobolError ? `\n=== COBOL TOOLCHAIN ERROR (compile/run side) ===\n${snippet(p.cobolError)}\n` : '') +
         (p.javaError  ? `\n=== JAVA TOOLCHAIN ERROR (compile/run side) ===\n${snippet(p.javaError)}\n`  : '') +
         `\n=== COBOL OUTPUT ===\n${snippet(p.cobolOutput)}\n\n` +
-        `=== JAVA OUTPUT ===\n${snippet(p.javaOutput)}\n`;
+        `=== JAVA OUTPUT ===\n${snippet(p.javaOutput)}\n` +
+        // Output files — surfaced separately so the model treats them as
+        // CANONICAL OUTPUT for programs that emit via WRITE, not DISPLAY.
+        // Content is already head+tail snippeted by the caller's
+        // listOutputFiles (~8k preview); we cap each to stay under 4k
+        // per file in the prompt.
+        (Array.isArray(p.cobolOutputFiles) && p.cobolOutputFiles.length
+            ? '\n=== COBOL OUTPUT FILES (programs that WRITE to files, not DISPLAY) ===\n' +
+              p.cobolOutputFiles.map(f =>
+                  `--- ${f.name} (${f.bytes} bytes) ---\n${snippet(f.contentPreview || '')}`
+              ).join('\n')
+            : '') +
+        (Array.isArray(p.javaOutputFiles) && p.javaOutputFiles.length
+            ? '\n=== JAVA OUTPUT FILES ===\n' +
+              p.javaOutputFiles.map(f =>
+                  `--- ${f.name} (${f.bytes} bytes) ---\n${snippet(f.contentPreview || '')}`
+              ).join('\n')
+            : '');
 
     try {
         const response = await makeOpenAIRequest(

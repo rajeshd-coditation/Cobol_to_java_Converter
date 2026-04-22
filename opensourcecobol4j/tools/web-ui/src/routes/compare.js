@@ -82,7 +82,13 @@ function mount(app, deps) {
                 javaTimedOut:  !!b.javaTimedOut,
                 fileName:    b.fileName || '',
                 cobolSource: cobolSource || undefined,
-                javaCode:    javaCode    || undefined
+                javaCode:    javaCode    || undefined,
+                // Output files surface programs that emit via WRITE (PRTLINE /
+                // REPORT / etc) rather than DISPLAY — without these the AI
+                // sees "(empty)" COBOL output and misreads the match as
+                // divergence. Accept both shapes clients already use.
+                cobolOutputFiles: Array.isArray(b.cobolOutputFiles) ? b.cobolOutputFiles : undefined,
+                javaOutputFiles:  Array.isArray(b.javaOutputFiles)  ? b.javaOutputFiles  : undefined
             });
             res.json(verdict);
         } catch (err) {

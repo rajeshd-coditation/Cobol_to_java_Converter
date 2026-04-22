@@ -4481,7 +4481,13 @@ async function renderRunDivergenceBanner(data) {
                 // straight from disk — lets the comparator reason about DISPLAY
                 // statements and computations, not just output strings.
                 conversionId: currentConversionId || undefined,
-                relativePath: (currentBrowserFile && currentBrowserFile.cobolPath) || undefined
+                relativePath: (currentBrowserFile && currentBrowserFile.cobolPath) || undefined,
+                // Program-written output files (PRTLINE / REPORT / etc) are
+                // the CANONICAL output for programs that only WRITE to files
+                // and never DISPLAY. Without these the AI sees an empty
+                // stdout and can't judge behavior.
+                cobolOutputFiles: data.cobol.outputFiles || [],
+                javaOutputFiles:  data.java.outputFiles  || []
             })
         });
         verdict = await r.json();
