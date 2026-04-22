@@ -206,7 +206,14 @@ function runJava(result, reportFile, conversion, userInput) {
         }
 
         const tryCompile = (paths) => {
-            const cmd = `javac ${paths.map(p => `"${p}"`).join(' ')}`;
+            // -d work_dir emits class files into the work dir — same place
+            // `java -cp work_dir <class>` looks for them below. Without -d
+            // javac emits next to the .java source (javaDir for the target),
+            // so re-compile produced class files in the WRONG place and
+            // the run kept falling back to the stale work_dir/.class from
+            // the initial conversion. Broke as soon as Fix-with-AI started
+            // deleting the stale class to force a fresh compile.
+            const cmd = `javac -d "${reportFile.work_dir}" ${paths.map(p => `"${p}"`).join(' ')}`;
             try {
                 execSync(cmd, { cwd: reportFile.work_dir, timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
                 return { ok: true };

@@ -4733,6 +4733,33 @@ async function fixSelectedJavaFromRun() {
                 if (diag.ok) renderAccuracyPanel(javaPane, await diag.json());
             } catch {}
         }
+        // Refresh the LEFT tree so the accuracy badge next to the filename
+        // updates in place — otherwise the tree shows the pre-fix score
+        // even though the Java pane + accuracy panel already reflect the
+        // new one. Mirrors what fixSelectedJava (legacy button) does.
+        try {
+            const br = await fetch(`/api/browser/${currentConversionId}`);
+            if (br.ok) {
+                const d2 = await br.json();
+                if (d2 && Array.isArray(d2.files)) {
+                    browserFiles = d2.files;
+                    browserLoaded = true;
+                    renderBrowserTree(browserFiles);
+                    // Preserve selection so the user doesn't lose their place.
+                    const row = document.querySelector(`.tree-file[data-path="${CSS.escape(currentBrowserFile.cobolPath)}"]`);
+                    if (row) row.classList.add('selected');
+                    // Also sync the cached currentBrowserFile accuracy so
+                    // _lastRunContext (if populated by the next Run) carries
+                    // the new score in its metadata.
+                    const fresh = d2.files.find(f => f.cobolPath === currentBrowserFile.cobolPath);
+                    if (fresh) {
+                        currentBrowserFile.accuracy = fresh.accuracy;
+                        currentBrowserFile.penalties = fresh.penalties;
+                    }
+                }
+            }
+        } catch { /* non-fatal */ }
+
         // Clear the stale verdict + banner so the next Run starts fresh.
         _lastRunContext = null;
         document.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
