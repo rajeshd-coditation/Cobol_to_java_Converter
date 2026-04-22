@@ -1906,6 +1906,9 @@ app.post('/api/run/:id/:fileId(*)', async (req, res) => {
                         const uniq = [...new Set(preprocessMods.typosFixed.map(t => `${t.bad}→${t.suggestion}`))];
                         modsParts.push(`typo fix(es): ${uniq.join(', ')}`);
                     }
+                    if (preprocessMods.endifDanglingFixed) {
+                        modsParts.push(`${preprocessMods.endifDanglingFixed} dangling END-IF fix(es)`);
+                    }
                     const modsNote = modsParts.length
                         ? `\n\nPreprocessor mods applied: ${modsParts.join('; ')}.`
                         : '';

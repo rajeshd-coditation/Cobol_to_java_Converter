@@ -1295,6 +1295,63 @@ test('preprocessCobolSource auto-rewrites PRINT-REX, TLIMIT, CURRENT-DATA', () =
     }
 });
 
+// End-to-end sanity: the actual CBL0009-style bug from COBOL Programming
+// Course (TLIMIT referenced, TLIMITED declared, edit-distance 2) must run
+// through the preprocessor AND compile with cobc. This is what /api/run
+// does — pinning it here catches any future regression where the typo
+// fix lands but cobc still rejects because of a different issue.
+test('preprocessCobolSource + cobc end-to-end — TLIMIT fixture compiles', () => {
+    const { execSync } = require('child_process');
+    try {
+        execSync('which cobc', { stdio: 'ignore' });
+    } catch {
+        return; // no cobc on PATH → skip gracefully (matches /api/run short-circuit)
+    }
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'tlimit-e2e-'));
+    try {
+        const src = path.join(tmp, 'TLIMITBUG.cobol');
+        // Minimal reproduction of the CBL0009 shape: field declared as
+        // TLIMITED, code references TLIMIT. Raw source MUST fail cobc;
+        // post-preprocess MUST pass cobc.
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. TLIMITBUG.',
+            '       DATA DIVISION.',
+            '       WORKING-STORAGE SECTION.',
+            '       01  TLIMIT-GROUP.',
+            '           05 TLIMITED PIC S9(9)V99 COMP-3 VALUE ZERO.',
+            '       PROCEDURE DIVISION.',
+            '           COMPUTE TLIMIT = TLIMIT + 1 END-COMPUTE.',
+            '           STOP RUN.'
+        ].join('\n'));
+
+        // 1. Raw source should NOT compile (baseline — confirms the bug).
+        let rawFailed = false;
+        try {
+            execSync(`cobc -x -std=mf -frelax-syntax-checks -Wno-obsolete -o "${tmp}/raw_bin" "${src}"`,
+                { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
+        } catch {
+            rawFailed = true;
+        }
+        assert.ok(rawFailed, 'raw source with TLIMIT bug should fail cobc (baseline check)');
+
+        // 2. Post-preprocess: the preprocessor auto-applies TLIMIT→TLIMITED.
+        const mods = { periodsAdded: 0, typosFixed: [] };
+        const patched = preprocessCobolSource(src, tmp, mods);
+        const rewrite = (mods.typosFixed || []).find(t =>
+            t.bad.toUpperCase() === 'TLIMIT' && t.suggestion.toUpperCase() === 'TLIMITED');
+        assert.ok(rewrite, `expected TLIMIT→TLIMITED rewrite in mods.typosFixed; got ${JSON.stringify(mods.typosFixed)}`);
+
+        // 3. Patched source MUST compile — closing the end-to-end loop.
+        execSync(`cobc -x -std=mf -frelax-syntax-checks -Wno-obsolete -o "${tmp}/fixed_bin" "${patched}"`,
+            { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
+        // Built successfully → the UI's /api/run path now produces cobc output instead of 'TLIMIT not defined'.
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 test('preprocessCobolSource does NOT auto-rewrite HINT_ONLY entries (ACCTREC)', () => {
     const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'typo-hintonly-'));
@@ -1324,6 +1381,75 @@ test('preprocessCobolSource does NOT auto-rewrite HINT_ONLY entries (ACCTREC)', 
         // And no typo fix should be reported for ACCTREC (it's HINT_ONLY).
         const badRewrite = (mods.typosFixed || []).find(t => t.bad.toUpperCase() === 'ACCTREC');
         assert.ok(!badRewrite, 'ACCTREC is HINT_ONLY and must not auto-rewrite');
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+// Dangling END-IF fix — covers the COBOL Programming Course CBL0007
+// IS-STATE-VIRGINIA bug. The IF line ends with `.`, closing the scope,
+// and the next line's END-IF is stranded. Fix: strip the trailing
+// period on the IF line when the next non-comment line begins with
+// END-IF. Narrow by design — won't touch multi-line IF blocks or
+// END-IFs that aren't preceded by a dangling-period IF.
+test('preprocessCobolSource strips dangling period before END-IF (CBL0007 bug)', () => {
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'endif-dangle-'));
+    try {
+        const src = path.join(tmp, 'DANGLE.cobol');
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. DANGLE.',
+            '       DATA DIVISION.',
+            '       WORKING-STORAGE SECTION.',
+            '       01 COUNTER PIC 9(4) VALUE 0.',
+            '       01 STATE-FLAG PIC X VALUE "Y".',
+            '       PROCEDURE DIVISION.',
+            '           IF STATE-FLAG = "Y" ADD 1 TO COUNTER.',
+            '           END-IF.',
+            '           STOP RUN.'
+        ].join('\n'));
+
+        const mods = { periodsAdded: 0, typosFixed: [], endifDanglingFixed: 0 };
+        const patched = preprocessCobolSource(src, tmp, mods);
+        assert.strictEqual(mods.endifDanglingFixed, 1,
+            `expected 1 dangling-END-IF fix; got ${mods.endifDanglingFixed}`);
+        const out = fs.readFileSync(patched, 'utf-8');
+        // The IF line must NO LONGER end with a period — END-IF closes the scope now.
+        assert.match(out, /IF STATE-FLAG = "Y" ADD 1 TO COUNTER\s*$/m,
+            'IF-inline-action line should have its trailing period stripped');
+        assert.match(out, /END-IF\s*\./, 'END-IF should be preserved');
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('preprocessCobolSource leaves canonical END-IF patterns alone (no false positives)', () => {
+    const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'endif-ok-'));
+    try {
+        const src = path.join(tmp, 'OK.cobol');
+        // Correct form: IF line has no terminating period; actions on separate
+        // lines. END-IF properly closes the block. The preprocessor must
+        // leave this untouched.
+        fs.writeFileSync(src, [
+            '       IDENTIFICATION DIVISION.',
+            '       PROGRAM-ID. OK.',
+            '       DATA DIVISION.',
+            '       WORKING-STORAGE SECTION.',
+            '       01 COUNTER PIC 9(4) VALUE 0.',
+            '       PROCEDURE DIVISION.',
+            '           IF COUNTER > 0',
+            '               DISPLAY "positive"',
+            '               ADD 1 TO COUNTER',
+            '           END-IF.',
+            '           STOP RUN.'
+        ].join('\n'));
+
+        const mods = { periodsAdded: 0, typosFixed: [], endifDanglingFixed: 0 };
+        preprocessCobolSource(src, tmp, mods);
+        assert.strictEqual(mods.endifDanglingFixed, 0,
+            'correctly-formed multi-line IF block must not trigger the dangle-fix');
     } finally {
         try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
     }

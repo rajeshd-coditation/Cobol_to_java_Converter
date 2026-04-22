@@ -24,6 +24,14 @@
  *      bugs in public COBOL repos — we auto-apply because the mapping
  *      is vetted and applying it unblocks compile without the user
  *      having to click "Apply typo fix" in the UI first.
+ *   4. Dangling END-IF fix. Specific upstream pattern:
+ *            IF <cond> <inline action>.
+ *            END-IF.
+ *      The period after the inline action closes the IF scope, leaving
+ *      END-IF stranded — cobc errors "unexpected END-IF". Canonical
+ *      example: COBOL Programming Course CBL0007 `IS-STATE-VIRGINIA`
+ *      paragraph. Fix: strip the period on the IF line when the next
+ *      non-comment line begins with END-IF.
  *
  * Returns: patched file path (same as srcPath if no changes were needed).
  *          mods.periodsAdded tracks header-period fixes.
@@ -108,6 +116,42 @@ function preprocessCobolSource(srcPath, outDir, mods) {
                 }
             }
             lines[i] = l;
+        }
+
+        // Second pass: strip the period on a single-line `IF <cond> <action>.`
+        // when the next non-comment non-blank line starts with END-IF. Narrow
+        // by design: matches ONLY when IF and the action live on the same
+        // line (that's the upstream bug shape). Multi-line IF blocks are
+        // untouched because their IF line doesn't end with `.` — they end
+        // with the condition or newline.
+        const looksLikeCommentLine = (s) => {
+            if (!s) return false;
+            if (s.length >= 7 && s[6] === '*') return true; // fixed-format comment
+            if (/^\s*\*>/.test(s)) return true;             // free-format comment
+            return false;
+        };
+        const nextCodeLine = (from) => {
+            for (let j = from + 1; j < lines.length; j++) {
+                const t = lines[j];
+                if (!t || !t.trim()) continue;
+                if (looksLikeCommentLine(t)) continue;
+                return { idx: j, text: t };
+            }
+            return null;
+        };
+        const IF_INLINE_PERIOD_RE = /^(\s*IF\s+\S.*\S)\s*\.\s*$/i;
+        const ENDIF_LINE_RE = /^\s*END-IF\b/i;
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (looksLikeCommentLine(l)) continue;
+            const m = l.match(IF_INLINE_PERIOD_RE);
+            if (!m) continue;
+            const nx = nextCodeLine(i);
+            if (!nx || !ENDIF_LINE_RE.test(nx.text)) continue;
+            // Strip the trailing period on the IF line so END-IF terminates
+            // the scope instead of being dangled behind a closed IF.
+            lines[i] = m[1];
+            mods.endifDanglingFixed = (mods.endifDanglingFixed || 0) + 1;
         }
 
         const patched = lines.join('\n');
