@@ -132,7 +132,19 @@ function mount(app, deps) {
                 cobolOutputFiles: Array.isArray(rc.cobolOutputFiles) ? rc.cobolOutputFiles : undefined,
                 javaOutputFiles:  Array.isArray(rc.javaOutputFiles)  ? rc.javaOutputFiles  : undefined,
                 comparatorVerdict: rc.verdict || null,
-                dependencies: programIdToJavaClass
+                dependencies: programIdToJavaClass,
+                // Called right before the AI request goes out. Lets us ship
+                // the full prompt to the UI as a debugging attachment so the
+                // user can inspect exactly what the model saw when a fix
+                // produces an unexpected result.
+                onPromptReady: ({ systemPrompt, userPrompt }) => {
+                    emit('prompt', {
+                        systemPrompt,
+                        userPrompt,
+                        systemBytes: systemPrompt.length,
+                        userBytes: userPrompt.length
+                    });
+                }
             });
             emit('step', {
                 step: 'ai_done',

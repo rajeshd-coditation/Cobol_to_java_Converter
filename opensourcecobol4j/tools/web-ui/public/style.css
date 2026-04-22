@@ -1426,7 +1426,10 @@ body:not(.theme-light) .fix-java-btn:hover {
     position: fixed;
     top: 0;
     right: 0;
-    width: 380px;
+    /* Match the right activity drawer's width so the two right-docked
+       panels feel consistent. Readability and step-body wrap improve
+       at 460 vs 380 — the prompt-attachment textarea especially. */
+    width: 460px;
     max-width: 92vw;
     height: 100vh;
     background: var(--c-bg-raised, #ffffff);
@@ -1440,6 +1443,61 @@ body:not(.theme-light) .fix-java-btn:hover {
     font-family: 'Inter', system-ui, sans-serif;
 }
 .fix-progress-panel.open { transform: translateX(0); }
+
+/* Prompt-attachment inside the fix-progress panel. Expandable; renders
+   the full system + user prompt exactly as sent to the AI. Used for
+   debugging unexpected fix outcomes. */
+.fix-prompt-attachment {
+    margin: 0 14px 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--c-border, rgba(124, 92, 255, 0.2));
+    border-radius: var(--r-sm, 6px);
+    background: rgba(0, 0, 0, 0.12);
+    font-size: 11.5px;
+}
+body:not(.theme-light) .fix-prompt-attachment {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(124, 92, 255, 0.25);
+}
+.fix-prompt-attachment > summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--c-text-mute, #8c89a8);
+    padding: 2px 0;
+    list-style: none;
+}
+.fix-prompt-attachment > summary::marker { content: ''; }
+.fix-prompt-attachment[open] > summary { color: var(--c-text, #e8e6f2); margin-bottom: 6px; }
+.fix-prompt-section { margin-top: 6px; }
+.fix-prompt-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--c-text-mute, #8c89a8);
+    margin-bottom: 2px;
+}
+.fix-prompt-body {
+    max-height: 280px;
+    overflow: auto;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin: 0;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--c-text, #e8e6f2);
+}
+body.theme-light .fix-prompt-body { background: rgba(0, 0, 0, 0.04); }
+.fix-prompt-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
 body:not(.theme-light) .fix-progress-panel {
     background: #141230;
     border-left-color: rgba(124, 92, 255, 0.40);

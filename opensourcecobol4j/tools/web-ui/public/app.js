@@ -3258,6 +3258,35 @@ function openFixProgressPanel(fileLabel) {
             stepsEl.appendChild(li);
             currentRunningLi = null;
         },
+        // Render the full prompt as a collapsible attachment so the user
+        // can inspect exactly what the model received — key when a fix
+        // produces an unexpected result ("I can see the comparator verdict
+        // made it in; the compileErrors block is empty — now I know why").
+        addPromptAttachment({ systemPrompt, userPrompt, systemBytes, userBytes }) {
+            // Remove any previous attachment on re-fix.
+            panel.querySelectorAll('.fix-prompt-attachment').forEach(n => n.remove());
+            const wrap = document.createElement('details');
+            wrap.className = 'fix-prompt-attachment';
+            const total = (systemBytes || 0) + (userBytes || 0);
+            wrap.innerHTML = `
+                <summary>View prompt sent to AI · ${total.toLocaleString()} chars (${(systemBytes || 0).toLocaleString()} system + ${(userBytes || 0).toLocaleString()} user)</summary>
+                <div class="fix-prompt-section"><div class="fix-prompt-label">System prompt</div><pre class="fix-prompt-body"><code></code></pre></div>
+                <div class="fix-prompt-section"><div class="fix-prompt-label">User prompt</div><pre class="fix-prompt-body"><code></code></pre></div>
+                <div class="fix-prompt-actions"><button class="btn-pill btn-ghost btn-sm" type="button" data-copy="system">Copy system</button><button class="btn-pill btn-ghost btn-sm" type="button" data-copy="user">Copy user</button></div>
+            `;
+            const [sysCode, userCode] = wrap.querySelectorAll('.fix-prompt-body code');
+            if (sysCode)  sysCode.textContent  = systemPrompt || '';
+            if (userCode) userCode.textContent = userPrompt   || '';
+            wrap.querySelectorAll('[data-copy]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const which = e.currentTarget.getAttribute('data-copy');
+                    const txt = which === 'system' ? (systemPrompt || '') : (userPrompt || '');
+                    navigator.clipboard.writeText(txt).then(() => toast('Copied.', 'success')).catch(() => {});
+                });
+            });
+            // Insert after the steps list, before the footer.
+            stepsEl.after(wrap);
+        },
         finalize(final) {
             clearInterval(tickInterval);
             markRunningDone();
@@ -3308,6 +3337,7 @@ async function consumeFixStream(response, panel) {
             try { payload = JSON.parse(data); } catch { /* ignore */ }
             if (!payload) continue;
             if (type === 'step') panel.addStep(payload);
+            else if (type === 'prompt') panel.addPromptAttachment(payload);
             else if (type === 'final') {
                 finalPayload = payload;
                 panel.finalize(payload);
@@ -4576,8 +4606,16 @@ async function fixSelectedJavaFromRun() {
         toast('Run the file first so the AI has something to diagnose.', 'info');
         return;
     }
+    // Disable Run + Interactive while the fix is in flight so the user
+    // doesn't accidentally execute the OLD Java mid-repair (which is what
+    // made the previous fix "not work as expected" — user clicked Run
+    // before the AI had returned the new code).
     const fixBtn = document.getElementById('runFixWithAiBtn');
+    const runBtn = document.getElementById('runBtn');
+    const interactiveBtn = document.getElementById('runInteractiveBtn');
     if (fixBtn) { fixBtn.disabled = true; fixBtn.textContent = 'Fixing…'; }
+    if (runBtn) { runBtn.disabled = true; runBtn.title = 'Fix in progress — wait for repair to complete'; }
+    if (interactiveBtn) { interactiveBtn.disabled = true; interactiveBtn.title = 'Fix in progress'; }
 
     // Reuse the existing fix-progress panel + streaming flow, but pass the
     // extra context through. fixSelectedJava is tuned for the browser-
@@ -4638,6 +4676,9 @@ async function fixSelectedJavaFromRun() {
             fixBtn.textContent = 'Fix with AI';
             fixBtn.classList.add('hidden'); // hide until next Run produces a non-OK verdict
         }
+        // Re-enable Run / Interactive once the fix settles (success or fail).
+        if (runBtn) { runBtn.disabled = false; runBtn.title = ''; }
+        if (interactiveBtn) { interactiveBtn.disabled = false; interactiveBtn.title = 'Open a live terminal for the Java program — walk through menu prompts instead of pre-padding stdin'; }
     }
 }
 window.fixSelectedJavaFromRun = fixSelectedJavaFromRun;

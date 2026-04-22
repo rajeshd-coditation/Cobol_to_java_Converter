@@ -29,7 +29,8 @@ async function fixJavaCode({
     cobolError, javaError,
     cobolOutputFiles, javaOutputFiles,
     comparatorVerdict,
-    dependencies
+    dependencies,
+    onPromptReady
 }) {
     if (!isAvailable()) {
         return { success: false, error: 'Azure AI not configured' };
@@ -160,6 +161,15 @@ async function fixJavaCode({
         javaFilesBlock +
         `=== DEPENDENCIES ===\n${depBlock}\n\n` +
         `Produce the corrected Java file.`;
+
+    // Fire the caller-supplied prompt-ready callback (e.g. the /api/fix-java
+    // SSE emitter) BEFORE the AI call so the UI can render the full prompt
+    // as a debugging attachment even if the AI request hangs or times out.
+    try {
+        if (typeof onPromptReady === 'function') {
+            onPromptReady({ systemPrompt, userPrompt });
+        }
+    } catch { /* non-fatal */ }
 
     try {
         const response = await makeOpenAIRequest(
