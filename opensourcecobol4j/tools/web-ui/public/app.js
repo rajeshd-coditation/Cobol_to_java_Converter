@@ -3055,6 +3055,48 @@ const ICONS_BY_STEP = {
     done: 'DONE',
     skipped: 'SKIP'
 };
+
+// Pick the li className for a timeline entry so the icon color matches
+// the outcome, not just "it happened". Matches the legend palette:
+//   done    → green (success)
+//   error   → red   (failure)
+//   warning → amber (partial / repair-but-still-failing / skipped)
+//   info    → gray  (neutral progress — queued, context_built, ai_call)
+//
+// Inputs:
+//   e.step          canonical step name
+//   e.compileStatus 'ok' | 'fail' (for compile_done / repair_done)
+//   e.error         truthy when the step reported an error
+//   e.label         final-status label (e.g. 'SUCCESS' vs 'COMPILE_FAIL')
+function classifyStep(e) {
+    const err = !!e.error;
+    if (err) return 'error';
+    if (/failed|errored|FAIL/i.test(e.step || '')) return 'error';
+    if (e.compileStatus === 'fail') return 'error';
+    if (e.step === 'skipped' || e.step === 'repair_failed') return 'warning';
+    if (e.step === 'done') {
+        const label = String(e.label || '').toUpperCase();
+        if (label.includes('FAIL') || label.includes('ERROR')) return 'error';
+        if (label.includes('SKIP')) return 'warning';
+        return 'done';
+    }
+    // Successful terminal markers — green
+    if (e.step === 'ai_done' || e.step === 'compile_done' || e.step === 'repair_done') return 'done';
+    // Everything else (queued / context_built / ai_call / compile / accuracy
+    // / repair / stitch / split) — neutral progress in gray.
+    return 'info';
+}
+
+// Icon text follows the status when the step's outcome disagrees with
+// the static ICONS_BY_STEP marker. `OK` + `DONE` flip to `FAIL` when
+// compile/repair actually failed, so the summary line reads correctly.
+function iconFor(e, cls) {
+    const fallback = ICONS_BY_STEP[e.step] || '-';
+    if (cls === 'error' && (e.step === 'compile_done' || e.step === 'repair_done' || e.step === 'done')) {
+        return 'FAIL';
+    }
+    return fallback;
+}
 let _timelinePoll = null;
 function openFileTimelinePanel(relPath, label) {
     if (!currentConversionId || !relPath) return;
@@ -3104,9 +3146,10 @@ function openFileTimelinePanel(relPath, label) {
 
     let seenCount = 0;
     const renderEntry = (e) => {
-        const icon = ICONS_BY_STEP[e.step] || '-';
+        const cls = classifyStep(e);
+        const icon = iconFor(e, cls);
         const li = document.createElement('li');
-        li.className = 'done';
+        li.className = cls;
         const meta = [];
         if (e.ms != null) meta.push(`${e.ms}ms`);
         if (e.tokens != null) meta.push(`${e.tokens} tokens`);
@@ -3202,13 +3245,20 @@ function openFixProgressPanel(fileLabel) {
 
     const startedAt = Date.now();
     let currentRunningLi = null;
+    // Finalize the previously-running step using ITS OWN payload so the
+    // icon / color reflect the actual outcome. Unconditionally marking
+    // every prior step "done/green" was wrong — e.g. the compile step
+    // emits compileStatus='fail' but the next step (repair) would then
+    // flip the FAIL line to an OK checkmark.
     function markRunningDone() {
-        if (currentRunningLi) {
-            currentRunningLi.classList.remove('running');
-            currentRunningLi.classList.add('done');
-            const ico = currentRunningLi.querySelector('.ico');
-            if (ico) ico.textContent = 'OK';
-        }
+        if (!currentRunningLi) return;
+        currentRunningLi.classList.remove('running');
+        let payload = {};
+        try { payload = JSON.parse(currentRunningLi.dataset.payload || '{}'); } catch {}
+        const cls = classifyStep(payload);
+        currentRunningLi.classList.add(cls);
+        const ico = currentRunningLi.querySelector('.ico');
+        if (ico) ico.textContent = iconFor(payload, cls);
     }
     function tickElapsed() {
         const el = panel.querySelector('.elapsed');
@@ -3245,6 +3295,9 @@ function openFixProgressPanel(fileLabel) {
             `;
             li.querySelector('.label').textContent = payload.label || payload.step || '(step)';
             if (meta.length) li.querySelector('.meta').textContent = meta.join(' - ');
+            // Stash the payload so markRunningDone can classify this step
+            // with its OWN outcome when the next step arrives.
+            try { li.dataset.payload = JSON.stringify(payload); } catch {}
             stepsEl.appendChild(li);
             li.scrollIntoView({ block: 'nearest' });
             currentRunningLi = li;

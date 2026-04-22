@@ -1615,8 +1615,16 @@ body:not(.theme-light) .fix-progress-steps li {
 }
 .fix-progress-steps li.running .ico { animation: fpSpin 1s linear infinite; }
 @keyframes fpSpin { to { transform: rotate(360deg); } }
-.fix-progress-steps li.done .ico { color: #22c55e; }
-.fix-progress-steps li.error .ico { color: #ef4444; }
+/* Status palette — mirrors the graph legend so users recognize colors
+   across views. done=green (success), error=red (failure),
+   warning=amber (partial / repair-but-still-failing / skipped),
+   info=muted (neutral progress — queued / context_built / ai_call).
+   Without the info/warning rules these steps inherited the default
+   text color which fought with the .done green. */
+.fix-progress-steps li.done .ico    { color: #22c55e; }
+.fix-progress-steps li.error .ico   { color: #ef4444; }
+.fix-progress-steps li.warning .ico { color: #f59e0b; }
+.fix-progress-steps li.info .ico    { color: var(--c-text-mute, #8c89a8); }
 .fix-progress-footer {
     padding: 12px 18px 16px;
     border-top: 1px solid rgba(124, 92, 255, 0.18);
