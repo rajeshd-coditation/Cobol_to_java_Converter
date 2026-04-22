@@ -702,6 +702,14 @@ function createHandler(deps) {
             // Group files into LEVELS where each level can run in parallel,
             // but levels run sequentially. Level 0 = files with no COBOL deps,
             // Level 1 = files whose deps are all in level 0, etc.
+            //
+            // idOf — relativize a COBOL file's absolute path against inputPath
+            // so it matches the keys used everywhere else (graph nodes,
+            // fileStates, edges all use repo-relative paths). Was previously
+            // a hidden closure capture from the inline buildConversionGraph
+            // before that code moved into src/core/conversion-graph.js;
+            // re-defined here at the call site so the wave loop can use it.
+            const idOf = (p) => path.relative(inputPath, p);
             const cobolAbsSet = new Set(cobolFiles);
             const idOfAbs = new Map();
             for (const p of cobolFiles) idOfAbs.set(p, idOf(p));
@@ -711,6 +719,10 @@ function createHandler(deps) {
             const fileDeps = new Map(); // relPath -> Set of relPaths it CALLs (cobol-only)
             const selectedRelSet = new Set([...cobolFiles].map(p => idOf(p)));
             for (const rel of selectedRelSet) fileDeps.set(rel, new Set());
+            // graphEdges was a closure-captured local of the inline graph
+            // builder before it moved to src/core/conversion-graph.js. The
+            // builder now returns the full graph object; pull edges off it.
+            const graphEdges = (conversion.graph && conversion.graph.edges) || [];
             for (const e of graphEdges) {
                 if (e.kind !== 'call') continue;
                 if (!selectedRelSet.has(e.source) || !selectedRelSet.has(e.target)) continue;
