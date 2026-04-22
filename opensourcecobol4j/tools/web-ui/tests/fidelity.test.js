@@ -1774,6 +1774,22 @@ test('runCompileAndRepair fires repair when fabricated-input fallback is flagged
     }
 });
 
+// Regression guard for two pre-Phase-3 latent ReferenceErrors that only
+// surfaced when a real conversion hit the wave loop with at least one
+// CALL edge: `idOf is not defined` and `graphEdges is not defined`.
+// Both were closure locals of the inline graph builder before the
+// builder moved to src/core/conversion-graph.js. The fix re-defines
+// them at the wave-loop call site. This test pins both definitions
+// so a future cleanup pass doesn't silently delete them again — V8
+// won't flag them statically (the references live inside an async IIFE).
+test('convert-azure wave loop defines idOf + graphEdges at the call site', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'routes', 'convert-azure.js'), 'utf-8');
+    assert.match(src, /const idOf = \(p\) => path\.relative\(inputPath, p\)/,
+        'wave loop must define `idOf` locally — see git log b37f531 for the regression context');
+    assert.match(src, /const graphEdges = \(conversion\.graph && conversion\.graph\.edges\) \|\| \[\]/,
+        'wave loop must derive `graphEdges` from conversion.graph.edges — see git log b37f531');
+});
+
 test('buildContext caps copybook-payload at ~40k chars', () => {
     const { buildContext } = require('../src/routes/convert-azure-helpers');
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ctx-cap-'));
