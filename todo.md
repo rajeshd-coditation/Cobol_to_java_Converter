@@ -24,7 +24,7 @@ Good single-session work. Each delivers a coherent feature.
 
 Each of these is multi-hour and benefits from its own planning pass.
 
-- [ ] **Phase 3 refactor: extract `/api/convert-azure` worker and `/api/run` control flow.** Both are still inline in `server.js` (the ~1,800 remaining lines are almost entirely these two). The worker has shared closure state through a 30-step pipeline; not a mechanical extraction. Write an integration test first (we have `e2e.test.js` scaffolding), then extract `processFile` → `src/core/conversion-worker.js` one stage at a time.
+- [ ] **Phase 3 internal refactor: splinter `processFile` inside `src/routes/convert-azure.js`.** Phase 3a + 3d shipped — `/api/run` is in `src/routes/run.js` (~580 lines), and the `/api/convert-azure` closure moved whole into `src/routes/convert-azure.js` (~1310 lines). server.js is now 361 lines of bootstrap + route mounts. Open: break `processFile` (~600 lines, 30-step pipeline) into focused helpers inside the same file. Low priority — the closure state is contained now; internal refactor can happen when a specific stage needs changing. Decisions-log note: shared closure captures are non-obvious, rush passes produce landmines.
 - [ ] **Phase 5 refactor: finish `public/app.js` split.** Four modules extracted (`helpers`, `dialogs`, `accuracy-panel`, `review-chat`); remaining candidates in rough priority order: browser-tree (~400 lines), run-modal (~240), review-modal (~200), AI-analyzer + baselines (~300), export (~40), session restore (~120). Each needs care with load order and monkey-patched globals.
 - [ ] **Phase 6: CSS cleanup.** `public/style.css` has ~3,400 lines of pre-v2 rules. Audit (2026-04-21) identified **26 safely-dead classes** with zero references across HTML + all JS (the full bundle: `coming-soon`, `review-chat-panel`, `chat-title/messages/actions/tabs`, `post-review-*`, `run-diverge-*`, `logs-details`, `details-tabs/tab/panel/files-list`, `run-output-panel/header`, `drawer-handle`, `run-input-field`, `hero-engine-img`, `theme-dark`, `accent`, `browser-actions`, `history-list-panel`, `toast-body`) spanning ~60 rules across the file. Risk of compound-selector regression means this deserves its own session with visual verification — NOT a mass `sed` delete. Target: 4,927 → ~1,500.
 - [ ] **True PTY for interactive terminal.** Current WS flow (`/ws/run/:id/:fileId`, see `src/routes/run-ws.js`) streams stdin/stdout over `child_process.spawn` pipes — works for COBOL menu programs that just ACCEPT from SYSIN. Programs that check `isatty()` or need ANSI cursor control still see non-interactive pipes. Swap in `node-pty` when there's a real use case (same message protocol, just replace the spawn call).
@@ -80,18 +80,19 @@ Raw AI output compiles on **0/10** files every time — always some flavor of il
 - `autoFixCobolCode` from `aiAgent.js` (only caller was the deleted `/api/ai/fix` endpoint)
 - `/api/azure/status`, `/api/azure/convert`, `/api/azure/scan`, `/api/azure/convert-directory`, `/api/azure/analyze` — all had zero frontend callers and duplicated `/api/convert-azure` / `/api/ai/analyze` with inferior context
 
-### Module layout (2026-04-21 state)
+### Module layout (2026-04-22 state)
 
 ```
-server.js            ~1,820 lines (two inline routes remaining: convert-azure + run)
+server.js            ~360 lines — bootstrap + route mounts only after Phase 3a/3d
 azureAgent.js        53 lines (pure facade)
 src/
   ai/                azure-client, convert-cobol, fix-java, analyze-failure, compare-runs
   core/              auto-fix-java, accuracy-scorer, conversion-graph, compile-gate-local,
                      normalize-class, parse-scanner-output, manual-review, source-integrity
   core/run/          cobol-preprocess, data-file-staging, list-output-files
-  routes/            13 modules (ai-analyze, cancel, compare, convert-local, download,
-                     fix-java, graph, health, jcl, misc, post-review, review, scan-repo,
+  routes/            19 modules (ai-analyze, cancel, compare, convert-azure,
+                     convert-local, download, fix-cobol, fix-java, graph, health, jcl,
+                     misc, post-review, resume, review, run, run-ws, scan-repo,
                      stats, status, unfix-java)
   scan/              cobol-scanner, jcl-parser
   persistence/       checkpoint, active-conversions-ttl
