@@ -18,10 +18,12 @@
  * Functions:
  *   resolveDataAssignments(reportFile, conversion)
  *     Finds what data files this program needs. Prefers the cached
- *     conversion.dataFileLookup map (built during scan), falls back to
- *     re-parsing the source for `SELECT … ASSIGN TO` if the lookup is
- *     missing (older conversions / cancelled runs). Filters out synthetic
- *     ASSIGN names (PRINTER, CONSOLE, RANDOM, DISK, TAPE, STDIN, STDOUT,
+ *     conversion.dataFileLookup map (built during scan). If that's empty
+ *     (conversion rehydrated from an old checkpoint that didn't persist
+ *     the lookup), ensureDataFileLookup rebuilds it on the fly by
+ *     re-parsing the report's JCL entries + matching DSN qualifiers to
+ *     SKIPPED_DATA / SKIPPED_OTHER files. Filters out synthetic ASSIGN
+ *     names (PRINTER, CONSOLE, RANDOM, DISK, TAPE, STDIN, STDOUT,
  *     DISPLAY) that resolve inside libcob rather than to real files.
  *     Returns: [{ expected, matchedPath, variants }]
  *
@@ -51,7 +53,7 @@ function resolveDataAssignments(reportFile, conversion) {
             if (!n || SYNTHETIC_ASSIGN.test(n)) continue;
             expected.add(n);
         }
-        const lookup = conversion.dataFileLookup || {};
+        const lookup = ensureDataFileLookup(conversion);
         const reportFiles = (conversion.result && conversion.result.report && conversion.result.report.files) || [];
         for (const exp of expected) {
             const cached = lookup[exp.toUpperCase()];
@@ -75,6 +77,80 @@ function resolveDataAssignments(reportFile, conversion) {
         }
     } catch { /* non-fatal */ }
     return out;
+}
+
+/**
+ * Rebuild dataFileLookup on the fly when the conversion was rehydrated
+ * from a pre-checkpoint-fields version (conv.dataFileLookup is undefined).
+ * Uses the report's SKIPPED_DATA / SKIPPED_OTHER / SKIPPED_JCL entries,
+ * re-parses any JCL files, and maps each DD name → matching data file.
+ *
+ * Canonical shape of the scan-side lookup (UPPER(DD/ASSIGN) → path). Same
+ * logic as buildConversionGraph's JCL-DD scan — kept in sync if one side
+ * grows a new heuristic, both should.
+ *
+ * Idempotent: caches the result on conv.dataFileLookup so repeat /api/run
+ * calls on the same file don't re-do the work.
+ */
+function ensureDataFileLookup(conversion) {
+    if (conversion.dataFileLookup && Object.keys(conversion.dataFileLookup).length > 0) {
+        return conversion.dataFileLookup;
+    }
+    const lookup = {};
+    const reportFiles = (conversion.result && conversion.result.report && conversion.result.report.files) || [];
+    const inputPath = conversion.inputPath;
+    if (!inputPath) return lookup;
+
+    // Pool of candidate data files — anything the scanner classified as
+    // SKIPPED_DATA or SKIPPED_OTHER. JCL files themselves are excluded.
+    const dataPool = reportFiles
+        .filter(f => f.source_path && (f.java_status === 'SKIPPED_DATA' || f.java_status === 'SKIPPED_OTHER') && fs.existsSync(f.source_path))
+        .map(p => ({
+            path: p.source_path,
+            base: path.basename(p.source_path).toUpperCase(),
+            stem: path.basename(p.source_path, path.extname(p.source_path)).toUpperCase()
+        }));
+
+    // Walk every JCL file the conversion knows about and parse DD → DSN.
+    // parseJcl lives in src/scan/jcl-parser.js — require here (not at
+    // top-of-file) so older conversions without JCL skip the resolve
+    // without needing the module on the fast path.
+    const jclFiles = reportFiles
+        .filter(f => f.source_path && f.java_status === 'SKIPPED_JCL' && fs.existsSync(f.source_path))
+        .map(f => f.source_path);
+    if (jclFiles.length === 0) return (conversion.dataFileLookup = lookup);
+
+    let parseJcl;
+    try { ({ parseJcl } = require('../../scan/jcl-parser')); }
+    catch { return (conversion.dataFileLookup = lookup); }
+
+    for (const jclPath of jclFiles) {
+        try {
+            const parsed = parseJcl(fs.readFileSync(jclPath, 'utf-8'));
+            if (!parsed) continue;
+            for (const step of parsed.steps || []) {
+                for (const dd of step.dds || []) {
+                    if (!dd.name || !dd.dsn) continue;
+                    // Extract the last qualifier of the DSN (strip &SYSUID.)
+                    const qual = dd.dsn
+                        .replace(/^[&]?[A-Z0-9]+\./i, '')
+                        .split('.')
+                        .filter(Boolean)
+                        .pop();
+                    if (!qual) continue;
+                    const candidates = dataPool.filter(e =>
+                        e.base.startsWith(qual.toUpperCase()) || e.stem === qual.toUpperCase()
+                    );
+                    if (candidates.length > 0) {
+                        const upperDD = dd.name.toUpperCase();
+                        if (!lookup[upperDD]) lookup[upperDD] = candidates[0].path;
+                    }
+                }
+            }
+        } catch {}
+    }
+    conversion.dataFileLookup = lookup;
+    return lookup;
 }
 
 function stageDataFilesInto(workDir, dataAssignments) {

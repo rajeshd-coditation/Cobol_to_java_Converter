@@ -47,6 +47,16 @@ function saveCheckpoint(activeConversions, id) {
                                             // slide-out panel — restored across
                                             // restarts so past conversions stay
                                             // inspectable).
+        // Build-time context that /api/run + Fix-with-AI depend on after a
+        // server restart. Previously lost on reboot — a rehydrated
+        // conversion would then fail to stage input files (dataFileLookup)
+        // into the cobc work dir, giving libcob `status = 35 (file does
+        // not exist)` on every run even though the repo has the data.
+        // Similar story for siblingSignatures (next-wave CALL hints) and
+        // jclContext (failure-analyst repo awareness).
+        dataFileLookup: conv.dataFileLookup,
+        jclContext: conv.jclContext,
+        siblingSignatures: conv.siblingSignatures,
         currentFiles: conv.currentFiles,
         inputPath: conv.inputPath,
         outputDir: conv.outputDir,

@@ -944,6 +944,107 @@ test('cleanupOldCheckpoints deletes checkpoints older than maxAgeMs', () => {
     }
 });
 
+// ─── 20b. Checkpoint persists build-time context (dataFileLookup etc) ─
+// A rehydrated conversion must retain the DD→file mapping, JCL context,
+// and sibling-signature cache so /api/run can still stage ACCTREC (or
+// whatever the program's SELECT-ASSIGN targets) into the cobc work dir.
+// Without these, libcob fires status=35 "file does not exist" on every
+// run — even though the repo ships the data. User-reported regression.
+test('saveCheckpoint persists dataFileLookup / jclContext / siblingSignatures', () => {
+    const { saveCheckpoint, loadCheckpoints, CHECKPOINT_DIR, checkpointPath } =
+        require('../src/persistence/checkpoint');
+    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+    const id = `ctxroundtrip-${Date.now()}`;
+    const activeConversions = new Map();
+    activeConversions.set(id, {
+        status: 'completed',
+        completedAt: Date.now(),
+        startedAt: Date.now() - 1000,
+        inputPath: '/tmp/repo',
+        outputDir: '/tmp/out',
+        dataFileLookup: { 'ACCTREC': '/tmp/repo/data/data' },
+        jclContext: { 'CBL0009': [{ jclFile: 'CBL0009J.jcl', stepName: 'STEP1', dds: [] }] },
+        siblingSignatures: { 'ADDAMT': 'public void run(int n)' }
+    });
+    try {
+        saveCheckpoint(activeConversions, id);
+        const raw = JSON.parse(fs.readFileSync(checkpointPath(id), 'utf-8'));
+        assert.deepStrictEqual(raw.dataFileLookup, { 'ACCTREC': '/tmp/repo/data/data' });
+        assert.ok(raw.jclContext && raw.jclContext['CBL0009']);
+        assert.strictEqual(raw.siblingSignatures['ADDAMT'], 'public void run(int n)');
+
+        // Rehydrate — the loadCheckpoints path must keep these fields.
+        const rehydrated = new Map();
+        loadCheckpoints(rehydrated);
+        const loaded = rehydrated.get(id);
+        assert.ok(loaded, 'checkpoint must rehydrate');
+        assert.strictEqual(loaded.dataFileLookup['ACCTREC'], '/tmp/repo/data/data');
+        assert.strictEqual(loaded.siblingSignatures['ADDAMT'], 'public void run(int n)');
+    } finally {
+        try { fs.unlinkSync(checkpointPath(id)); } catch {}
+    }
+});
+
+// ─── 20c. ensureDataFileLookup rebuilds from JCL when lookup is missing ──
+// Covers the "conversion rehydrated from a pre-persisted-lookup
+// checkpoint" path: conversion.dataFileLookup is undefined/empty, but
+// conversion.result.report has SKIPPED_JCL + SKIPPED_DATA/SKIPPED_OTHER
+// entries with real paths. Rebuild on the fly + cache on the conversion
+// so repeat calls skip the work.
+test('resolveDataAssignments rebuilds lookup from JCL when conversion has no cached lookup', () => {
+    const { resolveDataAssignments } = require('../src/core/run/data-file-staging');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'dfl-rebuild-'));
+    try {
+        // Lay out a minimal COBOL Programming Course shape:
+        //   data/data    — the data file the COBOL SELECT ASSIGNs to ACCTREC
+        //   jcl/CBL.jcl  — JCL that maps ACCTREC DD → &SYSUID..DATA
+        //   src/CBL.cbl  — the COBOL source the run is targeting
+        fs.mkdirSync(path.join(tmp, 'data'));
+        fs.mkdirSync(path.join(tmp, 'jcl'));
+        fs.mkdirSync(path.join(tmp, 'src'));
+        const dataPath = path.join(tmp, 'data', 'data');
+        const jclPath  = path.join(tmp, 'jcl', 'CBL.jcl');
+        const cobPath  = path.join(tmp, 'src', 'CBL.cbl');
+        fs.writeFileSync(dataPath, 'fixture bytes');
+        fs.writeFileSync(jclPath,
+            '//CBL0009J JOB\n' +
+            '//STEP1 EXEC PGM=CBL\n' +
+            '//ACCTREC DD DSN=&SYSUID..DATA,DISP=SHR\n');
+        fs.writeFileSync(cobPath,
+            '       IDENTIFICATION DIVISION.\n' +
+            '       PROGRAM-ID. CBL.\n' +
+            '       ENVIRONMENT DIVISION.\n' +
+            '       INPUT-OUTPUT SECTION.\n' +
+            '       FILE-CONTROL.\n' +
+            '           SELECT ACCT-REC ASSIGN TO ACCTREC.\n');
+
+        // conversion WITHOUT dataFileLookup (simulates a rehydrated
+        // pre-fix checkpoint). report has SKIPPED_DATA/SKIPPED_OTHER +
+        // SKIPPED_JCL entries so the rebuild path has something to walk.
+        const conversion = {
+            inputPath: tmp,
+            // dataFileLookup intentionally missing
+            result: { report: { files: [
+                { path: 'data/data', source_path: dataPath, java_status: 'SKIPPED_OTHER' },
+                { path: 'jcl/CBL.jcl', source_path: jclPath, java_status: 'SKIPPED_JCL' }
+            ]}}
+        };
+        const reportFile = { source_path: cobPath, path: 'src/CBL.cbl' };
+
+        const out = resolveDataAssignments(reportFile, conversion);
+        assert.strictEqual(out.length, 1, `expected 1 assignment resolved; got ${JSON.stringify(out)}`);
+        assert.strictEqual(out[0].expected, 'ACCTREC');
+        assert.strictEqual(out[0].matchedPath, dataPath,
+            'ACCTREC should resolve to data/data via the JCL DSN rebuild path');
+
+        // Cache check — second call must hit the cached lookup (not re-parse JCL).
+        assert.ok(conversion.dataFileLookup, 'lookup must be cached on the conversion');
+        assert.strictEqual(conversion.dataFileLookup['ACCTREC'], dataPath);
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 // ─── 21. Resumable conversion — checkpoint + load + resume route ──────
 //
 // The resumability contract has three moving parts that a contributor
