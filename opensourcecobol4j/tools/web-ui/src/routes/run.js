@@ -307,20 +307,26 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
             const execHit = srcText.match(/\bEXEC\s+(SQL|CICS|DLI|MQ)\b/i);
             if (execHit) {
                 const kind = execHit[1].toUpperCase();
+                // One-liner in the COBOL output pane — the UI has limited
+                // vertical space there. Full explanation stays available via
+                // the `detail` field for a click-to-expand affordance.
+                const tool =
+                    kind === 'SQL'  ? 'DB2 precompiler' :
+                    kind === 'CICS' ? 'CICS translator' :
+                    kind === 'DLI'  ? 'IMS DLI preprocessor' :
+                                      'MQ preprocessor';
                 cobolPrecheckSkip = {
                     kind,
-                    message: 'COBOL cannot run locally: requires mainframe preprocessor ('
-                        + (kind === 'SQL'  ? 'DB2 precompiler — `db2 prep` / `dsnhpc`'
-                         : kind === 'CICS' ? 'CICS translator — `DFHECP1$` / `cicstran`'
-                         : kind === 'DLI'  ? 'IMS DLI — `DFSRRC00` load + DLI preprocessor'
-                         :                   'MQ preprocessor')
-                        + ').\n\n'
-                        + 'GnuCOBOL has no preprocessor for ' + kind + ' directives. The Java\n'
-                        + 'conversion below simulates these constructs with TODO markers so\n'
-                        + 'you can read the business logic; the AI verdict above shows the\n'
-                        + 'best available semantic comparison.\n\n'
-                        + 'To run the COBOL for a true runtime compare, deploy on a z/OS or\n'
-                        + 'a mainframe-emulator environment with the required preprocessor.'
+                    message: `COBOL uses EXEC ${kind} — needs ${tool}; can't run locally. Java-only comparison above.`,
+                    detail:
+                        `GnuCOBOL has no preprocessor for ${kind} directives. The generated Java simulates ` +
+                        `these constructs with TODO markers so you can read the business logic; the AI ` +
+                        `verdict shows the best-available semantic comparison.\n\n` +
+                        `For a true runtime compare, deploy on z/OS or a mainframe-emulator environment ` +
+                        `with the required preprocessor (${kind === 'SQL' ? '`db2 prep` / `dsnhpc`' :
+                                                          kind === 'CICS' ? '`DFHECP1$` / `cicstran`' :
+                                                          kind === 'DLI' ? '`DFSRRC00` + DLI preprocessor' :
+                                                                           'MQ tooling'}).`
                 };
             }
         } catch {}
@@ -353,6 +359,9 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
                 ok: false,
                 output: '',
                 error: cobolPrecheckSkip.message,
+                // Expandable long-form — UI renders behind a "Why can't this run?"
+                // toggle so the short `error` line stays scannable.
+                errorDetail: cobolPrecheckSkip.detail,
                 requiresPrecompile: cobolPrecheckSkip.kind
             };
             log('cobol-compile', 'skipped-precompile', {

@@ -517,12 +517,14 @@
                             <div class="pane-header java-header">
                                 <span class="pane-title" id="browserJavaTitle">Generated Java</span>
                                 <button type="button" class="pane-expand-btn" onclick="togglePaneExpand('java')" title="Expand this pane (hide COBOL)" aria-label="Expand Java pane">⤢</button>
+                                <!-- Fix-with-AI moved to the Run panel header so the user
+                                     can trigger it from the same place where the divergence
+                                     verdict surfaces. Legacy #fixJavaBtn element kept below
+                                     as a hidden stub so existing JS handlers (click listener,
+                                     enable/disable toggles in pollStatus) don't throw.
+                                     See runFixWithAiBtn in the Run panel instead. -->
                                 <button type="button" id="fixJavaBtn" class="btn-pill btn-sm fix-java-btn hidden"
-                                        title="Use AI to repair this Java file using the COBOL source, compile errors, run output, and known dependencies as context"
-                                        aria-label="Fix this Java file with AI">
-                                    <span class="fix-java-icon"></span>
-                                    <span class="fix-java-label">Fix with AI</span>
-                                </button>
+                                        aria-hidden="true" tabindex="-1" style="display:none"></button>
                                 <button type="button" id="fixDiffBtn" class="btn-pill btn-sm hidden"
                                         title="Show what changed between the pre-fix and current Java"
                                         aria-label="Show fix diff">View fix diff</button>

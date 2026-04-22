@@ -1512,7 +1512,11 @@ body:not(.theme-light) .fix-progress-panel {
 .fix-progress-header .title {
     font-weight: 600;
     font-size: 14px;
-    flex: 1;
+    flex: 0 0 auto;            /* Don't let flex squash "Fix with AI" onto 3 lines */
+    white-space: nowrap;
+}
+.fix-progress-header .file {
+    flex: 1;                   /* filename column gets the remaining width */
 }
 .fix-progress-header .file {
     font-size: 11px;
@@ -1522,6 +1526,41 @@ body:not(.theme-light) .fix-progress-panel {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 body:not(.theme-light) .fix-progress-header .file { color: #c2c0d8; }
+
+/* Expandable detail under the COBOL output pane when the server attaches
+   errorDetail (e.g. DB2/CICS/IMS precheck). Keeps the main pane terse —
+   users who want the full explanation open the toggle. */
+.run-error-detail {
+    margin: 6px 10px 8px;
+    padding: 6px 8px;
+    border: 1px dashed rgba(124, 92, 255, 0.3);
+    border-radius: var(--r-sm, 6px);
+    font-size: 11px;
+}
+.run-error-detail > summary {
+    cursor: pointer;
+    color: var(--c-text-mute, #8c89a8);
+    font-weight: 500;
+    list-style: none;
+    padding: 2px 0;
+}
+.run-error-detail > summary::marker { content: ''; }
+.run-error-detail[open] > summary { color: var(--c-text, #e8e6f2); margin-bottom: 6px; }
+.run-error-detail-body {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 220px;
+    overflow: auto;
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 4px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--c-text, #e8e6f2);
+}
+body.theme-light .run-error-detail-body { background: rgba(0, 0, 0, 0.04); }
 .fix-progress-close {
     background: transparent;
     border: 0;

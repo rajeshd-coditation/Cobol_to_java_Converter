@@ -4256,13 +4256,29 @@ async function runSelectedFile() {
         const data = await r.json();
         // COBOL pane
         if (data.cobol) {
+            const cobolPane = cobolEl.parentElement;
+            // Drop any previous expandable detail block.
+            cobolPane.querySelectorAll('.run-error-detail').forEach(n => n.remove());
             if (data.cobol.error) {
                 cobolEl.querySelector('code').textContent = data.cobol.error;
-                cobolEl.parentElement.classList.add('failed');
+                cobolPane.classList.add('failed');
                 cobolMeta.textContent = 'unavailable';
+                // Server may attach errorDetail (e.g. DB2/CICS/IMS precheck)
+                // — surface as a collapsible "Why can't this run?" toggle so
+                // the main pane stays scannable.
+                if (data.cobol.errorDetail) {
+                    const dt = document.createElement('details');
+                    dt.className = 'run-error-detail';
+                    dt.innerHTML = `
+                        <summary>Why can't this run?</summary>
+                        <pre class="run-error-detail-body"><code></code></pre>
+                    `;
+                    dt.querySelector('code').textContent = data.cobol.errorDetail;
+                    cobolPane.appendChild(dt);
+                }
             } else {
                 cobolEl.querySelector('code').textContent = data.cobol.output;
-                cobolEl.parentElement.classList.remove('failed');
+                cobolPane.classList.remove('failed');
                 cobolMeta.textContent = `exit ${data.cobol.exitCode} - ${data.cobol.duration}ms`;
             }
             // Render the one-click typo-fix affordance when the server
