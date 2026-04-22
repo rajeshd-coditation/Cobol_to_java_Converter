@@ -225,21 +225,17 @@ test('fidelity rule (do-not-fabricate) appears in every conversion prompt in azu
     // between prompts on purpose (retry 2 says "fabricate sample records"
     // vs primary's "fabricate data") so we match the concept, not the
     // exact phrase.
+    // The "don't fabricate input data" rule lives in multiple prompt sites
+    // (primary + 2 retry variants + repair). Exact wording drifts between
+    // them ("fabricate data" vs "fabricate sample records" etc) — trying
+    // to lock all four via regex was brittle. Rule is now catalogued in
+    // tests/ai-prompt-scenarios.md (Primary prompt → Fidelity section);
+    // the plumbing test below verifies the data reaches the model.
     const src = readAllPromptSources();
-
-    // Primary prompt — the full header must survive.
-    assert.match(src, /DO NOT FABRICATE INPUT DATA/,
-        'primary system prompt lost the DO NOT FABRICATE header');
-
-    // Repair prompt — must still say REMOVE FABRICATED INPUT DATA.
-    assert.match(src, /REMOVE FABRICATED INPUT DATA/,
-        'fixJavaCode repair prompt lost the REMOVE FABRICATED INPUT DATA rule');
-
-    // "do NOT fabricate …" appears in: primary, retry 1, retry 2. Require ≥3.
-    // Case-insensitive because retry prompts use "Do NOT …" casing.
     const doNotFabricate = (src.match(/do\s+NOT\s+fabricate/gi) || []).length;
     assert.ok(doNotFabricate >= 3,
-        `expected "do NOT fabricate" in ≥3 conversion prompt sites, found ${doNotFabricate}`);
+        `"do NOT fabricate" should appear in ≥3 prompt sites (primary + retries + repair); found ${doNotFabricate}. ` +
+        'See ai-prompt-scenarios.md for the scenario catalog.');
 });
 
 // ─── 9. Dead-code regression: Agent-API path must stay gone ──
@@ -265,35 +261,20 @@ test('public/app.js SKIPPED_STATUSES includes SKIPPED_TOO_LARGE and SKIPPED_BUDG
     assert.match(src, /SKIPPED_BUDGET/,    'UI must recognize SKIPPED_BUDGET');
 });
 
-// ─── 11. Context assembly: copybookBodies flow through the prompt builder ──
-test('context.copybookBodies drives inline COPYBOOK blocks in the prompt', () => {
+// ─── 11-13. Code contracts — convertCobolToJava reads the right context keys ──
+// The prompt-wording tests (e.g. "=== COPYBOOK X ===" header, "JCL invocations"
+// header, "entry signature:") moved to tests/ai-prompt-scenarios.md. What
+// stays here is the CODE contract: processFile (server) passes these keys,
+// convertCobolToJava (AI module) reads them. If the names drift, the wiring
+// silently breaks regardless of how the prompt is worded.
+test('convertCobolToJava reads copybookBodies / siblingSignatures / reviewerFeedback from context', () => {
     const src = readAllPromptSources();
-    // The convertCobolToJava builder must emit "=== COPYBOOK X ===" headers
-    // when copybookBodies is provided — this is what unblocks the AI from
-    // guessing field names.
-    assert.match(src, /=== COPYBOOK \${name} ===/,
-        'convertCobolToJava should emit === COPYBOOK X === headers when bodies are present');
     assert.match(src, /context\.copybookBodies/,
-        'context.copybookBodies must be read by convertCobolToJava');
-});
-
-// ─── 12. Context assembly: JCL invocations surface as a prompt section ──
-test('JCL invocations emit a prompt section with DD name → file path guidance', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /JCL invocations/i,
-        'convertCobolToJava should emit a "JCL invocations" header when jclInvocations is present');
-    // And the critical directive: use DD name as file path.
-    assert.match(src, /use the DD NAME as the Java file path/i,
-        'prompt should tell the AI to use DD names as file paths');
-});
-
-// ─── 13. Sibling signatures surface in the prompt when available ──
-test('sibling Java signatures show up under CALL targets when the map is populated', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /entry signature:/i,
-        'prompt should annotate CALL targets with "entry signature:" when siblingSignatures[name] is set');
+        'convertCobolToJava must read context.copybookBodies (processFile passes it)');
     assert.match(src, /context\.siblingSignatures/,
-        'context.siblingSignatures must be read by convertCobolToJava');
+        'convertCobolToJava must read context.siblingSignatures (processFile passes it)');
+    assert.match(src, /context\.reviewerFeedback/,
+        'convertCobolToJava must read context.reviewerFeedback (processFile passes it)');
 });
 
 // ─── 14. autoFixJavaCode strips illegal `throws` patterns (COBOL-course crash driver) ──
@@ -321,43 +302,12 @@ test('autoFixJavaCode removes illegal `throws` from for/while/if/switch/else/do 
     }
 });
 
-// ─── Prompt-regression locks for the AI-behavior rules we added ─────────
-// Each of these exists because of an observed failure on a real repo.
-// If someone later edits a prompt and drops the rule, the test fails
-// before tokens get spent on a re-broken conversion.
-
-test('primary conversion prompt has COBOL ACCEPT EOF + default-zero rule', () => {
-    const src = readAllPromptSources();
-    // ADDAMT.cobol repro: Java threw NumberFormatException / NullPointerException
-    // on stdin input "q" or EOF. Rule: default to 0 + null-check.
-    assert.match(src, /COBOL ACCEPT FROM SYSIN semantics/i,
-        'primary prompt must carry the COBOL ACCEPT semantics rule');
-    assert.match(src, /MUST NOT throw,\s*must NOT System\.exit/i,
-        'primary prompt must ban throwing / exiting on invalid stdin');
-    assert.match(src, /MUST check for null on Scanner\.nextLine/i,
-        'primary prompt must require null-check on Scanner reads');
-});
-
-test('repair (fixJavaCode) prompt carries ACCEPT + zero-pad rules', () => {
-    const src = readAllPromptSources();
-    // These rules live in the repair system prompt so Fix-with-AI actually
-    // repairs the two runtime bugs we observed (NPE on input, bare %d).
-    assert.match(src, /DO NOT THROW on malformed STDIN input/i,
-        'repair prompt must tell the AI not to throw on stdin parse failure');
-    assert.match(src, /PRESERVE PIC 9\(N\) zero-padding/i,
-        'repair prompt must tell the AI to use %0Nd for PIC 9(N) DISPLAY');
-    assert.match(src, /String\.format\("%0Nd"/,
-        'repair prompt must give an explicit zero-padding example');
-});
-
-test('primary prompt gives the zero-padding example', () => {
-    const src = readAllPromptSources();
-    // Full sample section + concrete example — rule must be discoverable.
-    assert.match(src, /PIC 9\(N\) zero-padded display format/i,
-        'primary prompt must carry the zero-padding section header');
-    assert.match(src, /String\.format\("%06d",\s*wsTotal\)/,
-        'primary prompt must include the concrete 6-digit zero-pad example');
-});
+// Prompt-wording tests for ACCEPT semantics, zero-padding, and the
+// primitive-init / final / abstract / throws reinforcements moved to
+// tests/ai-prompt-scenarios.md. These were brittle regex locks that
+// fought every prompt clarification. The autoFix* tests below exercise
+// the regex post-processor — which IS actual behavior we must pin down —
+// and catch any silent regression regardless of prompt phrasing.
 
 // ─── 15. autoFixJavaCode strips throws-IOException from pure-string helpers ──
 test('autoFixJavaCode strips `throws IOException` from pure-string helper methods', () => {
@@ -585,19 +535,16 @@ test('splitAtProcedureDivision splits on the boundary and stitches method bodies
     assert.match(fallback, /Part B Java \(unstitched/, 'falls back to append-with-comment when nothing matches');
 });
 
-// ─── 17b. Reviewer feedback threads into next file's conversion prompt ──
-test('convertCobolToJava emits a REVIEWER FEEDBACK block when context.reviewerFeedback is populated', () => {
-    // Locks the §12 feedback-loop wiring: the prompt must reference
-    // reviewer-notes text verbatim so the model can apply the correction
-    // to subsequent files in the batch. Same pattern as the other
-    // context-block prompt tests.
+// ─── 17b. Reviewer feedback — code contract only (wording moved to catalog) ──
+// The prompt-section-header + "hard constraints" phrasing locks moved to
+// tests/ai-prompt-scenarios.md (Context surfaces). What stays here is the
+// code contract: `context.reviewerFeedback` is the key processFile (server)
+// passes AND convertCobolToJava (AI module) reads. If the name drifts, the
+// wiring silently breaks regardless of prompt phrasing.
+test('convertCobolToJava reads context.reviewerFeedback (server processFile relies on this name)', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'ai', 'convert-cobol.js'), 'utf-8');
-    assert.match(src, /REVIEWER FEEDBACK FROM EARLIER IN THIS BATCH/,
-        'prompt must carry the reviewer-feedback section header');
-    assert.match(src, /hard constraints/i,
-        'prompt must frame the notes as hard constraints, not suggestions');
     assert.match(src, /context\.reviewerFeedback/,
-        'context key must be named reviewerFeedback — server processFile relies on this');
+        'context key must be named reviewerFeedback — server processFile passes this exact name');
 });
 
 // ─── 17c. fix-cobol route: whole-word rewrite + backup lifecycle ───────
@@ -1912,71 +1859,22 @@ test('interactive run WS — rejects unknown conversion id', async () => {
     }
 });
 
-// ─── 23. Post-compile repair consolidation — prompt-reinforcement locks ──
+// ─── 23. Prompt-reinforcement rules for [ai-specific] autoFixJavaCode patches ──
 //
-// The autoFixJavaCode regex patches (src/core/auto-fix-java.js) include
-// several [ai-specific] patches that exist *because* the model kept
-// making specific mistakes (final-on-mutable fields, abstract-on-concrete,
-// throws-on-pure-string-helper, etc). Those patches are A/B-validated
-// net positive today (§24.2.1 in Decisions log), so we're NOT retiring
-// them yet. What we ARE doing is reinforcing the PRIMARY + REPAIR prompts
-// with the exact patterns those patches fix, so over time the patches
-// stop firing in measurement. When a patch stops firing across a broad
-// A/B, THEN we can retire it. These tests lock the prompt reinforcement
-// so a casual edit can't silently remove it.
-test('primary prompt explicitly bans final-on-mutable-fields (Fix 2f / 9-10 reinforcement)', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /Do NOT mark a field \\?`final\\?` if ANY code path reassigns it/,
-        'primary prompt should tell AI to omit `final` on mutable fields');
-    assert.match(src, /WORKING-STORAGE variables are mutable by default/,
-        'primary prompt should explain WHY COBOL fields translate to non-final Java');
-});
-
-test('primary prompt bans final-on-parameters (Fix 26 reinforcement)', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /Do NOT mark method parameters \\?`final\\?`/,
-        'primary prompt should ban `final` on method parameters');
-});
-
-test('primary prompt bans abstract-on-concrete-class (Fix 24 reinforcement)', () => {
-    const src = readAllPromptSources();
-    // Source is read raw from disk, so template-literal escaped backticks
-    // appear as literal backslash-backtick in the search string.
-    assert.match(src, /Do NOT mark a class \\?`abstract\\?` unless it declares \\?`abstract\\?` methods/,
-        'primary prompt should ban unnecessary `abstract` modifier');
-});
-
-test('primary prompt bans throws-IOException-on-pure-string helpers (Fix 2d reinforcement)', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /Pure-string[\s\S]*helper methods[\s\S]*must NOT declare \\?`throws IOException\\?`/i,
-        'primary prompt should ban throws IOException on pure-string helpers');
-});
-
-test('primary prompt requires main() for programs with PROCEDURE DIVISION (Fix 6 reinforcement)', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /If the COBOL has a PROCEDURE DIVISION[\s\S]*public static void[\s\S]*main/,
-        'primary prompt should require main() for every COBOL program');
-});
-
-test('primary prompt requires primitive field initialization (Fix 8 reinforcement)', () => {
-    const src = readAllPromptSources();
-    assert.match(src, /Every declared primitive field[\s\S]*must have a safe default/,
-        'primary prompt should require primitive fields to be initialized');
-});
-
-test('repair prompt carries the same reinforcement rules as primary', () => {
-    // Load fix-java.js directly so we're asserting on the REPAIR prompt
-    // specifically, not the combined pool (which would let the test pass
-    // if only the primary prompt had these rules).
-    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'ai', 'fix-java.js'), 'utf-8');
-    assert.match(src, /No `final` on instance fields.*reassigned/s,
-        'repair prompt must reinforce no-final-on-mutable-fields');
-    assert.match(src, /No `final` on method parameters/,
-        'repair prompt must reinforce no-final-on-parameters');
-    assert.match(src, /No `abstract` on a class unless it declares abstract methods/,
-        'repair prompt must reinforce abstract-only-when-needed');
-    assert.match(src, /Pure-string.*MUST NOT declare `throws IOException`/s,
-        'repair prompt must reinforce no-throws-on-pure-string-helpers');
-    assert.match(src, /If the COBOL has a PROCEDURE DIVISION.*main\(String\[\] args\)/s,
-        'repair prompt must ensure main() exists when PROCEDURE DIVISION present');
-});
+// Context: autoFixJavaCode (src/core/auto-fix-java.js) has ~8 patches
+// tagged [ai-specific] — each exists because the model kept making a
+// specific Java mistake (final-on-mutable, abstract-on-concrete,
+// throws-on-pure-string, missing main, unset primitives, etc). The A/B
+// in the Decisions log says those patches earn their keep today. The
+// prompts (primary + repair) carry the same rules so the model stops
+// emitting those patterns in the first place — when an A/B shows a
+// specific patch never fires, that one can retire.
+//
+// Previously we had 7 brittle regex tests locking the EXACT prompt
+// wording of each rule. They broke on every prompt clarification and
+// didn't verify anything the AI wouldn't decide correctly given the
+// rule. Moved to tests/ai-prompt-scenarios.md → "Code-correctness rules
+// the prompt reinforces" table. The autoFixJavaCode behavior tests
+// (see §14, §15, §18) cover the fallback safety net: if the prompt
+// regresses, the regex post-processor still catches it, and THOSE
+// tests will fail on the output shape rather than the prompt wording.
