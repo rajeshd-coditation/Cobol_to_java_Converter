@@ -5,6 +5,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+    <!-- Resolve every relative asset href/src against the doc root. Needed
+         because /c/<id> (deep-link bookmark for a previous run) is served
+         by the catch-all route — a hard refresh there would otherwise
+         resolve href="style.css" as "/c/style.css" and 404, leaving the
+         page rendered with browser defaults. With <base href="/">, both
+         the landing URL ("/") and deep-link URLs ("/c/12345") produce
+         the same asset resolution. Keeps all existing href / src attrs
+         working without per-line edits. -->
+    <base href="/">
+
     <!-- White-label: Coditation Branding -->
     <title>COBOL to Java Conversion | Coditation</title>
     <meta name="description"
