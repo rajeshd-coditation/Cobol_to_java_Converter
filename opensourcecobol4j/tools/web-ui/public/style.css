@@ -798,6 +798,34 @@ body {
 }
 .graph-legend { display: flex; gap: 14px; flex-wrap: wrap; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--c-text-dim); }
+
+/* Edge-kinds expanded legend: 2-3 column grid where each item carries a
+   one-line description under the bold name. Each cell aligns the swatch
+   with the top of the text so descriptions wrap cleanly. */
+.graph-legend-edges-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px 20px;
+    margin-top: .35rem;
+}
+.graph-legend-edges-grid .legend-item {
+    align-items: flex-start;
+    line-height: 1.35;
+    gap: 8px;
+}
+.graph-legend-edges-grid .legend-item > span:last-child {
+    display: flex; flex-direction: column;
+}
+.graph-legend-edges-grid .legend-item strong {
+    font-size: 11.5px;
+    color: var(--c-text, #e8e6f2);
+    font-weight: 600;
+}
+.graph-legend-edges-grid .legend-desc {
+    font-size: 10.5px;
+    color: var(--c-text-mute, #8c89a8);
+    margin-top: 1px;
+}
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid; }
 .legend-dot.pending  { background: rgba(7, 6, 31, 0.8); border-color: var(--c-text-mute); }
 .legend-dot.active   { background: var(--c-accent); border-color: var(--c-accent-light); box-shadow: 0 0 8px var(--c-accent); }

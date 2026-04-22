@@ -345,19 +345,59 @@
                         </div>
                         <details class="graph-legend-edges" style="margin-top: .35rem;">
                             <summary style="cursor: pointer; font-size: .78rem; color: var(--text-muted, #888);">Edge &amp; node kinds</summary>
-                            <div class="graph-legend" style="margin-top: .35rem; flex-wrap: wrap; gap: .5rem .9rem;">
-                                <span class="legend-item"><span class="legend-edge" style="background:#8077c7;color:#8077c7;"></span>CALL</span>
-                                <span class="legend-item"><span class="legend-edge" style="background:#3b82f6;color:#3b82f6;"></span>COPY</span>
-                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#b45309;"></span>SELECT / data</span>
-                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#94a3b8;"></span>CALL — external</span>
-                                <span class="legend-item"><span class="legend-edge legend-dotted" style="color:#2563eb;"></span>SQL INCLUDE</span>
-                                <span class="legend-item"><span class="legend-edge" style="background:#7c3aed;color:#7c3aed;"></span>CICS LINK</span>
-                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#7c3aed;"></span>CICS XCTL</span>
-                                <span class="legend-item"><span class="legend-edge legend-dotted" style="color:#7c3aed;"></span>CICS SEND MAP</span>
-                                <span class="legend-item"><span class="legend-edge legend-dashed" style="color:#14b8a6;"></span>IMS DLI</span>
-                                <span class="legend-item"><span class="legend-edge-shape" style="background:#6b7280;transform:rotate(45deg);"></span>missing external</span>
-                                <span class="legend-item"><span class="legend-edge-shape legend-shape-rect" style="background:#7c3aed;"></span>BMS map</span>
-                                <span class="legend-item"><span class="legend-edge-shape legend-shape-hex" style="background:#0f766e;"></span>IMS PCB</span>
+                            <!-- Each item: swatch + bold name + one-line plain-language
+                                 description so the legend explains itself without
+                                 needing a separate doc. Stacks vertically when there's
+                                 room; collapses to wrap on narrow viewports. -->
+                            <div class="graph-legend graph-legend-edges-grid">
+                                <span class="legend-item">
+                                    <span class="legend-edge" style="background:#8077c7;color:#8077c7;"></span>
+                                    <span><strong>CALL</strong><span class="legend-desc">Source CALLs target as a subroutine — both convert.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge" style="background:#3b82f6;color:#3b82f6;"></span>
+                                    <span><strong>COPY</strong><span class="legend-desc">Source COPYs target copybook (textual include of field defs).</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dashed" style="color:#b45309;"></span>
+                                    <span><strong>SELECT / data</strong><span class="legend-desc">Source reads/writes target data file via SELECT-ASSIGN.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dashed" style="color:#94a3b8;"></span>
+                                    <span><strong>CALL — external</strong><span class="legend-desc">CALL target is outside this repo (system util, vendor lib).</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dotted" style="color:#2563eb;"></span>
+                                    <span><strong>SQL INCLUDE</strong><span class="legend-desc">EXEC SQL INCLUDE — pulls in DB2 structures (SQLCA etc).</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge" style="background:#7c3aed;color:#7c3aed;"></span>
+                                    <span><strong>CICS LINK</strong><span class="legend-desc">EXEC CICS LINK — call another transaction, then return.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dashed" style="color:#7c3aed;"></span>
+                                    <span><strong>CICS XCTL</strong><span class="legend-desc">EXEC CICS XCTL — transfer control (no return to caller).</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dotted" style="color:#7c3aed;"></span>
+                                    <span><strong>CICS SEND MAP</strong><span class="legend-desc">Source sends/receives target BMS terminal screen.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge legend-dashed" style="color:#14b8a6;"></span>
+                                    <span><strong>IMS DLI</strong><span class="legend-desc">IMS database call via PCB — referenced PCB in the database.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge-shape" style="background:#6b7280;transform:rotate(45deg);"></span>
+                                    <span><strong>missing external</strong><span class="legend-desc">Referenced program isn't in this repo — diamond placeholder.</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge-shape legend-shape-rect" style="background:#7c3aed;"></span>
+                                    <span><strong>BMS map</strong><span class="legend-desc">CICS terminal screen layout (.bms / MAPSET).</span></span>
+                                </span>
+                                <span class="legend-item">
+                                    <span class="legend-edge-shape legend-shape-hex" style="background:#0f766e;"></span>
+                                    <span><strong>IMS PCB</strong><span class="legend-desc">IMS Program Communication Block — DBD reference.</span></span>
+                                </span>
                             </div>
                         </details>
                     </div>

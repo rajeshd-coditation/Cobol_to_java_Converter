@@ -37,13 +37,28 @@
                     id: `${e.source}__${e.target}__${e.kind}`,
                     source: e.source,
                     target: e.target,
-                    kind: e.kind
+                    kind: e.kind,
+                    via: e.via || null
                 },
                 classes: e.kind
             });
         }
         return elements;
     }
+
+    // Friendly labels for edge `kind`s. The internal kind strings come from
+    // src/core/conversion-graph.js — keep the dictionary in sync if a new
+    // edge type is added there. Anything unknown falls back to the raw string.
+    const EDGE_KIND_LABELS = {
+        'call':          { label: 'CALL',           desc: 'Source CALLs target as a subroutine.' },
+        'call-external': { label: 'CALL (external)', desc: 'Source CALLs a program outside this conversion.' },
+        'copy':          { label: 'COPY',            desc: 'Source COPYs the target copybook (textual include).' },
+        'sql-include':   { label: 'EXEC SQL INCLUDE', desc: 'Source EXEC SQL INCLUDEs target as a copybook.' },
+        'cics':          { label: 'CICS LINK/XCTL',  desc: 'Source transfers control to target via CICS.' },
+        'cics-map':      { label: 'CICS SEND MAP',   desc: 'Source sends/receives target BMS map.' },
+        'ims':           { label: 'IMS DLI',         desc: 'Source uses target as an IMS DLI PCB.' },
+        'data':          { label: 'SELECT/ASSIGN',   desc: 'Source reads/writes the target data file (via SELECT-ASSIGN).' }
+    };
 
     function styleSheet() {
         return [
@@ -435,12 +450,20 @@
                 const errLine = extra.error
                     ? `<div class="tip-reason tip-error" style="color:#f87171;">${String(extra.error).slice(0, 180)}</div>`
                     : '';
+                // Skip reason (set by /api/graph buildFileMeta when the
+                // file's java_status starts with SKIPPED_) — surfaces the
+                // SPECIFIC skip cause so a user hovering a gray node sees
+                // why it didn't convert, not just that it was skipped.
+                const skipLine = (stateClass === 'skipped' && extra.skipReason)
+                    ? `<div class="tip-reason" style="color:#a78bfa;">Skipped: ${extra.skipReason}</div>`
+                    : '';
                 tip.innerHTML = `
                     <div class="tip-name">${d.label || d.id}</div>
                     <div class="tip-row"><span>Type</span><span>${d.type || ''}</span></div>
                     <div class="tip-row"><span>Status</span><span class="tip-state ${stateClass}">${stateClass.replace('_', ' ')}</span></div>
                     ${duration ? `<div class="tip-row"><span>Duration</span><span>${duration}</span></div>` : ''}
                     ${accuracy ? `<div class="tip-row"><span>Accuracy</span><span>${accuracy}</span></div>` : ''}
+                    ${skipLine}
                     ${errLine}
                     ${d.reason ? `<div class="tip-reason">${d.reason}</div>` : ''}
                 `;
@@ -468,6 +491,40 @@
             });
         }
         cy.on('mousemove', 'node', evt => {
+            const tip = document.getElementById('graphTooltip');
+            if (!tip) return;
+            const orig = evt.originalEvent;
+            tip.style.left = (orig.pageX + 14) + 'px';
+            tip.style.top  = (orig.pageY + 14) + 'px';
+        });
+
+        // Edge tooltip — hover any edge to see its kind, source→target, and
+        // (for data edges) the original DD/file name from the COBOL SELECT-
+        // ASSIGN. The tip reuses the node tooltip element + CSS for visual
+        // consistency.
+        cy.on('mouseover', 'edge', evt => {
+            const tip = document.getElementById('graphTooltip');
+            if (!tip) return;
+            const d = evt.target.data();
+            const srcNode = cy.getElementById(d.source);
+            const tgtNode = cy.getElementById(d.target);
+            const srcLabel = (srcNode && srcNode.data('label')) || d.source;
+            const tgtLabel = (tgtNode && tgtNode.data('label')) || d.target;
+            const kindMeta = EDGE_KIND_LABELS[d.kind] || { label: d.kind, desc: '' };
+            tip.innerHTML = `
+                <div class="tip-name">${kindMeta.label}</div>
+                <div class="tip-row"><span>From</span><span>${srcLabel}</span></div>
+                <div class="tip-row"><span>To</span><span>${tgtLabel}</span></div>
+                ${d.via ? `<div class="tip-row"><span>via</span><span>${d.via}</span></div>` : ''}
+                ${kindMeta.desc ? `<div class="tip-reason">${kindMeta.desc}</div>` : ''}
+            `;
+            tip.classList.add('visible');
+        });
+        cy.on('mouseout', 'edge', () => {
+            const tip = document.getElementById('graphTooltip');
+            if (tip) tip.classList.remove('visible');
+        });
+        cy.on('mousemove', 'edge', evt => {
             const tip = document.getElementById('graphTooltip');
             if (!tip) return;
             const orig = evt.originalEvent;

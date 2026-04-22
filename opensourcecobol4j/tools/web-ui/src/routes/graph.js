@@ -48,13 +48,33 @@ function mount(app, deps) {
                 }
             }
         }
-        // Last-run stdout/stderr error summary from any failed report entries.
+        // Last-run stdout/stderr error summary + java_status passthrough so
+        // the UI's tooltip can distinguish a "skipped because too large"
+        // node from a "skipped: no PROGRAM-ID" node from a "skipped:
+        // copybook" node — the bare 'skipped' fileState doesn't carry that
+        // distinction. Friendly skipReason maps the SKIPPED_* status code
+        // to a one-liner the user can read without consulting the report.
+        const SKIP_REASONS = {
+            'SKIPPED_NO_ID':            'no PROGRAM-ID — looks like a copybook fragment',
+            'SKIPPED_COPYBOOK':         'copybook (.cpy) — included by reference, not converted standalone',
+            'SKIPPED_TOO_LARGE':        'source exceeds the single-pass char cap',
+            'SKIPPED_BUDGET':           'token budget exhausted before this file',
+            'SKIPPED_INCOMPLETE_SOURCE':'source looks truncated — would force the AI to fabricate',
+            'SKIPPED_CANCELLED':        'user cancelled the run before this file',
+            'SKIPPED_JCL':              'JCL — orchestration metadata, not converted',
+            'SKIPPED_DATA':             'data file — input record fixture, not converted',
+            'SKIPPED_OTHER':            'unrecognized file type'
+        };
         const files = (conversion.result && conversion.result.report && conversion.result.report.files) || [];
         for (const f of files) {
             if (!f || !f.path) continue;
             const m = meta[f.path] = meta[f.path] || { calls: 0, copies: 0, jcl: 0 };
             if (!m.error && f.error) m.error = String(f.error).slice(0, 120);
             if (m.accuracy == null && typeof f.conversionAccuracy === 'number') m.accuracy = f.conversionAccuracy;
+            if (f.java_status) m.javaStatus = f.java_status;
+            if (f.java_status && f.java_status.startsWith('SKIPPED_')) {
+                m.skipReason = SKIP_REASONS[f.java_status] || f.java_status.slice(8).toLowerCase().replace(/_/g, ' ');
+            }
         }
         return meta;
     }
