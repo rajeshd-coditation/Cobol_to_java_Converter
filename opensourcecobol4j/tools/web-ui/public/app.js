@@ -5561,9 +5561,12 @@ let currentPhase = 'input';
 let completedPhases = new Set();
 
 function setPhase(phase) {
-    // Mark all previous phases as completed
+    // Mark all previous phases as completed; un-mark any phase at or
+    // after the new one so going BACKWARDS (e.g. resetSession() →
+    // 'input') doesn't leave Convert/Review/Results visually completed.
     const idx = PHASES.indexOf(phase);
     for (let i = 0; i < idx; i++) completedPhases.add(PHASES[i]);
+    for (let i = idx; i < PHASES.length; i++) completedPhases.delete(PHASES[i]);
     currentPhase = phase;
     updateStepper();
     updatePhaseVisibility();
