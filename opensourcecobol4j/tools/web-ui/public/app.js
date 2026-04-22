@@ -1348,8 +1348,8 @@ function updateErrorList(items) {
                 </div>
                 <div class="file-actions">
                 ${path ? `
-                    <button class="icon-btn ai-btn" title="Analyze with AI" onclick="analyzeWithAI('${escapedPath}', '${escapedWorkDir}', '${escapedErrorType}', '${displayName}')">
-                         Fix with AI
+                    <button class="icon-btn ai-btn" title="Analyze this failure with AI" onclick="analyzeWithAI('${escapedPath}', '${escapedWorkDir}', '${escapedErrorType}', '${displayName}')">
+                         Analyze with AI
                     </button>
                 ` : ''}
                 ${workDir ? `

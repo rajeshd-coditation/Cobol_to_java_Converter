@@ -25,6 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { normalizeClassName } = require('../core/normalize-class');
 
 function mount(app, deps) {
     const { activeConversions, azureAgent } = deps;
@@ -109,10 +110,43 @@ function mount(app, deps) {
                 } catch {}
             }
 
+            // Richer context the repair agent was missing: structural graph
+            // edges involving THIS file, the sibling-signature cache built
+            // during the initial conversion, and any JCL invocations of this
+            // program. Without these the repair sees only the PROGRAM-ID map
+            // and has to guess everything else.
+            const relatedEdges = [];
+            const fileEdges = (conversion.graph && conversion.graph.edges) || [];
+            for (const e of fileEdges) {
+                if (!e || !e.source || !e.target) continue;
+                if (e.source === entry.path || e.target === entry.path) {
+                    relatedEdges.push({
+                        source: e.source, target: e.target, kind: e.kind,
+                        via: e.via || null
+                    });
+                }
+            }
+            const siblingSignatures = conversion.siblingSignatures || {};
+            const jclContext = conversion.jclContext || {};
+            const baseUp = path.basename(entry.source_path, path.extname(entry.source_path)).toUpperCase();
+            // PROGRAM-ID of the target file (may differ from basename).
+            let pidUp = null;
+            try {
+                const pm = cobolSource.match(programIdRe);
+                if (pm) pidUp = pm[1].toUpperCase();
+            } catch {}
+            const jclInvocations = [
+                ...(jclContext[baseUp] || []),
+                ...(pidUp && pidUp !== baseUp ? (jclContext[pidUp] || []) : [])
+            ];
+
             emit('step', {
                 step: 'context_built',
                 label: 'Context ready — calling AI repair agent',
                 dependencies: Object.keys(programIdToJavaClass).length,
+                edges: relatedEdges.length,
+                siblingSigs: Object.keys(siblingSignatures).length,
+                jclInvocations: jclInvocations.length,
                 hasRunOutput: !!(runCache.cobolOutput || runCache.javaOutput)
             });
             const tAI = Date.now();
@@ -133,6 +167,9 @@ function mount(app, deps) {
                 javaOutputFiles:  Array.isArray(rc.javaOutputFiles)  ? rc.javaOutputFiles  : undefined,
                 comparatorVerdict: rc.verdict || null,
                 dependencies: programIdToJavaClass,
+                graphEdges: relatedEdges,
+                siblingSignatures,
+                jclInvocations,
                 // Called right before the AI request goes out. Lets us ship
                 // the full prompt to the UI as a debugging attachment so the
                 // user can inspect exactly what the model saw when a fix
@@ -169,7 +206,15 @@ function mount(app, deps) {
             if (!fs.existsSync(backupPath)) {
                 try { fs.copyFileSync(entry.java_path, backupPath); } catch {}
             }
-            fs.writeFileSync(entry.java_path, fix.javaCode, 'utf-8');
+            // Normalize class name — the repair agent sometimes renames
+            // `public class Foo` to `FooBugfix` / `FooFixed` / etc. javac
+            // then writes `FooBugfix.class` but `java -cp workDir Foo`
+            // (what /api/run invokes) fails with "Could not find or load
+            // main class Foo". Same helper the initial conversion uses.
+            const javaClassName = path.basename(entry.java_path, '.java');
+            const baseName = path.basename(entry.source_path, path.extname(entry.source_path));
+            const repaired = normalizeClassName(fix.javaCode, javaClassName, baseName);
+            fs.writeFileSync(entry.java_path, repaired, 'utf-8');
             // Also update the per-file work_dir copy — /api/run compiles
             // FROM there, not from javaDir. Without this, fixes appear to
             // land (javaDir has the new code, Java pane refreshes, accuracy
@@ -179,7 +224,7 @@ function mount(app, deps) {
             // showing the stale formatPIC9_7V99 output.
             if (entry.work_dir) {
                 const workCopy = path.join(entry.work_dir, path.basename(entry.java_path));
-                try { fs.writeFileSync(workCopy, fix.javaCode, 'utf-8'); } catch {}
+                try { fs.writeFileSync(workCopy, repaired, 'utf-8'); } catch {}
                 // Drop stale .class too so the next javac run doesn't use
                 // the old bytecode against a changed source (rare but
                 // possible if javac fails mid-repair).
@@ -196,7 +241,7 @@ function mount(app, deps) {
             }
 
             try {
-                const acc = azureAgent.analyzeConversionAccuracy(cobolSource, fix.javaCode);
+                const acc = azureAgent.analyzeConversionAccuracy(cobolSource, repaired);
                 if (acc && typeof acc.accuracy === 'number') {
                     entry.conversionAccuracy = acc.accuracy;
                     entry.accuracyDetails = acc.details || [];
@@ -252,7 +297,7 @@ function mount(app, deps) {
             const payload = {
                 success: true,
                 applied: true,
-                newJavaCode: fix.javaCode,
+                newJavaCode: repaired,
                 backupPath: path.basename(backupPath),
                 newAccuracy: entry.conversionAccuracy,
                 compileStatus,

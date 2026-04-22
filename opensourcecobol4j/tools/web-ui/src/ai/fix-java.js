@@ -30,6 +30,9 @@ async function fixJavaCode({
     cobolOutputFiles, javaOutputFiles,
     comparatorVerdict,
     dependencies,
+    graphEdges,
+    siblingSignatures,
+    jclInvocations,
     onPromptReady
 }) {
     if (!isAvailable()) {
@@ -149,6 +152,27 @@ async function fixJavaCode({
         (cobolError ? `=== COBOL RUNTIME / COMPILE ERROR ===\n${snippet(cobolError, 800)}\n\n` : '') +
         (javaError  ? `=== JAVA RUNTIME / COMPILE ERROR ===\n${snippet(javaError, 800)}\n\n`   : '');
 
+    // Graph edges involving this file tell the AI which CALL / COPY /
+    // data / JCL targets it depends on — so the repair doesn't lose a
+    // relationship the initial conversion got right. Sibling signatures
+    // give real method shapes for CALLs the AI might otherwise re-stub.
+    // JCL invocations surface DD-name → file-path mappings.
+    const edgesBlock = (Array.isArray(graphEdges) && graphEdges.length)
+        ? '=== DEPENDENCY GRAPH (edges touching this file) ===\n' +
+          graphEdges.slice(0, 40).map(e => `  ${e.source} --${e.kind}--> ${e.target}${e.via ? ' (via ' + e.via + ')' : ''}`).join('\n') + '\n\n'
+        : '';
+    const sigsBlock = (siblingSignatures && typeof siblingSignatures === 'object' && Object.keys(siblingSignatures).length)
+        ? '=== SIBLING CLASS SIGNATURES (use these exact signatures for CALLs) ===\n' +
+          Object.entries(siblingSignatures).slice(0, 40).map(([name, sig]) => `  ${name}: ${sig}`).join('\n') + '\n\n'
+        : '';
+    const jclBlock = (Array.isArray(jclInvocations) && jclInvocations.length)
+        ? '=== JCL INVOCATIONS OF THIS PROGRAM ===\n' +
+          jclInvocations.slice(0, 10).map(inv => {
+              const ddsText = (inv.dds || []).map(d => `${d.name}${d.dsn ? '=' + d.dsn : ''}${d.sysout ? '(SYSOUT)' : ''}`).join(', ');
+              return `  ${inv.jclFile} step ${inv.stepName}${ddsText ? ' — DDs: ' + ddsText : ''}`;
+          }).join('\n') + '\n\n'
+        : '';
+
     const userPrompt =
         `=== ORIGINAL COBOL ===\n${cobolSource}\n\n` +
         `=== CURRENT JAVA (needs fixing) ===\n${javaCode}\n\n` +
@@ -159,6 +183,9 @@ async function fixJavaCode({
         (runOutput   ? `=== WHAT CURRENT JAVA OUTPUTS ===\n${snippet(runOutput, 1500)}\n\n`   : '') +
         cobolFilesBlock +
         javaFilesBlock +
+        edgesBlock +
+        sigsBlock +
+        jclBlock +
         `=== DEPENDENCIES ===\n${depBlock}\n\n` +
         `Produce the corrected Java file.`;
 

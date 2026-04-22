@@ -14,6 +14,8 @@ chosen), it lives in **[Decisions log](#decisions-log)** at the bottom.
 
 Tractable wins. Pick any one and ship.
 
+- [ ] **Version history for Java files after Fix-with-AI.** Today the fix path keeps a single `.java.before-fix` backup — subsequent fixes overwrite each other, so the user can only roll back ONE step. For real trust we need a full per-file version log: every successful fix appends a new entry with `{ timestamp, trigger (fix-with-ai / typo / manual-edit), verdictTitle, prompt (sha256 for dedup), javaBytes, accuracyBefore/After, commit-style note }`, and the UI surfaces a "History" affordance next to Copy / View fix diff. Undo becomes a picker, not a single toggle. Storage: one `<javaFileName>.history.jsonl` per file alongside `.before-fix` (append-only, cheap). Out of scope: cross-file correlated history (would need a proper transaction log).
+
 
 ## Next — medium, clear value (2–5 hrs each)
 
