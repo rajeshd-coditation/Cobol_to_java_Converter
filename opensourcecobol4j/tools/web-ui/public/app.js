@@ -121,11 +121,21 @@ function init() {
     // HITL: show/hide glob input alongside the review-mode toggle
     const reviewToggleEl = document.getElementById('reviewModeToggle');
     const reviewGlobEl = document.getElementById('reviewGlobInput');
+    // Show / hide the workflow stepper's "Review" pill based on whether
+    // HITL is on. The pill (+ its leading connector) carry the
+    // .wf-review-only marker class — toggle display via a CSS class on
+    // <body> so we don't fight the stepper's own active/done state machine.
+    const syncReviewStepVisibility = () => {
+        const on = !!(reviewToggleEl && reviewToggleEl.checked);
+        document.body.classList.toggle('hide-review-step', !on);
+    };
+    syncReviewStepVisibility();
     if (reviewToggleEl) {
         // Debounce rapid clicks: only push the final state after 150ms of silence.
         let reviewToggleTimer = null;
         reviewToggleEl.addEventListener('change', () => {
             if (reviewGlobEl) reviewGlobEl.classList.toggle('hidden', !reviewToggleEl.checked);
+            syncReviewStepVisibility();
             // If a conversion is in flight, push the new state to the server so it
             // applies seamlessly mid-run (drains pending reviews when turning off).
             if (reviewToggleTimer) clearTimeout(reviewToggleTimer);

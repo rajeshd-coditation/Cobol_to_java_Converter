@@ -196,8 +196,13 @@
                 <span class="wf-num">4</span>
                 <span class="wf-label">Convert</span>
             </div>
-            <div class="wf-connector"></div>
-            <div class="wf-step" data-step="review">
+            <!-- "Review" + its leading connector are hidden when HITL is off.
+                 Toggled live by syncReviewStepVisibility() against
+                 #reviewModeToggle. Step numbers are still 5/6 in the DOM —
+                 only display flips, so existing setPhase('review') logic
+                 keeps working if HITL is later turned back on mid-flow. -->
+            <div class="wf-connector wf-review-only"></div>
+            <div class="wf-step wf-review-only" data-step="review">
                 <span class="wf-num">5</span>
                 <span class="wf-label">Review</span>
             </div>
