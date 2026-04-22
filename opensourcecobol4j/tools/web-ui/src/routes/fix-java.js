@@ -170,6 +170,22 @@ function mount(app, deps) {
                 try { fs.copyFileSync(entry.java_path, backupPath); } catch {}
             }
             fs.writeFileSync(entry.java_path, fix.javaCode, 'utf-8');
+            // Also update the per-file work_dir copy — /api/run compiles
+            // FROM there, not from javaDir. Without this, fixes appear to
+            // land (javaDir has the new code, Java pane refreshes, accuracy
+            // re-scores) but the next Run still executes the pre-fix
+            // workDir copy. User-reported on DEPTPAY: fix-with-AI
+            // produced the correct formatPIC9_7V99WithDecimal but Run kept
+            // showing the stale formatPIC9_7V99 output.
+            if (entry.work_dir) {
+                const workCopy = path.join(entry.work_dir, path.basename(entry.java_path));
+                try { fs.writeFileSync(workCopy, fix.javaCode, 'utf-8'); } catch {}
+                // Drop stale .class too so the next javac run doesn't use
+                // the old bytecode against a changed source (rare but
+                // possible if javac fails mid-repair).
+                const staleClass = workCopy.replace(/\.java$/i, '.class');
+                try { fs.existsSync(staleClass) && fs.unlinkSync(staleClass); } catch {}
+            }
 
             // Flag the file as auto-repaired so the browser shows the penalty.
             if (entry.accuracyBreakdown) {
