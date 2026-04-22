@@ -23,7 +23,14 @@
 const { isAvailable, makeOpenAIRequest } = require('./azure-client');
 const { autoFixJavaCode } = require('../core/auto-fix-java');
 
-async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, cobolOutput, dependencies }) {
+async function fixJavaCode({
+    javaCode, cobolSource,
+    compileErrors, runOutput, cobolOutput,
+    cobolError, javaError,
+    cobolOutputFiles, javaOutputFiles,
+    comparatorVerdict,
+    dependencies
+}) {
     if (!isAvailable()) {
         return { success: false, error: 'Azure AI not configured' };
     }
@@ -116,12 +123,41 @@ async function fixJavaCode({ javaCode, cobolSource, compileErrors, runOutput, co
     // policy so the repair agent sees every line. Runtime stdout (cobolOutput
     // / runOutput) stays head+tail-snipped because stuck-in-a-loop programs
     // produce megabytes of repetitive text; first+last few KB tell the story.
+    // Render comparator verdict + output files + runtime errors when the
+    // caller (Run-panel Fix-with-AI) supplied them. These give the repair
+    // agent the SPECIFIC divergence the user is looking at, not just
+    // generic "Java didn't match COBOL" — e.g. "COBOL wrote 45 rows to
+    // PRTLINE totaling $23M; Java printed sample data totaling $10k".
+    const verdictBlock = (comparatorVerdict && typeof comparatorVerdict === 'object')
+        ? '=== AI COMPARATOR VERDICT (what just went wrong) ===\n' +
+          `${comparatorVerdict.title || ''} [verdict=${comparatorVerdict.verdict || ''} severity=${comparatorVerdict.severity || ''}]\n` +
+          (Array.isArray(comparatorVerdict.reasons) && comparatorVerdict.reasons.length
+              ? comparatorVerdict.reasons.map(r => `- ${r}`).join('\n') + '\n'
+              : '') +
+          'Use this verdict as your PRIMARY repair target. The generic rules above still apply, but the fix must address what the comparator flagged.\n\n'
+        : '';
+    const cobolFilesBlock = (Array.isArray(cobolOutputFiles) && cobolOutputFiles.length)
+        ? '=== COBOL OUTPUT FILES (canonical output for WRITE-to-file programs) ===\n' +
+          cobolOutputFiles.map(f => `--- ${f.name} (${f.bytes} bytes) ---\n${snippet(f.contentPreview || '', 1200)}`).join('\n') + '\n\n'
+        : '';
+    const javaFilesBlock = (Array.isArray(javaOutputFiles) && javaOutputFiles.length)
+        ? '=== CURRENT JAVA OUTPUT FILES ===\n' +
+          javaOutputFiles.map(f => `--- ${f.name} (${f.bytes} bytes) ---\n${snippet(f.contentPreview || '', 1200)}`).join('\n') + '\n\n'
+        : '';
+    const runtimeErrBlock =
+        (cobolError ? `=== COBOL RUNTIME / COMPILE ERROR ===\n${snippet(cobolError, 800)}\n\n` : '') +
+        (javaError  ? `=== JAVA RUNTIME / COMPILE ERROR ===\n${snippet(javaError, 800)}\n\n`   : '');
+
     const userPrompt =
         `=== ORIGINAL COBOL ===\n${cobolSource}\n\n` +
         `=== CURRENT JAVA (needs fixing) ===\n${javaCode}\n\n` +
+        verdictBlock +
         (compileErrors ? `=== COMPILE ERRORS ===\n${compileErrors}\n\n` : '') +
+        runtimeErrBlock +
         (cobolOutput ? `=== WHAT COBOL OUTPUTS WHEN RUN ===\n${snippet(cobolOutput, 1500)}\n\n` : '') +
         (runOutput   ? `=== WHAT CURRENT JAVA OUTPUTS ===\n${snippet(runOutput, 1500)}\n\n`   : '') +
+        cobolFilesBlock +
+        javaFilesBlock +
         `=== DEPENDENCIES ===\n${depBlock}\n\n` +
         `Produce the corrected Java file.`;
 

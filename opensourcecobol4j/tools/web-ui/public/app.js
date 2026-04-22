@@ -4440,10 +4440,22 @@ function renderRunOutputFiles(data) {
 // Regex heuristics can't anticipate the N possible output shapes, so we ask
 // the agent to decide if the two programs are behaving equivalently.
 // The banner updates as soon as the AI responds (non-blocking).
+// Module-level stash of the latest Run output + AI verdict. Read by
+// fixSelectedJavaFromRun() so the repair agent gets full context (not
+// just compile errors — also the comparator's verdict, reasons, both
+// sides' stdout, both sides' output files, and cobolError). Populated
+// at the end of renderRunDivergenceBanner; reset on file change / reset.
+let _lastRunContext = null;
+
 async function renderRunDivergenceBanner(data) {
     const panel = document.getElementById('runOutputPanel');
     if (!panel) return;
     panel.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
+
+    // Every Run call resets the Fix button — we only enable it after a
+    // verdict that flags something to fix.
+    const fixBtn = document.getElementById('runFixWithAiBtn');
+    if (fixBtn) fixBtn.classList.add('hidden');
 
     // Only run the comparison if we have something to compare. If either side
     // didn't run at all, skip the banner.
@@ -4524,7 +4536,111 @@ async function renderRunDivergenceBanner(data) {
     const grid2 = stillPanel.querySelector('.run-output-grid');
     if (grid2) stillPanel.insertBefore(banner, grid2);
     else stillPanel.appendChild(banner);
+
+    // Show "Fix with AI" in the Run header for any non-OK verdict. The
+    // repair agent gets the comparator's title + reasons as extra
+    // context so the fix targets the specific issue the AI flagged,
+    // not just raw compile errors.
+    const needsFix = verdict.verdict === 'diverge'
+        || verdict.verdict === 'partial'
+        || verdict.severity === 'warning'
+        || verdict.severity === 'error';
+    if (needsFix && fixBtn) {
+        _lastRunContext = {
+            cobolOutput: data.cobol.output || '',
+            javaOutput:  data.java.output  || '',
+            cobolError:  data.cobol.error  || '',
+            javaError:   data.java.error   || '',
+            cobolOutputFiles: data.cobol.outputFiles || [],
+            javaOutputFiles:  data.java.outputFiles  || [],
+            verdict: { verdict: verdict.verdict, severity: verdict.severity, title: verdict.title, reasons }
+        };
+        fixBtn.classList.remove('hidden');
+    } else {
+        _lastRunContext = null;
+    }
 }
+
+// Fix-with-AI from the Run panel — sends the AI comparator's verdict +
+// both sides' stdout/stderr/output-files to the repair agent alongside
+// the usual compileErrors + cobolSource. The repair prompt already
+// handles the common patterns (fabricated fallback, unpadded digits,
+// throws-on-stdin); the extra context steers it at the SPECIFIC
+// divergence the user is looking at.
+async function fixSelectedJavaFromRun() {
+    if (!currentBrowserFile || !currentConversionId) {
+        toast('Select a file and run it first.', 'warning');
+        return;
+    }
+    if (!_lastRunContext) {
+        toast('Run the file first so the AI has something to diagnose.', 'info');
+        return;
+    }
+    const fixBtn = document.getElementById('runFixWithAiBtn');
+    if (fixBtn) { fixBtn.disabled = true; fixBtn.textContent = 'Fixing…'; }
+
+    // Reuse the existing fix-progress panel + streaming flow, but pass the
+    // extra context through. fixSelectedJava is tuned for the browser-
+    // Java-pane trigger — here we want just the repair side-effect +
+    // a clear toast telling the user to click Run again.
+    const panel = openFixProgressPanel(currentBrowserFile.cobolPath);
+    try {
+        const r = await fetch('/api/fix-java', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+            body: JSON.stringify({
+                conversionId: currentConversionId,
+                relativePath: currentBrowserFile.cobolPath,
+                runContext: _lastRunContext
+            })
+        });
+
+        let data = null;
+        const ctype = (r.headers.get('content-type') || '').toLowerCase();
+        if (ctype.includes('text/event-stream')) {
+            data = await consumeFixStream(r, panel);
+        } else {
+            data = await r.json();
+            panel.finalize(data);
+        }
+
+        if (!r.ok || !data || !data.success) {
+            toast('Fix failed: ' + ((data && data.error) || r.status), 'error');
+            return;
+        }
+
+        // Refresh the Java source pane + accuracy panel in place so the
+        // user sees the repaired code. Then nudge them to re-run.
+        const javaEl = document.getElementById('browserJavaCode');
+        const codeNode = javaEl && javaEl.querySelector('code');
+        if (codeNode) codeNode.textContent = data.newJavaCode;
+        const javaPane = javaEl && javaEl.closest('.browser-pane');
+        if (javaPane) {
+            javaPane.querySelectorAll('.accuracy-panel').forEach(n => n.remove());
+            try {
+                const qs = new URLSearchParams({
+                    conversionId: currentConversionId,
+                    relativePath: currentBrowserFile.cobolPath
+                });
+                const diag = await fetch(`/api/code-comparison?${qs.toString()}`);
+                if (diag.ok) renderAccuracyPanel(javaPane, await diag.json());
+            } catch {}
+        }
+        // Clear the stale verdict + banner so the next Run starts fresh.
+        _lastRunContext = null;
+        document.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
+        toast('Fixed. Click Run to re-verify behavior.', 'success');
+    } catch (err) {
+        toast('Fix failed: ' + err.message, 'error');
+    } finally {
+        if (fixBtn) {
+            fixBtn.disabled = false;
+            fixBtn.textContent = 'Fix with AI';
+            fixBtn.classList.add('hidden'); // hide until next Run produces a non-OK verdict
+        }
+    }
+}
+window.fixSelectedJavaFromRun = fixSelectedJavaFromRun;
 
 function closeRunOutput() {
     const panel = document.getElementById('runOutputPanel');

@@ -471,6 +471,16 @@
                                         title="Open a live terminal for the Java program — walk through menu prompts instead of pre-padding stdin">
                                     Interactive
                                 </button>
+                                <!-- Fix-with-AI triggered from the Run panel where the user
+                                     already sees the divergence verdict. Enabled only when
+                                     the last /api/run or /api/compare-runs surfaced an
+                                     issue (divergence, partial match, or compile fail);
+                                     wiring + enable-gate live in renderRunFixWithAi(). -->
+                                <button id="runFixWithAiBtn" class="btn-pill btn-ghost btn-sm hidden"
+                                        onclick="fixSelectedJavaFromRun()"
+                                        title="Ask the AI repair agent to fix the Java using the comparator's verdict as context, then click Run again to re-verify">
+                                    Fix with AI
+                                </button>
                             </div>
                             <button class="run-close-btn" onclick="closeRunOutput()" title="Close">x</button>
                         </div>

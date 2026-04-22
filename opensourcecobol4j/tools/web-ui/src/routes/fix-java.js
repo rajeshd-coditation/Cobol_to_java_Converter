@@ -30,7 +30,7 @@ function mount(app, deps) {
     const { activeConversions, azureAgent } = deps;
 
     app.post('/api/fix-java', async (req, res) => {
-        const { conversionId, relativePath } = req.body || {};
+        const { conversionId, relativePath, runContext } = req.body || {};
         if (!conversionId || !relativePath) {
             return res.status(400).json({ success: false, error: 'conversionId and relativePath required' });
         }
@@ -116,12 +116,22 @@ function mount(app, deps) {
                 hasRunOutput: !!(runCache.cobolOutput || runCache.javaOutput)
             });
             const tAI = Date.now();
+            // Caller-supplied runContext (from the Run panel's Fix-with-AI)
+            // gives the AI the comparator verdict + output files that the
+            // conversion._lastRun cache doesn't carry. Fall back to the
+            // cache for legacy callers that don't pass runContext.
+            const rc = (runContext && typeof runContext === 'object') ? runContext : {};
             const fix = await azureAgent.fixJavaCode({
                 javaCode,
                 cobolSource,
                 compileErrors,
-                runOutput: runCache.javaOutput || '',
-                cobolOutput: runCache.cobolOutput || '',
+                runOutput: rc.javaOutput || runCache.javaOutput || '',
+                cobolOutput: rc.cobolOutput || runCache.cobolOutput || '',
+                cobolError: rc.cobolError || runCache.cobolError || '',
+                javaError:  rc.javaError  || runCache.javaError  || '',
+                cobolOutputFiles: Array.isArray(rc.cobolOutputFiles) ? rc.cobolOutputFiles : undefined,
+                javaOutputFiles:  Array.isArray(rc.javaOutputFiles)  ? rc.javaOutputFiles  : undefined,
+                comparatorVerdict: rc.verdict || null,
                 dependencies: programIdToJavaClass
             });
             emit('step', {
