@@ -43,6 +43,12 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const {
+    preflightCheck,
+    buildContext,
+    extractReviewerFeedback,
+    extractEntrySignature
+} = require('./convert-azure-helpers');
 
 function createHandler(deps) {
     const {
@@ -378,32 +384,12 @@ function createHandler(deps) {
                 const _t0 = Date.now();
                 pushTimeline(relativePath, 'queued', 'Picked up by worker');
 
-                // If user cancelled, mark as skipped and return immediately
-                if (conversion.cancelled) {
-                    conversion.fileStates[relativePath] = 'skipped';
-                    return { relativePath, baseName, cobolPath, status: 'skipped_cancelled', reportEntry: null };
-                }
-
-                // Token-budget guard. If the conversion has consumed more than
-                // its ceiling, stop making new AI calls and mark remaining
-                // files as SKIPPED_BUDGET. Protects against runaway token spend
-                // on large repos — opt-in via MAX_TOKENS_PER_CONVERSION env.
-                if (conversion.tokenBudget > 0 && conversion.tokens.total >= conversion.tokenBudget) {
-                    conversion.fileStates[relativePath] = 'skipped';
-                    return {
-                        relativePath, baseName, cobolPath,
-                        status: 'error',
-                        error: `Token budget exceeded (${conversion.tokens.total} / ${conversion.tokenBudget})`,
-                        reportEntry: {
-                            path: relativePath,
-                            source_path: cobolPath,
-                            java_status: 'SKIPPED_BUDGET',
-                            error: `Token budget of ${conversion.tokenBudget} reached; ${conversion.tokens.total} tokens used. Set MAX_TOKENS_PER_CONVERSION=0 to disable the cap.`
-                        }
-                    };
-                }
-
-                // Mark active for live graph
+                // Mark active for live graph. The preflight check below may
+                // flip it back to 'skipped' immediately; for cancelled /
+                // budget-overrun that's expected behavior (the wave loop's
+                // .then() completes within a single event-loop tick so the
+                // UI's 800ms poll never shows the intermediate 'active'
+                // state).
                 conversion.fileStates[relativePath] = 'active';
                 if (!conversion.currentFiles.includes(relativePath)) {
                     conversion.currentFiles.push(relativePath);
@@ -417,177 +403,39 @@ function createHandler(deps) {
                     reportEntry: null
                 };
 
+                let divisionalSplit = null;
+                let cobolSource;
                 try {
-                    const cobolSource = fs.readFileSync(cobolPath, 'utf-8');
+                    cobolSource = fs.readFileSync(cobolPath, 'utf-8');
 
-                    // Skip if it looks like a copybook (no PROGRAM-ID)
-                    if (!cobolSource.match(/PROGRAM-ID/i)) {
-                        fileResult.status = 'skipped_noid';
-                        fileResult.reportEntry = {
-                            path: relativePath,
-                            source_path: cobolPath,
-                            java_status: 'SKIPPED_NO_ID'
-                        };
-                        return fileResult;
-                    }
+                    // All skip gates consolidated into preflightCheck:
+                    // cancelled, token-budget, no-PROGRAM-ID, tiny-file,
+                    // truncated, oversize (with divisional-split fallback).
+                    // → src/routes/convert-azure-helpers.js
+                    const pre = preflightCheck({
+                        relativePath, baseName, cobolPath, cobolSource,
+                        conversion,
+                        isLikelyTruncated,
+                        isDivisionalSplitEnabled,
+                        splitAtProcedureDivision,
+                        pushTimeline
+                    });
+                    if (pre.outcome === 'skip') return pre.fileResult;
+                    divisionalSplit = pre.divisionalSplit;
 
-                    // Skip if file is too small
-                    if (cobolSource.trim().length < 50) {
-                        fileResult.status = 'skipped_small';
-                        fileResult.reportEntry = {
-                            path: relativePath,
-                            source_path: cobolPath,
-                            java_status: 'SKIPPED_NO_ID'
-                        };
-                        return fileResult;
-                    }
-
-                    // Pre-check for truncated / incomplete sources (§13).
-                    // Flag + skip BEFORE sending to the AI — otherwise the
-                    // model helpfully invents a plausible-looking ending
-                    // and we get Java that doesn't match the user's intent.
-                    const integrity = isLikelyTruncated(cobolSource);
-                    if (integrity.truncated) {
-                        fileResult.status = 'skipped_incomplete';
-                        fileResult.error = integrity.reason;
-                        fileResult.reportEntry = {
-                            path: relativePath,
-                            source_path: cobolPath,
-                            java_status: 'SKIPPED_INCOMPLETE_SOURCE',
-                            error: integrity.reason,
-                            sourceBytes: cobolSource.length
-                        };
-                        return fileResult;
-                    }
-
-                    // Skip if file is too large for a single conversion pass.
-                    // The primary convert prompt sends the FULL COBOL source,
-                    // so a 200KB file ~ 65k input tokens. Past MAX_COBOL_CHARS
-                    // (default 80k; env-overridable) we're at serious risk of
-                    // blowing the deployment's context window.
-                    //
-                    // When ENABLE_DIVISIONAL_SPLIT is set, attempt a two-pass
-                    // split at PROCEDURE DIVISION before giving up — converts
-                    // data + procedure separately and stitches the output.
-                    const MAX_COBOL_CHARS = parseInt(process.env.MAX_COBOL_CHARS || '80000', 10);
-                    let divisionalSplit = null;
-                    if (cobolSource.length > MAX_COBOL_CHARS) {
-                        if (isDivisionalSplitEnabled()) {
-                            divisionalSplit = splitAtProcedureDivision(cobolSource);
-                        }
-                        if (!divisionalSplit) {
-                            fileResult.status = 'error';
-                            const hint = isDivisionalSplitEnabled()
-                                ? ' Divisional split attempted but failed — no clean PROCEDURE DIVISION boundary detected.'
-                                : ' Set ENABLE_DIVISIONAL_SPLIT=1 to attempt a two-pass DATA/PROCEDURE split, or raise MAX_COBOL_CHARS for a larger-context deployment.';
-                            fileResult.error = `Source is ${cobolSource.length} chars — exceeds ${MAX_COBOL_CHARS}-char cap for a single-pass conversion.${hint}`;
-                            fileResult.reportEntry = {
-                                path: relativePath,
-                                source_path: cobolPath,
-                                java_status: 'SKIPPED_TOO_LARGE',
-                                error: fileResult.error,
-                                sourceBytes: cobolSource.length
-                            };
-                            return fileResult;
-                        }
-                        pushTimeline(relativePath, 'split', `Source is ${cobolSource.length} chars — splitting at PROCEDURE DIVISION`, {
-                            partABytes: divisionalSplit.partA.length,
-                            partBBytes: divisionalSplit.partB.length
-                        });
-                    }
-
-                    // --- Build conversion context so the AI can emit REAL Java calls
-                    // to sibling classes instead of fabricating/simulating CALL targets.
-                    // Uses the same regexes the graph builder used earlier.
-                    const _callRe = /CALL\s+['"]([A-Z0-9_-]+)['"]/gi;
-                    const _copyRe = /COPY\s+['"]?([A-Z0-9_-]+)['"]?/gi;
-                    const calledPrograms = [];
-                    const copybooks = [];
-                    const _seenCalls = new Set();
-                    const _seenCopy = new Set();
-                    let _m;
-                    while ((_m = _callRe.exec(cobolSource)) !== null) {
-                        const n = _m[1].toUpperCase();
-                        if (!_seenCalls.has(n)) { _seenCalls.add(n); calledPrograms.push(n); }
-                    }
-                    while ((_m = _copyRe.exec(cobolSource)) !== null) {
-                        const n = _m[1].toUpperCase();
-                        if (!_seenCopy.has(n)) { _seenCopy.add(n); copybooks.push(n); }
-                    }
-                    // Build PROGRAM-ID → Java class name map for everything in this conversion.
-                    // The graph's nameIndex already maps PROGRAM-ID / filename → relative path.
-                    // We derive the Java class name via toPascalCase of the file basename.
-                    const programIdToJavaClass = {};
-                    const gNodes = (conversion.graph && conversion.graph.nodes) || [];
-                    for (const n of gNodes) {
-                        if (n.type !== 'program') continue;
-                        const base = path.basename(n.path || n.id, path.extname(n.path || n.id));
-                        const javaClass = toPascalCase(base);
-                        programIdToJavaClass[base.toUpperCase()] = javaClass;
-                    }
-                    // Overlay any PROGRAM-ID entries from the nameIndex (so 'HELLO-APP'
-                    // inside a file named HELLO.cbl also resolves).
-                    // The conversion's graph edges already stored resolution via name-index,
-                    // but we don't persist the index itself; re-scan for PROGRAM-IDs here.
-                    const _pidRe = /^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)['"]?/im;
-                    for (const n of gNodes) {
-                        if (n.type !== 'program' || !n.path) continue;
-                        try {
-                            const src = fs.readFileSync(n.path, 'utf-8');
-                            const mm = src.match(_pidRe);
-                            if (mm) {
-                                const base = path.basename(n.path, path.extname(n.path));
-                                if (!programIdToJavaClass[mm[1].toUpperCase()]) {
-                                    programIdToJavaClass[mm[1].toUpperCase()] = toPascalCase(base);
-                                }
-                            }
-                        } catch {}
-                    }
-
-                    // Load copybook bodies for any COPY target we actually have on disk.
-                    // Cached across files so a repo of 200 programs COPYing the same 10
-                    // copybooks doesn't re-read the same files 2000 times. Size-gated:
-                    // total inlined bodies capped at ~40k chars to keep the prompt
-                    // within context budget; largest omitted first if we exceed.
-                    const copybookBodies = {};
-                    const MAX_COPYBOOK_PAYLOAD = 40000;
-                    let copybookPayloadSize = 0;
-                    const loadOrder = copybooks
-                        .map(name => ({ name, p: copybookPathByName[name.toUpperCase()] }))
-                        .filter(e => e.p);
-                    for (const { name, p } of loadOrder) {
-                        const key = name.toUpperCase();
-                        let body = copybookBodyCache[key];
-                        if (body === undefined) {
-                            try { body = fs.readFileSync(p, 'utf-8'); }
-                            catch { body = null; }
-                            copybookBodyCache[key] = body;
-                        }
-                        if (!body) continue;
-                        if (copybookPayloadSize + body.length > MAX_COPYBOOK_PAYLOAD) continue;
-                        copybookBodies[key] = body;
-                        copybookPayloadSize += body.length;
-                    }
-
-                    // JCL invocations for this program — look up by basename AND by any
-                    // declared PROGRAM-ID, since a file CBL0033.cbl may declare
-                    // `PROGRAM-ID. PAYROL00.` and the JCL references the latter.
-                    const jclByProgram = conversion.jclContext || {};
-                    const jclInvocations = [];
-                    const seenJcl = new Set();
-                    const addJclFor = (key) => {
-                        const invs = jclByProgram[key.toUpperCase()];
-                        if (!invs) return;
-                        for (const inv of invs) {
-                            const fp = `${inv.jclFile}::${inv.stepName}`;
-                            if (seenJcl.has(fp)) continue;
-                            seenJcl.add(fp);
-                            jclInvocations.push(inv);
-                        }
-                    };
-                    addJclFor(baseName);
-                    const _pidOwn = cobolSource.match(/^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)/im);
-                    if (_pidOwn) addJclFor(_pidOwn[1]);
+                    // Build the AI prompt context — CALL/COPY/PROGRAM-ID extraction,
+                    // copybook inlining (size-capped), JCL invocation lookup by both
+                    // basename and declared PROGRAM-ID. copybookBodyCache is shared
+                    // across files in the wave, so a repo that COPYs the same .cpy
+                    // from 200 programs reads it once.
+                    // → src/routes/convert-azure-helpers.js
+                    const {
+                        calledPrograms, copybooks, programIdToJavaClass,
+                        copybookBodies, jclInvocations
+                    } = buildContext({
+                        cobolSource, baseName, conversion,
+                        copybookPathByName, copybookBodyCache, toPascalCase
+                    });
 
                     pushTimeline(relativePath, 'context_built', 'Context assembled', {
                         calls: calledPrograms.length,
@@ -600,21 +448,12 @@ function createHandler(deps) {
                     // sibling-class calls match their actual method signatures, and
                     // JCL-staged files use real DD names instead of guessed paths.
                     //
-                    // Feedback loop: if earlier files in this batch were rejected
-                    // or edited during HITL review with a reviewer note, thread
-                    // those notes into the next file's context so the model can
-                    // avoid repeating the same mistake. We take up to the last 5
-                    // non-empty notes — more than that bloats the prompt without
-                    // adding signal (same mistake in 6+ files = prompt drift, not
-                    // individual feedback).
-                    const reviewerFeedback = ((conversion.reviewHistory || [])
-                        .filter(h => (h.action === 'reject' || h.action === 'edit') && h.note && h.fileId !== relativePath)
-                        .slice(-5)
-                        .map(h => ({
-                            fileBasename: (h.fileId || '').split('/').pop(),
-                            action: h.action,
-                            note: h.note
-                        })));
+                    // Thread HITL reject/edit notes from earlier files in this
+                    // batch into the next file's context so the model can avoid
+                    // repeating a flagged mistake. Capped at 5 notes — beyond
+                    // that is prompt drift, not per-file signal.
+                    // → src/routes/convert-azure-helpers.js
+                    const reviewerFeedback = extractReviewerFeedback(conversion.reviewHistory, relativePath);
                     const _tAI = Date.now();
                     pushTimeline(relativePath, 'ai_call', divisionalSplit ? 'Calling AI (split: Part A — DATA)' : 'Calling AI to generate Java');
                     let conversionResult;
@@ -941,35 +780,19 @@ function createHandler(deps) {
                             totalMs: Date.now() - _t0
                         });
 
-                        // --- Sibling signature cache ------------------------
-                        // Pull the PRIMARY public method signature out of the
-                        // final Java source and cache it on the conversion so
-                        // the NEXT wave's callers can emit `new Foo().run(...)`
-                        // with the exact parameter list this class expects,
-                        // instead of guessing. Prefer a non-`main` public method
-                        // (the COBOL "entry point" typically becomes `run(...)`
-                        // or `execute(...)`); fall back to `main`.
-                        try {
-                            const sigRe = /public\s+(?:static\s+)?(?:final\s+)?[\w<>\[\],\s]+\s+(\w+)\s*\(([^)]*)\)/g;
-                            const sigs = [];
-                            let sm;
-                            while ((sm = sigRe.exec(fixedJavaCode)) !== null) {
-                                sigs.push({ name: sm[1], args: sm[2].trim(), full: sm[0].trim() });
+                        // Cache the primary non-main public method signature
+                        // so the next wave's callers emit `new Foo().run(...)`
+                        // with the real parameter list instead of guessing.
+                        // Indexed by basename AND PROGRAM-ID (they often differ —
+                        // CBL0033.cbl declares PROGRAM-ID. PAYROL00.).
+                        // → src/routes/convert-azure-helpers.js
+                        const entrySig = extractEntrySignature(fixedJavaCode, javaClassName);
+                        if (entrySig) {
+                            conversion.siblingSignatures[baseName.toUpperCase()] = entrySig;
+                            const pidMatch = cobolSource.match(/^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)/im);
+                            if (pidMatch) {
+                                conversion.siblingSignatures[pidMatch[1].toUpperCase()] = entrySig;
                             }
-                            const entrySig = sigs.find(s => s.name !== 'main' && s.name !== javaClassName)
-                                || sigs.find(s => s.name === 'main')
-                                || sigs[0];
-                            if (entrySig) {
-                                conversion.siblingSignatures[baseName.toUpperCase()] = entrySig.full;
-                                // Also index by PROGRAM-ID if it differs from the basename
-                                // (e.g. file CBL0033.cbl has PROGRAM-ID. PAYROL00.).
-                                const pidMatch = cobolSource.match(/^\s*(?:\d+\s+)?PROGRAM-ID\s*\.\s*['"]?([A-Za-z0-9_-]+)/im);
-                                if (pidMatch) {
-                                    conversion.siblingSignatures[pidMatch[1].toUpperCase()] = entrySig.full;
-                                }
-                            }
-                        } catch (sigErr) {
-                            // Signature extraction is best-effort; a regex miss shouldn't fail the conversion.
                         }
 
                         // Final status: if Java still doesn't compile after any

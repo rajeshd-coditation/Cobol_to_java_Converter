@@ -1424,6 +1424,232 @@ test('preprocessCobolSource strips dangling period before END-IF (CBL0007 bug)',
     }
 });
 
+// ─── Phase 3b helpers — lock the extracted pure helpers' behavior ────────
+//
+// processFile uses four helpers from src/routes/convert-azure-helpers.js
+// (preflightCheck, buildContext, extractReviewerFeedback,
+// extractEntrySignature). Unit-test each so an internal refactor can't
+// silently shift behavior. The helpers take their inputs explicitly —
+// no need to spin up a full conversion to exercise them.
+test('extractReviewerFeedback keeps ≤5 reject/edit notes, excludes current file, requires note', () => {
+    const { extractReviewerFeedback } = require('../src/routes/convert-azure-helpers');
+    const hist = [
+        { fileId: 'a.cbl', action: 'approve' },                         // no note + not reject/edit → drop
+        { fileId: 'b.cbl', action: 'reject', note: 'bad mov' },         // keep
+        { fileId: 'c.cbl', action: 'edit', note: 'fix types' },         // keep
+        { fileId: 'd.cbl', action: 'edit' },                            // no note → drop
+        { fileId: 'e.cbl', action: 'reject', note: 'wrong class' },     // keep
+        { fileId: 'f.cbl', action: 'reject', note: 'off by one' },      // keep
+        { fileId: 'g.cbl', action: 'reject', note: 'unused var' },      // keep
+        { fileId: 'h.cbl', action: 'edit',   note: 'rename' },          // keep (5th)
+        { fileId: 'i.cbl', action: 'reject', note: 'wrong cast' },      // keep (6th — pushes oldest off)
+        { fileId: 'SELF.cbl', action: 'reject', note: 'skip self' }     // same-file self-reject → drop
+    ];
+    const fb = extractReviewerFeedback(hist, 'SELF.cbl');
+    assert.strictEqual(fb.length, 5, `expected 5 notes; got ${fb.length}`);
+    // Oldest (b.cbl) dropped by the tail-5; current-file (SELF.cbl) filtered out.
+    const files = fb.map(f => f.fileBasename).join(',');
+    assert.ok(!files.includes('b.cbl'), `expected oldest b.cbl dropped; got ${files}`);
+    assert.ok(!files.includes('SELF.cbl'), `SELF.cbl must not surface its own reject; got ${files}`);
+});
+
+test('extractReviewerFeedback handles missing / non-array history', () => {
+    const { extractReviewerFeedback } = require('../src/routes/convert-azure-helpers');
+    assert.deepStrictEqual(extractReviewerFeedback(null, 'x.cbl'), []);
+    assert.deepStrictEqual(extractReviewerFeedback(undefined, 'x.cbl'), []);
+    assert.deepStrictEqual(extractReviewerFeedback([], 'x.cbl'), []);
+});
+
+test('extractEntrySignature prefers non-main non-class method, falls back to main', () => {
+    const { extractEntrySignature } = require('../src/routes/convert-azure-helpers');
+
+    const withRun = `
+public class Foo {
+    public static void main(String[] args) { new Foo().run("x", 1); }
+    public void run(String arg, int n) { }
+}`;
+    const sigRun = extractEntrySignature(withRun, 'Foo');
+    assert.match(sigRun, /public void run\(String arg, int n\)/,
+        `expected run(...) preferred; got ${sigRun}`);
+
+    const mainOnly = `
+public class Bar {
+    public static void main(String[] args) { }
+}`;
+    const sigMain = extractEntrySignature(mainOnly, 'Bar');
+    assert.match(sigMain, /public static void main\(String\[\] args\)/,
+        `expected main(...) fallback; got ${sigMain}`);
+
+    // No public methods at all → null, not a throw.
+    assert.strictEqual(extractEntrySignature('class X { private int x; }', 'X'), null);
+});
+
+test('preflightCheck short-circuits on cancelled / budget / copybook / tiny / truncated', () => {
+    const { preflightCheck } = require('../src/routes/convert-azure-helpers');
+    const stubs = {
+        isLikelyTruncated: () => ({ truncated: false }),
+        isDivisionalSplitEnabled: () => false,
+        splitAtProcedureDivision: () => null,
+        pushTimeline: () => {}
+    };
+    const makeConv = (overrides = {}) => Object.assign({
+        cancelled: false,
+        tokens: { total: 0 },
+        tokenBudget: 0,
+        fileStates: {}
+    }, overrides);
+
+    // Cancelled
+    {
+        const conv = makeConv({ cancelled: true });
+        const r = preflightCheck({
+            relativePath: 'a.cbl', baseName: 'A', cobolPath: '/tmp/a.cbl',
+            cobolSource: 'IDENTIFICATION DIVISION. PROGRAM-ID. A.',
+            conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.outcome, 'skip');
+        assert.strictEqual(r.fileResult.status, 'skipped_cancelled');
+        assert.strictEqual(conv.fileStates['a.cbl'], 'skipped');
+    }
+    // Token budget exceeded
+    {
+        const conv = makeConv({ tokens: { total: 100 }, tokenBudget: 50 });
+        const r = preflightCheck({
+            relativePath: 'b.cbl', baseName: 'B', cobolPath: '/tmp/b.cbl',
+            cobolSource: 'x', conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.fileResult.reportEntry.java_status, 'SKIPPED_BUDGET');
+    }
+    // No PROGRAM-ID
+    {
+        const conv = makeConv();
+        const r = preflightCheck({
+            relativePath: 'c.cbl', baseName: 'C', cobolPath: '/tmp/c.cbl',
+            cobolSource: '       01 JUST-A-COPYBOOK-STUB PIC X(10).',
+            conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.fileResult.status, 'skipped_noid');
+    }
+    // Too small
+    {
+        const conv = makeConv();
+        const r = preflightCheck({
+            relativePath: 'd.cbl', baseName: 'D', cobolPath: '/tmp/d.cbl',
+            cobolSource: 'PROGRAM-ID tiny.',
+            conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.fileResult.status, 'skipped_small');
+    }
+    // Truncated
+    {
+        const conv = makeConv();
+        const r = preflightCheck({
+            relativePath: 'e.cbl', baseName: 'E', cobolPath: '/tmp/e.cbl',
+            cobolSource: 'IDENTIFICATION DIVISION. PROGRAM-ID. E.'.repeat(3),
+            conversion: conv,
+            ...stubs,
+            isLikelyTruncated: () => ({ truncated: true, reason: 'cut off' })
+        });
+        assert.strictEqual(r.fileResult.reportEntry.java_status, 'SKIPPED_INCOMPLETE_SOURCE');
+    }
+    // Oversize + split disabled → skip TOO_LARGE
+    {
+        const conv = makeConv();
+        const big = 'PROGRAM-ID. BIG.\n' + 'X'.repeat(90000);
+        const r = preflightCheck({
+            relativePath: 'f.cbl', baseName: 'F', cobolPath: '/tmp/f.cbl',
+            cobolSource: big, conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.fileResult.reportEntry.java_status, 'SKIPPED_TOO_LARGE');
+    }
+    // Normal-sized happy path → continue
+    {
+        const conv = makeConv();
+        const r = preflightCheck({
+            relativePath: 'g.cbl', baseName: 'G', cobolPath: '/tmp/g.cbl',
+            cobolSource: 'IDENTIFICATION DIVISION. PROGRAM-ID. G.\n'.repeat(3),
+            conversion: conv, ...stubs
+        });
+        assert.strictEqual(r.outcome, 'continue');
+        assert.strictEqual(r.divisionalSplit, null);
+    }
+});
+
+test('buildContext extracts calls, copies, PROGRAM-ID map + inlines copybook bodies', () => {
+    const { buildContext } = require('../src/routes/convert-azure-helpers');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ctx-'));
+    try {
+        const cpyA = path.join(tmp, 'CVACT01Y.cpy');
+        fs.writeFileSync(cpyA, '       05 ACCT-NO PIC 9(11).\n       05 ACCT-BAL PIC S9(9)V99 COMP-3.\n');
+
+        const ctx = buildContext({
+            cobolSource: `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MYPROG.
+       PROCEDURE DIVISION.
+           COPY CVACT01Y.
+           CALL 'ADDAMT' USING X.
+           CALL 'PRINTER' USING Y.
+           STOP RUN.
+`,
+            baseName: 'MYPROG',
+            conversion: {
+                graph: { nodes: [
+                    { type: 'program', path: path.join(tmp, 'OTHER.cbl'), id: 'OTHER.cbl' }
+                ]},
+                jclContext: {
+                    'MYPROG': [{ jclFile: 'RUN.jcl', stepName: 'STEP1', ddStatements: [] }]
+                }
+            },
+            copybookPathByName: { 'CVACT01Y': cpyA },
+            copybookBodyCache: {},
+            toPascalCase: (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+        });
+
+        // Calls deduplicated + uppercase
+        assert.deepStrictEqual(ctx.calledPrograms.sort(), ['ADDAMT', 'PRINTER']);
+        // Copybook found + inlined body
+        assert.ok(ctx.copybooks.includes('CVACT01Y'));
+        assert.ok(ctx.copybookBodies['CVACT01Y'].includes('ACCT-NO'));
+        // PROGRAM-ID map pulls in graph programs (not just the current file)
+        assert.strictEqual(ctx.programIdToJavaClass['OTHER'], 'Other');
+        // JCL invocations keyed by basename
+        assert.strictEqual(ctx.jclInvocations.length, 1);
+        assert.strictEqual(ctx.jclInvocations[0].stepName, 'STEP1');
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('buildContext caps copybook-payload at ~40k chars', () => {
+    const { buildContext } = require('../src/routes/convert-azure-helpers');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ctx-cap-'));
+    try {
+        const big = path.join(tmp, 'BIG.cpy');
+        const small = path.join(tmp, 'SMALL.cpy');
+        fs.writeFileSync(big, 'X'.repeat(35000));
+        fs.writeFileSync(small, 'Y'.repeat(10000));
+
+        const ctx = buildContext({
+            cobolSource: `
+       PROGRAM-ID. P.
+       COPY BIG.
+       COPY SMALL.
+`,
+            baseName: 'P',
+            conversion: { graph: { nodes: [] }, jclContext: {} },
+            copybookPathByName: { 'BIG': big, 'SMALL': small },
+            copybookBodyCache: {},
+            toPascalCase: (s) => s
+        });
+        // BIG fits (35k < 40k), SMALL would push over 45k so it's dropped.
+        assert.ok(ctx.copybookBodies['BIG'], 'BIG should be inlined');
+        assert.ok(!ctx.copybookBodies['SMALL'], 'SMALL must be dropped to stay under 40k cap');
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 test('preprocessCobolSource leaves canonical END-IF patterns alone (no false positives)', () => {
     const { preprocessCobolSource } = require('../src/core/run/cobol-preprocess');
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'endif-ok-'));
