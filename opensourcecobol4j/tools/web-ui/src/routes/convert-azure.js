@@ -47,7 +47,9 @@ const {
     preflightCheck,
     buildContext,
     extractReviewerFeedback,
-    extractEntrySignature
+    extractEntrySignature,
+    runCompileAndRepair,
+    buildReportEntry
 } = require('./convert-azure-helpers');
 
 function createHandler(deps) {
@@ -612,173 +614,27 @@ function createHandler(deps) {
                         // Copy original COBOL source to work dir
                         fs.copyFileSync(cobolPath, path.join(workDir, path.basename(cobolPath)));
 
-                        // --- Compile + run helper -----------------------------
-                        // Called up to twice per file: once on the initial AI
-                        // output, and (if a repair pass runs) once on the fixed
-                        // Java. Returns { javaOutput, compareStatus, compilationError }.
-                        async function compileAndRun() {
-                            const javaFileInWorkDir = path.join(workDir, javaFileName);
-                            let javaOutput = '';
-                            let compareStatus = 'JAVA_ONLY';
-                            let compilationError = null;
-                            try {
-                                const { execSync, spawnSync } = require('child_process');
-                                try {
-                                    // Classpath: include javaDir (where all siblings of this
-                                    // conversion live) so references like `new Hello().run()`
-                                    // resolve to already-converted sibling classes. Without
-                                    // this, per-file javac sees only this one .java and fails
-                                    // with "cannot find symbol: class Hello" even though
-                                    // Hello.java exists in the same batch. The per-file
-                                    // workDir stays the primary output (kept for the per-file
-                                    // Run panel), but compile AND run both need javaDir on
-                                    // the classpath to resolve cross-file CALLs.
-                                    execSync(`javac -cp "${javaDir}" -d "${workDir}" "${javaFileInWorkDir}"`, {
-                                        cwd: workDir,
-                                        timeout: 30000,
-                                        stdio: ['pipe', 'pipe', 'pipe']
-                                    });
-                                    try {
-                                        const result = spawnSync('java', ['-cp', workDir + path.delimiter + javaDir, javaClassName], {
-                                            cwd: workDir,
-                                            timeout: 10000,
-                                            encoding: 'utf-8',
-                                            shell: false,
-                                            input: '\n\n\n'
-                                        });
-                                        const stdout = result.stdout || '';
-                                        const stderr = result.stderr || '';
-                                        const exitCode = result.status;
-                                        let combinedOutput = '';
-                                        if (stdout.trim()) combinedOutput = stdout.trim();
-                                        if (stderr.trim()) {
-                                            combinedOutput = combinedOutput
-                                                ? combinedOutput + '\n' + stderr.trim()
-                                                : stderr.trim();
-                                        }
-                                        if (combinedOutput.length > 0) {
-                                            javaOutput = combinedOutput;
-                                            compareStatus = 'MATCH';
-                                        } else if (exitCode === 0) {
-                                            javaOutput = '[Program executed successfully but produced no console output]';
-                                        } else if (result.error) {
-                                            const errMsg = result.error.message || '';
-                                            javaOutput = (errMsg.includes('ETIMEDOUT') || errMsg.includes('timeout'))
-                                                ? '[Program timed out - may require interactive input]'
-                                                : `[Runtime Error] ${errMsg}`;
-                                        } else {
-                                            javaOutput = `[Program exited with code ${exitCode}]`;
-                                        }
-                                    } catch (runErr) {
-                                        javaOutput = `[Runtime Error] ${runErr.message}`;
-                                    }
-                                } catch (compileErr) {
-                                    compilationError = compileErr.stderr ? compileErr.stderr.toString() : compileErr.message;
-                                    javaOutput = `[Compilation Error]\n${compilationError}`;
-                                }
-                                fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
-                                fs.writeFileSync(path.join(workDir, 'native_output.txt'),
-                                    'COBOL native execution not available (requires mainframe environment)');
-                            } catch (execErr) {
-                                javaOutput = `[Execution Error] ${execErr.message}`;
-                                fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
-                            }
-                            return { javaOutput, compareStatus, compilationError };
-                        }
-
-                        // Initial compile + run
-                        const _tCompile = Date.now();
-                        pushTimeline(relativePath, 'compile', 'Running javac + java to verify');
-                        let run1 = await compileAndRun();
-                        let { javaOutput, compareStatus, compilationError } = run1;
-                        pushTimeline(relativePath, 'compile_done', compilationError ? 'javac: FAIL' : 'javac: OK', {
-                            ms: Date.now() - _tCompile,
-                            compileStatus: compilationError ? 'fail' : 'ok',
-                            errorPreview: compilationError ? String(compilationError).split('\n').slice(0, 2).join(' | ').slice(0, 200) : null
+                        // Compile the initial Java, score accuracy, maybe fire a
+                        // single repair pass, recompile the repaired output.
+                        // Entire pipeline collapsed into runCompileAndRepair so
+                        // processFile reads as orchestration instead of 160 lines
+                        // of nested try/catch. Mutates conversion.tokens + writes
+                        // to disk — no hidden state beyond that.
+                        // → src/routes/convert-azure-helpers.js
+                        const repairResult = await runCompileAndRepair({
+                            relativePath, baseName, javaClassName,
+                            javaDir, javaPath, workDir, javaFileName,
+                            initialJavaCode: fixedJavaCode,
+                            cobolSource, programIdToJavaClass,
+                            conversion,
+                            azureAgent, normalizeClassName,
+                            pushTimeline, startMs: _t0
                         });
-
-                        // Initial accuracy analysis (cheap; regex-based)
-                        let accuracyResult = azureAgent.analyzeConversionAccuracy(cobolSource, fixedJavaCode);
-                        pushTimeline(relativePath, 'accuracy', 'Accuracy scored', {
-                            accuracy: accuracyResult.accuracy,
-                            penalties: (accuracyResult.semanticPenalties || []).length
-                        });
-
-                        // --- Quality gates: compile-fail OR fabricated-fallback -
-                        // Either condition triggers a single repair pass via
-                        // fixJavaCode. Its system prompt already covers:
-                        //   - "COMPILES cleanly with plain javac"
-                        //   - "REMOVE FABRICATED INPUT DATA"
-                        // so one call handles both at once.
-                        const penalties = accuracyResult.semanticPenalties || [];
-                        const hasFabricatedFallback = penalties.includes('Fabricated input fallback');
-                        // A/B test switch: DISABLE_AUTOFIX=1 also skips the
-                        // auto-repair pass so we measure the full
-                        // post-AI-intervention effect vs. raw AI output.
-                        const needsRepair = process.env.DISABLE_AUTOFIX !== '1'
-                            && (compilationError || hasFabricatedFallback)
-                            && azureAgent.isAvailable();
-                        let repairApplied = null;
-                        if (needsRepair) {
-                            repairApplied = compilationError && hasFabricatedFallback
-                                ? 'compile+fallback'
-                                : (compilationError ? 'compile' : 'fallback');
-                            console.log(`    Auto-repair pass for ${relativePath} (${repairApplied})`);
-                            pushTimeline(relativePath, 'repair', 'Auto-repair triggered: ' + repairApplied);
-                            // Re-use a prior /api/run capture of COBOL's output if the user
-                            // already ran this file once — gives the repair agent real target
-                            // behavior to match, instead of just the Java error text. On a
-                            // fresh conversion (no prior run) this is still null, which is
-                            // fine — the repair prompt makes cobolOutput optional.
-                            const priorRun = (conversion._lastRun && conversion._lastRun[relativePath]) || {};
-                            try {
-                                const repair = await azureAgent.fixJavaCode({
-                                    javaCode: fixedJavaCode,
-                                    cobolSource,
-                                    compileErrors: compilationError || null,
-                                    runOutput: javaOutput,
-                                    cobolOutput: priorRun.cobolOutput || null,
-                                    dependencies: programIdToJavaClass
-                                });
-                                if (repair && repair.success && repair.javaCode) {
-                                    // Re-run class-name normalization on the repaired
-                                    // output — the repair agent usually preserves the
-                                    // class name, but not always, and a mismatch breaks
-                                    // `java -cp workDir <javaClassName>` after repair.
-                                    fixedJavaCode = normalizeClassName(repair.javaCode, javaClassName, baseName);
-                                    fs.writeFileSync(javaPath, fixedJavaCode);
-                                    fs.writeFileSync(path.join(workDir, javaFileName), fixedJavaCode);
-                                    if (repair.usage) {
-                                        conversion.tokens.promptIn     += repair.usage.prompt_tokens || 0;
-                                        conversion.tokens.completionOut += repair.usage.completion_tokens || 0;
-                                        conversion.tokens.total        += repair.usage.total_tokens || 0;
-                                        conversion.tokens.calls        += 1;
-                                    }
-                                    // Re-compile, re-run, re-score on the repaired code.
-                                    const run2 = await compileAndRun();
-                                    javaOutput       = run2.javaOutput;
-                                    compareStatus    = run2.compareStatus;
-                                    compilationError = run2.compilationError;
-                                    accuracyResult = azureAgent.analyzeConversionAccuracy(cobolSource, fixedJavaCode);
-                                    pushTimeline(relativePath, 'repair_done', compilationError ? 'Repair applied, still fails javac' : 'Repair fixed javac failure', {
-                                        compileStatus: compilationError ? 'fail' : 'ok',
-                                        tokens: repair.usage ? (repair.usage.total_tokens || null) : null,
-                                        accuracy: accuracyResult.accuracy
-                                    });
-                                } else {
-                                    console.warn(`   [warn]  Repair pass failed: ${repair && repair.error}`);
-                                    pushTimeline(relativePath, 'repair_failed', 'Repair call did not return usable Java', {
-                                        error: (repair && repair.error) || 'unknown'
-                                    });
-                                }
-                            } catch (repairErr) {
-                                console.warn(`   [warn]  Repair pass errored: ${repairErr.message}`);
-                                pushTimeline(relativePath, 'repair_errored', 'Repair call errored', { error: repairErr.message });
-                            }
-                        }
-                        pushTimeline(relativePath, 'done', compilationError ? 'COMPILE_FAIL' : 'SUCCESS', {
-                            totalMs: Date.now() - _t0
-                        });
+                        let { javaCode: _finalJavaCode, javaOutput, compareStatus, compilationError, accuracyResult, repairApplied } = repairResult;
+                        // runCompileAndRepair returns the latest Java code
+                        // (possibly post-repair). Sync back to fixedJavaCode so
+                        // downstream steps (sibling-sig extraction) see it.
+                        fixedJavaCode = _finalJavaCode;
 
                         // Cache the primary non-main public method signature
                         // so the next wave's callers emit `new Foo().run(...)`
@@ -795,50 +651,26 @@ function createHandler(deps) {
                             }
                         }
 
-                        // Final status: if Java still doesn't compile after any
-                        // repair pass, this is COMPILE_FAIL — not SUCCESS. The
-                        // UI can then surface the real error instead of hiding
-                        // it behind a green checkmark.
+                        // Final status: compile-fail after any repair pass is
+                        // COMPILE_FAIL (not SUCCESS) so the UI surfaces the real
+                        // error instead of a false-green result.
+                        // → src/routes/convert-azure-helpers.js
                         if (compilationError) {
                             fileResult.status = 'error';
                             fileResult.error = compilationError;
-                            fileResult.reportEntry = {
-                                path: relativePath,
-                                source_path: cobolPath,
-                                java_path: javaPath,
-                                work_dir: workDir,
-                                java_status: 'COMPILE_FAIL',
-                                compare: compareStatus,
-                                method: 'azure_ai',
-                                error: compilationError,
-                                repair_applied: repairApplied,
-                                conversionAccuracy: accuracyResult.accuracy,
-                                accuracyDetails: accuracyResult.details,
-                                accuracyBreakdown: {
-                                    cobolMetrics: accuracyResult.cobolMetrics,
-                                    javaMetrics: accuracyResult.javaMetrics,
-                                    semanticPenalties: accuracyResult.semanticPenalties || []
-                                }
-                            };
+                            fileResult.reportEntry = buildReportEntry({
+                                success: false,
+                                relativePath, cobolPath, javaPath, workDir,
+                                compareStatus, repairApplied, accuracyResult,
+                                compilationError
+                            });
                         } else {
                             fileResult.status = 'success';
-                            fileResult.reportEntry = {
-                                path: relativePath,
-                                source_path: cobolPath,
-                                java_path: javaPath,
-                                work_dir: workDir,
-                                java_status: 'SUCCESS',
-                                compare: compareStatus,
-                                method: 'azure_ai',
-                                repair_applied: repairApplied,
-                                conversionAccuracy: accuracyResult.accuracy,
-                                accuracyDetails: accuracyResult.details,
-                                accuracyBreakdown: {
-                                    cobolMetrics: accuracyResult.cobolMetrics,
-                                    javaMetrics: accuracyResult.javaMetrics,
-                                    semanticPenalties: accuracyResult.semanticPenalties || []
-                                }
-                            };
+                            fileResult.reportEntry = buildReportEntry({
+                                success: true,
+                                relativePath, cobolPath, javaPath, workDir,
+                                compareStatus, repairApplied, accuracyResult
+                            });
                         }
 
                     } else {

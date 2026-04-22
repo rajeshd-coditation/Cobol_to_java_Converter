@@ -1621,6 +1621,159 @@ test('buildContext extracts calls, copies, PROGRAM-ID map + inlines copybook bod
     }
 });
 
+// ─── Phase 3c helpers — lock runCompileAndRepair + buildReportEntry ────
+//
+// runCompileAndRepair orchestrates compile → score → maybe-repair →
+// recompile. Tests stub the Java tooling via a minimal temp dir + an
+// azureAgent mock so we can drive every branch (compile-ok-no-repair,
+// compile-fail-repair-fixes, compile-fail-repair-still-fails, fabricated-
+// fallback triggers repair, DISABLE_AUTOFIX bypass) without a real Azure
+// call or a real javac run. The `azureAgent.analyzeConversionAccuracy`
+// field matters: fabricated-fallback gate flips when that penalty fires.
+test('buildReportEntry returns SUCCESS shape on success, COMPILE_FAIL shape on fail', () => {
+    const { buildReportEntry } = require('../src/routes/convert-azure-helpers');
+    const accuracyResult = {
+        accuracy: 87,
+        details: 'ok',
+        cobolMetrics: { a: 1 },
+        javaMetrics: { b: 2 },
+        semanticPenalties: ['X']
+    };
+    const ok = buildReportEntry({
+        success: true,
+        relativePath: 'a.cbl', cobolPath: '/tmp/a.cbl',
+        javaPath: '/tmp/out/A.java', workDir: '/tmp/work/a',
+        compareStatus: 'MATCH', repairApplied: null, accuracyResult
+    });
+    assert.strictEqual(ok.java_status, 'SUCCESS');
+    assert.strictEqual(ok.error, undefined);
+    assert.strictEqual(ok.conversionAccuracy, 87);
+    assert.deepStrictEqual(ok.accuracyBreakdown.semanticPenalties, ['X']);
+
+    const fail = buildReportEntry({
+        success: false,
+        relativePath: 'b.cbl', cobolPath: '/tmp/b.cbl',
+        javaPath: '/tmp/out/B.java', workDir: '/tmp/work/b',
+        compareStatus: 'JAVA_ONLY', repairApplied: 'compile', accuracyResult,
+        compilationError: 'missing symbol Foo'
+    });
+    assert.strictEqual(fail.java_status, 'COMPILE_FAIL');
+    assert.strictEqual(fail.error, 'missing symbol Foo');
+    assert.strictEqual(fail.repair_applied, 'compile');
+});
+
+// runCompileAndRepair is heavier to test — it shells out to javac/java.
+// We only exercise the repair-gate decision logic since that's where
+// the flow-control bugs hide. Skip if the JDK isn't installed.
+test('runCompileAndRepair DISABLE_AUTOFIX=1 bypasses the repair gate', async () => {
+    try {
+        require('child_process').execSync('javac -version', { stdio: ['ignore', 'ignore', 'ignore'] });
+    } catch { return; }
+
+    const { runCompileAndRepair } = require('../src/routes/convert-azure-helpers');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cr-bypass-'));
+    try {
+        const javaDir = path.join(tmp, 'java');
+        const workDir = path.join(tmp, 'work');
+        fs.mkdirSync(javaDir, { recursive: true });
+        fs.mkdirSync(workDir, { recursive: true });
+        // Write a compile-broken Java so the repair gate WOULD fire if
+        // DISABLE_AUTOFIX were unset — but we set it, so no repair happens.
+        const javaPath = path.join(javaDir, 'Broken.java');
+        fs.writeFileSync(javaPath, 'public class Broken { void x() { return z; } }'); // bad: undefined z, no return type
+        fs.writeFileSync(path.join(workDir, 'Broken.java'), 'public class Broken { void x() { return z; } }');
+
+        let repairCalled = false;
+        const stubAgent = {
+            analyzeConversionAccuracy: () => ({ accuracy: 50, details: '', cobolMetrics: {}, javaMetrics: {}, semanticPenalties: [] }),
+            isAvailable: () => true,
+            fixJavaCode: async () => { repairCalled = true; return { success: false }; }
+        };
+
+        const prevDisable = process.env.DISABLE_AUTOFIX;
+        process.env.DISABLE_AUTOFIX = '1';
+        try {
+            const result = await runCompileAndRepair({
+                relativePath: 'b.cbl', baseName: 'Broken', javaClassName: 'Broken',
+                javaDir, javaPath, workDir, javaFileName: 'Broken.java',
+                initialJavaCode: 'public class Broken { }',
+                cobolSource: 'PROGRAM-ID. X.', programIdToJavaClass: {},
+                conversion: { tokens: { promptIn: 0, completionOut: 0, total: 0, calls: 0 }, _lastRun: {} },
+                azureAgent: stubAgent,
+                normalizeClassName: (s) => s,
+                pushTimeline: () => {},
+                startMs: Date.now()
+            });
+            assert.ok(result.compilationError, 'broken java should report a compile error');
+            assert.strictEqual(repairCalled, false, 'DISABLE_AUTOFIX=1 must bypass the repair call');
+            assert.strictEqual(result.repairApplied, null);
+        } finally {
+            if (prevDisable === undefined) delete process.env.DISABLE_AUTOFIX;
+            else process.env.DISABLE_AUTOFIX = prevDisable;
+        }
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
+test('runCompileAndRepair fires repair when fabricated-input fallback is flagged', async () => {
+    try {
+        require('child_process').execSync('javac -version', { stdio: ['ignore', 'ignore', 'ignore'] });
+    } catch { return; }
+
+    const { runCompileAndRepair } = require('../src/routes/convert-azure-helpers');
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cr-fabricated-'));
+    try {
+        const javaDir = path.join(tmp, 'java');
+        const workDir = path.join(tmp, 'work');
+        fs.mkdirSync(javaDir, { recursive: true });
+        fs.mkdirSync(workDir, { recursive: true });
+        // Compile-clean Java so ONLY the fabricated-fallback penalty
+        // triggers the repair gate.
+        const okJava = 'public class Hi { public static void main(String[] args) { System.out.println("hi"); } }';
+        const javaPath = path.join(javaDir, 'Hi.java');
+        fs.writeFileSync(javaPath, okJava);
+        fs.writeFileSync(path.join(workDir, 'Hi.java'), okJava);
+
+        let repairCalls = 0;
+        const stubAgent = {
+            analyzeConversionAccuracy: () => ({
+                accuracy: 70, details: '', cobolMetrics: {}, javaMetrics: {},
+                semanticPenalties: ['Fabricated input fallback']
+            }),
+            isAvailable: () => true,
+            fixJavaCode: async () => {
+                repairCalls++;
+                return {
+                    success: true,
+                    javaCode: okJava,  // repair returns same (no-op) — still triggers recompile
+                    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 }
+                };
+            }
+        };
+
+        const conversion = { tokens: { promptIn: 0, completionOut: 0, total: 0, calls: 0 }, _lastRun: {} };
+        const result = await runCompileAndRepair({
+            relativePath: 'h.cbl', baseName: 'Hi', javaClassName: 'Hi',
+            javaDir, javaPath, workDir, javaFileName: 'Hi.java',
+            initialJavaCode: okJava,
+            cobolSource: 'PROGRAM-ID. HI.', programIdToJavaClass: {},
+            conversion,
+            azureAgent: stubAgent,
+            normalizeClassName: (s) => s,
+            pushTimeline: () => {},
+            startMs: Date.now()
+        });
+        assert.strictEqual(repairCalls, 1, 'fabricated fallback penalty should trigger exactly one repair call');
+        assert.strictEqual(result.repairApplied, 'fallback');
+        // Token accounting must include the repair call's usage.
+        assert.strictEqual(conversion.tokens.calls, 1, 'repair call should be counted');
+        assert.strictEqual(conversion.tokens.total, 150);
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+});
+
 test('buildContext caps copybook-payload at ~40k chars', () => {
     const { buildContext } = require('../src/routes/convert-azure-helpers');
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ctx-cap-'));

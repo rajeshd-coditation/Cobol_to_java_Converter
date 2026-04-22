@@ -305,9 +305,265 @@ function extractEntrySignature(javaCode, javaClassName) {
     }
 }
 
+/**
+ * javac + java on a single converted file.
+ *
+ * Strategy: compile the target .java with `javaDir` on the classpath so
+ * cross-file `new Sibling().run(...)` references resolve to already-
+ * converted siblings in the same batch. Run with the same classpath at
+ * a 10s timeout, capturing stdout+stderr together. Writes java_output.txt
+ * and native_output.txt into the per-file work dir so the UI's Run panel
+ * can show what happened even before the user clicks Run.
+ *
+ * Pure in the functional sense — only touches `workDir` on disk. All
+ * class identity comes in via args; no closure.
+ *
+ * Returns { javaOutput, compareStatus, compilationError } where
+ * compareStatus is 'MATCH' on non-empty output or 'JAVA_ONLY' otherwise,
+ * and compilationError is non-null when javac failed.
+ */
+async function compileAndRun({ javaDir, workDir, javaFileName, javaClassName }) {
+    const path = require('path');
+    const fs = require('fs');
+    const { execSync, spawnSync } = require('child_process');
+
+    const javaFileInWorkDir = path.join(workDir, javaFileName);
+    let javaOutput = '';
+    let compareStatus = 'JAVA_ONLY';
+    let compilationError = null;
+    try {
+        try {
+            // javaDir on the classpath resolves `new Sibling().run(...)`
+            // across files in the same batch. workDir stays the primary
+            // output dir so the per-file Run panel has everything local.
+            execSync(`javac -cp "${javaDir}" -d "${workDir}" "${javaFileInWorkDir}"`, {
+                cwd: workDir,
+                timeout: 30000,
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+            try {
+                const result = spawnSync('java', ['-cp', workDir + path.delimiter + javaDir, javaClassName], {
+                    cwd: workDir,
+                    timeout: 10000,
+                    encoding: 'utf-8',
+                    shell: false,
+                    input: '\n\n\n'
+                });
+                const stdout = result.stdout || '';
+                const stderr = result.stderr || '';
+                const exitCode = result.status;
+                let combinedOutput = '';
+                if (stdout.trim()) combinedOutput = stdout.trim();
+                if (stderr.trim()) {
+                    combinedOutput = combinedOutput
+                        ? combinedOutput + '\n' + stderr.trim()
+                        : stderr.trim();
+                }
+                if (combinedOutput.length > 0) {
+                    javaOutput = combinedOutput;
+                    compareStatus = 'MATCH';
+                } else if (exitCode === 0) {
+                    javaOutput = '[Program executed successfully but produced no console output]';
+                } else if (result.error) {
+                    const errMsg = result.error.message || '';
+                    javaOutput = (errMsg.includes('ETIMEDOUT') || errMsg.includes('timeout'))
+                        ? '[Program timed out - may require interactive input]'
+                        : `[Runtime Error] ${errMsg}`;
+                } else {
+                    javaOutput = `[Program exited with code ${exitCode}]`;
+                }
+            } catch (runErr) {
+                javaOutput = `[Runtime Error] ${runErr.message}`;
+            }
+        } catch (compileErr) {
+            compilationError = compileErr.stderr ? compileErr.stderr.toString() : compileErr.message;
+            javaOutput = `[Compilation Error]\n${compilationError}`;
+        }
+        fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
+        fs.writeFileSync(path.join(workDir, 'native_output.txt'),
+            'COBOL native execution not available (requires mainframe environment)');
+    } catch (execErr) {
+        javaOutput = `[Execution Error] ${execErr.message}`;
+        fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
+    }
+    return { javaOutput, compareStatus, compilationError };
+}
+
+/**
+ * Orchestrate compile → accuracy → maybe-repair → recompile.
+ *
+ * Mirrors the original inline flow without changing behavior. When the
+ * initial javac fails OR the accuracy scorer flags a fabricated-input
+ * fallback, fire exactly one repair pass via fixJavaCodeFn (the repair
+ * prompt already covers both cases — "COMPILES cleanly" AND "REMOVE
+ * FABRICATED INPUT DATA"). Bypassed entirely when DISABLE_AUTOFIX=1 is
+ * set — that's the A/B arm for measuring raw-AI output quality.
+ *
+ * On successful repair, re-writes the Java to disk, recompiles, reruns,
+ * re-scores, and accumulates the repair call's token usage. On repair
+ * failure, returns the initial state with a repair_failed timeline
+ * event already pushed.
+ *
+ * pushTimeline is a thin wrapper the caller provides that writes a
+ * phase entry to the per-file timeline. Passing it in (instead of
+ * closing over) keeps this helper testable in isolation.
+ *
+ * Returns the final state: { javaCode, javaOutput, compareStatus,
+ *   compilationError, accuracyResult, repairApplied }.
+ */
+async function runCompileAndRepair(args) {
+    const path = require('path');
+    const fs = require('fs');
+    const {
+        relativePath, baseName, javaClassName,
+        javaDir, javaPath, workDir, javaFileName,
+        initialJavaCode,
+        cobolSource, programIdToJavaClass,
+        conversion,
+        azureAgent, normalizeClassName,
+        pushTimeline, startMs
+    } = args;
+
+    let fixedJavaCode = initialJavaCode;
+
+    // Initial compile + run.
+    const _tCompile = Date.now();
+    pushTimeline(relativePath, 'compile', 'Running javac + java to verify');
+    const run1 = await compileAndRun({ javaDir, workDir, javaFileName, javaClassName });
+    let { javaOutput, compareStatus, compilationError } = run1;
+    pushTimeline(relativePath, 'compile_done', compilationError ? 'javac: FAIL' : 'javac: OK', {
+        ms: Date.now() - _tCompile,
+        compileStatus: compilationError ? 'fail' : 'ok',
+        errorPreview: compilationError ? String(compilationError).split('\n').slice(0, 2).join(' | ').slice(0, 200) : null
+    });
+
+    // Initial accuracy score (cheap; regex-based).
+    let accuracyResult = azureAgent.analyzeConversionAccuracy(cobolSource, fixedJavaCode);
+    pushTimeline(relativePath, 'accuracy', 'Accuracy scored', {
+        accuracy: accuracyResult.accuracy,
+        penalties: (accuracyResult.semanticPenalties || []).length
+    });
+
+    // Repair-gate: compile-fail OR fabricated-fallback. Single repair
+    // pass; the prompt covers both cases at once.
+    const penalties = accuracyResult.semanticPenalties || [];
+    const hasFabricatedFallback = penalties.includes('Fabricated input fallback');
+    const needsRepair = process.env.DISABLE_AUTOFIX !== '1'
+        && (compilationError || hasFabricatedFallback)
+        && azureAgent.isAvailable();
+    let repairApplied = null;
+
+    if (needsRepair) {
+        repairApplied = compilationError && hasFabricatedFallback
+            ? 'compile+fallback'
+            : (compilationError ? 'compile' : 'fallback');
+        console.log(`    Auto-repair pass for ${relativePath} (${repairApplied})`);
+        pushTimeline(relativePath, 'repair', 'Auto-repair triggered: ' + repairApplied);
+        // Cached /api/run capture of the COBOL side (if the user ran this
+        // file once already) gives the repair agent real target behavior
+        // to match. Null on a fresh conversion — the repair prompt's
+        // cobolOutput is optional.
+        const priorRun = (conversion._lastRun && conversion._lastRun[relativePath]) || {};
+        try {
+            const repair = await azureAgent.fixJavaCode({
+                javaCode: fixedJavaCode,
+                cobolSource,
+                compileErrors: compilationError || null,
+                runOutput: javaOutput,
+                cobolOutput: priorRun.cobolOutput || null,
+                dependencies: programIdToJavaClass
+            });
+            if (repair && repair.success && repair.javaCode) {
+                // Re-normalize the class name — the repair agent usually
+                // preserves it, but a mismatch after repair breaks the
+                // `java -cp workDir <javaClassName>` invocation.
+                fixedJavaCode = normalizeClassName(repair.javaCode, javaClassName, baseName);
+                fs.writeFileSync(javaPath, fixedJavaCode);
+                fs.writeFileSync(path.join(workDir, javaFileName), fixedJavaCode);
+                if (repair.usage) {
+                    conversion.tokens.promptIn     += repair.usage.prompt_tokens || 0;
+                    conversion.tokens.completionOut += repair.usage.completion_tokens || 0;
+                    conversion.tokens.total        += repair.usage.total_tokens || 0;
+                    conversion.tokens.calls        += 1;
+                }
+                const run2 = await compileAndRun({ javaDir, workDir, javaFileName, javaClassName });
+                javaOutput       = run2.javaOutput;
+                compareStatus    = run2.compareStatus;
+                compilationError = run2.compilationError;
+                accuracyResult   = azureAgent.analyzeConversionAccuracy(cobolSource, fixedJavaCode);
+                pushTimeline(relativePath, 'repair_done',
+                    compilationError ? 'Repair applied, still fails javac' : 'Repair fixed javac failure', {
+                        compileStatus: compilationError ? 'fail' : 'ok',
+                        tokens: repair.usage ? (repair.usage.total_tokens || null) : null,
+                        accuracy: accuracyResult.accuracy
+                    });
+            } else {
+                console.warn(`   [warn]  Repair pass failed: ${repair && repair.error}`);
+                pushTimeline(relativePath, 'repair_failed', 'Repair call did not return usable Java', {
+                    error: (repair && repair.error) || 'unknown'
+                });
+            }
+        } catch (repairErr) {
+            console.warn(`   [warn]  Repair pass errored: ${repairErr.message}`);
+            pushTimeline(relativePath, 'repair_errored', 'Repair call errored', { error: repairErr.message });
+        }
+    }
+
+    pushTimeline(relativePath, 'done', compilationError ? 'COMPILE_FAIL' : 'SUCCESS', {
+        totalMs: Date.now() - startMs
+    });
+
+    return {
+        javaCode: fixedJavaCode,
+        javaOutput,
+        compareStatus,
+        compilationError,
+        accuracyResult,
+        repairApplied
+    };
+}
+
+/**
+ * Build the report entry object for a successful or compile-failed file.
+ *
+ * Pure. The two variants share most fields; the split keeps the caller's
+ * control flow simple (COMPILE_FAIL path has `error`, SUCCESS path
+ * doesn't).
+ */
+function buildReportEntry({
+    success,
+    relativePath, cobolPath, javaPath, workDir,
+    compareStatus, repairApplied, accuracyResult,
+    compilationError
+}) {
+    const base = {
+        path: relativePath,
+        source_path: cobolPath,
+        java_path: javaPath,
+        work_dir: workDir,
+        compare: compareStatus,
+        method: 'azure_ai',
+        repair_applied: repairApplied,
+        conversionAccuracy: accuracyResult.accuracy,
+        accuracyDetails: accuracyResult.details,
+        accuracyBreakdown: {
+            cobolMetrics: accuracyResult.cobolMetrics,
+            javaMetrics: accuracyResult.javaMetrics,
+            semanticPenalties: accuracyResult.semanticPenalties || []
+        }
+    };
+    if (success) {
+        return Object.assign(base, { java_status: 'SUCCESS' });
+    }
+    return Object.assign(base, { java_status: 'COMPILE_FAIL', error: compilationError });
+}
+
 module.exports = {
     preflightCheck,
     buildContext,
     extractReviewerFeedback,
-    extractEntrySignature
+    extractEntrySignature,
+    compileAndRun,
+    runCompileAndRepair,
+    buildReportEntry
 };
