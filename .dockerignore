@@ -1,0 +1,6 @@
+.git
+opensource/tools/web-ui/node_modules
+opensource/tools/web-ui/.env
+opensource/tools/test_output
+opensource/tools/test_out_check
+*.log

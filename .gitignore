@@ -78,6 +78,9 @@ configure~
 *.gcno
 report.html
 
+# Environment / secrets — never commit
+.env
+
 # Web UI
 opensource/tools/web-ui/node_modules/
 opensource/tools/web-ui/.env

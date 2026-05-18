@@ -1,0 +1,14 @@
+services:
+  cobol-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cobol-converter
+    ports:
+      - "3001:3000"
+    volumes:
+      # CardDemo COBOL sample app — available inside container as /cobol-source/carddemo
+      - ./opensource/carddemo-app:/cobol-source/carddemo:ro
+    env_file:
+      - .env
+    restart: unless-stopped
