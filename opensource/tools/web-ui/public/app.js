@@ -671,6 +671,11 @@ async function fetchResults() {
         // Show results section
         resultsSection.classList.remove('hidden');
 
+        // Load PRD if this was an Azure AI conversion
+        if (currentConversionId) {
+            showPRDSection(currentConversionId);
+        }
+
         // Auto-switch to error tab if mostly errors
         if ((data.converted || 0) === 0 && (data.skippedError || 0) > 0) {
             switchTab('error');
@@ -1230,6 +1235,345 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ── Business Intelligence: PRD + Diagrams ────────────────────────────────────
+
+// Initialize Mermaid with dark theme
+if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+            primaryColor: '#6c3de8',
+            primaryTextColor: '#e0e0ff',
+            primaryBorderColor: '#9b6cff',
+            lineColor: '#9b6cff',
+            secondaryColor: '#1a1550',
+            tertiaryColor: '#0d3b6e',
+            background: '#0a0818',
+            mainBkg: '#1a1550',
+            nodeBorder: '#6c3de8',
+            clusterBkg: '#1a1550',
+            titleColor: '#e0e0ff',
+            edgeLabelBackground: '#1a1550',
+            fontFamily: 'Space Grotesk, sans-serif'
+        }
+    });
+}
+
+let _prdContent = null;
+let _prdData = null;       // raw businessRules JSON
+let _activeBiTab = 'doc';
+let _visNetwork = null;    // vis.js network instance
+
+// Switch between BI tabs (Document / Process Flow / Knowledge Graph)
+function switchBiTab(tab) {
+    _activeBiTab = tab;
+    ['doc', 'flow', 'graph'].forEach(t => {
+        const btn = document.getElementById(`biTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        const panel = document.getElementById(`biPanel${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (!btn || !panel) return;
+        const active = t === tab;
+        btn.style.color = active ? 'var(--text-primary)' : 'var(--text-secondary)';
+        btn.style.borderBottomColor = active ? '#6c3de8' : 'transparent';
+        btn.style.fontWeight = active ? '600' : 'normal';
+        panel.style.display = active ? '' : 'none';
+    });
+    // Lazy-render knowledge graph when tab is first opened
+    if (tab === 'graph' && _prdData && _visNetwork === null) {
+        renderKnowledgeGraph(_prdData);
+    }
+    // Fit vis network if already rendered
+    if (tab === 'graph' && _visNetwork) {
+        setTimeout(() => _visNetwork.fit(), 100);
+    }
+}
+
+// Render Mermaid diagram into a container element
+async function renderMermaid(containerId, chartDef) {
+    const el = document.getElementById(containerId);
+    if (!el || typeof mermaid === 'undefined') return;
+    try {
+        const id = `mermaid_${Date.now()}`;
+        const { svg } = await mermaid.render(id, chartDef);
+        el.innerHTML = svg;
+        // Make SVG responsive
+        const svgEl = el.querySelector('svg');
+        if (svgEl) {
+            svgEl.style.maxWidth = '100%';
+            svgEl.style.height = 'auto';
+        }
+    } catch (err) {
+        el.innerHTML = `<p style="color:#ff6b6b;font-size:0.8rem;margin:0;">Diagram render error: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// Build Mermaid flowchart definition from a program's processFlow
+function buildFlowchartDef(programRules) {
+    const flow = programRules.processFlow || [];
+    if (flow.length === 0) return null;
+
+    const steps = flow.map((s, i) => {
+        if (typeof s === 'string') return { id: `S${i}`, step: s, type: 'process', rules: [] };
+        return { id: `S${i}`, step: s.step || `Step ${i + 1}`, type: s.type || 'process', rules: s.rules || [] };
+    });
+
+    const safe = t => (t || '').replace(/"/g, "'").replace(/[<>{}[\]|]/g, ' ').replace(/\n/g, ' ').trim().substring(0, 50);
+
+    let chart = `flowchart TD\n`;
+    chart += `    classDef startEnd fill:#6c3de8,stroke:#9b6cff,color:#fff\n`;
+    chart += `    classDef process fill:#1a1550,stroke:#6c3de8,color:#e0e0ff\n`;
+    chart += `    classDef decision fill:#0d3b6e,stroke:#4a9eff,color:#e0f0ff\n`;
+    chart += `    classDef io fill:#0a3d2e,stroke:#2ecc71,color:#d0ffe8\n`;
+
+    steps.forEach(s => {
+        const label = safe(s.step);
+        switch (s.type) {
+            case 'start': case 'end':
+                chart += `    ${s.id}(["${label}"]):::startEnd\n`; break;
+            case 'decision':
+                chart += `    ${s.id}{"${label}"}:::decision\n`; break;
+            case 'io':
+                chart += `    ${s.id}[/"${label}"/]:::io\n`; break;
+            default:
+                chart += `    ${s.id}["${label}"]:::process\n`;
+        }
+    });
+
+    for (let i = 0; i < steps.length - 1; i++) {
+        chart += `    ${steps[i].id} --> ${steps[i + 1].id}\n`;
+    }
+
+    return { chart, steps };
+}
+
+// Render process flow for the selected program
+function renderFlowForProgram(programName) {
+    const wrap = document.getElementById('flowDiagramWrap');
+    const stepRules = document.getElementById('flowStepRules');
+    if (!wrap) return;
+
+    if (!programName || !_prdData) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);margin:0;font-size:0.85rem;">Select a program to view its process flow diagram</p>';
+        if (stepRules) stepRules.innerHTML = '';
+        return;
+    }
+
+    const program = _prdData.find(p => p.programName === programName);
+    if (!program) return;
+
+    const result = buildFlowchartDef(program);
+    if (!result) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);margin:0;font-size:0.85rem;">No process flow data for this program.</p>';
+        if (stepRules) stepRules.innerHTML = '';
+        return;
+    }
+
+    wrap.innerHTML = '<div id="flowDiagram" style="min-height:200px;"></div>';
+    renderMermaid('flowDiagram', result.chart);
+
+    // Render step-by-step business rules below the diagram
+    if (stepRules) {
+        const hasRules = result.steps.some(s => s.rules && s.rules.length > 0);
+        if (hasRules) {
+            let html = '<h4 style="color:var(--text-primary);font-size:0.9rem;margin:0 0 12px 0;">Step Business Rules</h4>';
+            result.steps.forEach(s => {
+                if (!s.rules || s.rules.length === 0) return;
+                html += `<div style="margin-bottom:12px;">`;
+                html += `<div style="font-size:0.82rem;font-weight:600;color:#9b6cff;margin-bottom:4px;">${escapeHtml(s.step)}</div>`;
+                html += `<ul style="margin:0;padding-left:18px;">`;
+                s.rules.forEach(r => { html += `<li style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:2px;">${escapeHtml(r)}</li>`; });
+                html += `</ul></div>`;
+            });
+            stepRules.innerHTML = html;
+        } else {
+            stepRules.innerHTML = '';
+        }
+    }
+
+    // Also populate the side rules panel with overall program business rules
+    const rulesPanel = document.getElementById('flowRulesPanel');
+    if (rulesPanel && program.businessRules && program.businessRules.length > 0) {
+        let html = `<div style="font-size:0.82rem;font-weight:600;color:#9b6cff;margin-bottom:8px;">${escapeHtml(programName)}</div>`;
+        html += `<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;">Overall Business Rules:</div>`;
+        html += `<ul style="margin:0;padding-left:16px;">`;
+        program.businessRules.forEach(r => { html += `<li style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;">${escapeHtml(r)}</li>`; });
+        html += `</ul>`;
+        rulesPanel.innerHTML = html;
+    }
+}
+
+// Render vis.js knowledge graph
+function renderKnowledgeGraph(programs) {
+    const container = document.getElementById('knowledgeGraphContainer');
+    const placeholder = document.getElementById('graphPlaceholder');
+    if (!container || typeof vis === 'undefined') return;
+    if (placeholder) placeholder.style.display = 'none';
+
+    const nodes = [];
+    const edges = [];
+    const seen = new Set();
+    const programNames = new Set(programs.map(p => p.programName).filter(Boolean));
+
+    programs.forEach(p => {
+        if (!p || !p.programName) return;
+        if (!seen.has(p.programName)) {
+            seen.add(p.programName);
+            nodes.push({
+                id: p.programName,
+                label: p.programName,
+                title: p.description || p.programName,
+                color: { background: '#6c3de8', border: '#9b6cff', highlight: { background: '#8b5cf6', border: '#c4b5fd' } },
+                font: { color: '#ffffff', size: 13 },
+                shape: 'box',
+                margin: { top: 8, bottom: 8, left: 10, right: 10 },
+                shadow: true
+            });
+        }
+        (p.externalDependencies || []).forEach(dep => {
+            if (!seen.has(dep)) {
+                seen.add(dep);
+                const isProg = programNames.has(dep);
+                nodes.push({
+                    id: dep,
+                    label: dep,
+                    color: isProg
+                        ? { background: '#4a9eff', border: '#7bbfff', highlight: { background: '#60a8f8', border: '#a8d4ff' } }
+                        : { background: '#2ecc71', border: '#5de68e', highlight: { background: '#3dd681', border: '#82edb0' } },
+                    font: { color: '#ffffff', size: 11 },
+                    shape: isProg ? 'ellipse' : 'database',
+                    shadow: true
+                });
+            }
+            edges.push({ from: p.programName, to: dep, arrows: 'to', color: { color: '#555580', highlight: '#9b6cff' }, smooth: { type: 'curvedCW', roundness: 0.2 } });
+        });
+    });
+
+    if (nodes.length === 0) {
+        if (placeholder) { placeholder.textContent = 'No relationship data available.'; placeholder.style.display = ''; }
+        return;
+    }
+
+    const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+    const options = {
+        layout: { improvedLayout: true },
+        physics: { enabled: true, stabilization: { iterations: 150 }, barnesHut: { gravitationalConstant: -6000, springLength: 140, springConstant: 0.04 } },
+        interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true },
+        nodes: { borderWidth: 2, borderWidthSelected: 3 },
+        edges: { width: 1.5, selectionWidth: 2.5 }
+    };
+
+    _visNetwork = new vis.Network(container, data, options);
+}
+
+// PRD: fetch and display business rules document
+async function showPRDSection(conversionId) {
+    const prdSection = document.getElementById('prdSection');
+    const prdPreview = document.getElementById('prdPreview');
+    if (!prdSection || !prdPreview) return;
+
+    prdSection.classList.remove('hidden');
+    prdPreview.innerHTML = '<p style="color: var(--text-secondary); margin: 0;">Extracting business rules...</p>';
+    _prdContent = null;
+    _prdData = null;
+    _visNetwork = null;
+
+    // Reset to document tab
+    switchBiTab('doc');
+
+    // Poll until PRD is available (generated in parallel with conversion)
+    const maxAttempts = 10;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            const [prdResp, dataResp] = await Promise.all([
+                fetch(`/api/prd/${conversionId}`),
+                fetch(`/api/prd-data/${conversionId}`)
+            ]);
+
+            if (prdResp.ok) {
+                const prdJson = await prdResp.json();
+                if (prdJson.content) {
+                    _prdContent = prdJson.content;
+                    const preview = prdJson.content.substring(0, 1200) + (prdJson.content.length > 1200 ? '\n...(download for full document)' : '');
+                    prdPreview.innerHTML = `<pre style="white-space: pre-wrap; font-size: 0.8rem; color: var(--text-primary); margin: 0; font-family: monospace;">${escapeHtml(preview)}</pre>`;
+                }
+            }
+
+            if (dataResp.ok) {
+                const dataJson = await dataResp.json();
+                if (dataJson.programs && dataJson.programs.length > 0) {
+                    _prdData = dataJson.programs;
+                    populateFlowProgramSelect(_prdData);
+                }
+            }
+
+            if (_prdContent) return;
+        } catch (_) {}
+        if (attempt < maxAttempts - 1) await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (!_prdContent) {
+        prdPreview.innerHTML = '<p style="color: var(--text-secondary); margin: 0;">Business rules document not available for this conversion.</p>';
+    }
+}
+
+// Populate the program selector dropdown in the Process Flow tab
+function populateFlowProgramSelect(programs) {
+    const sel = document.getElementById('flowProgramSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— select a program —</option>';
+    programs.forEach(p => {
+        if (!p || !p.programName) return;
+        const opt = document.createElement('option');
+        opt.value = p.programName;
+        opt.textContent = p.programName;
+        sel.appendChild(opt);
+    });
+    // Auto-select first program with flow data
+    const first = programs.find(p => p.processFlow && p.processFlow.length > 0);
+    if (first) {
+        sel.value = first.programName;
+        renderFlowForProgram(first.programName);
+    }
+}
+
+function downloadPRD() {
+    if (!_prdContent) return;
+    const blob = new Blob([_prdContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'COBOL_BusinessRules_PRD.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function downloadPRDHtml() {
+    if (!currentConversionId) return;
+    const btn = document.getElementById('downloadHtmlBtn');
+    const origText = btn ? btn.textContent : '';
+    if (btn) btn.textContent = 'Fetching...';
+    try {
+        const resp = await fetch(`/api/prd-html/${currentConversionId}`);
+        if (!resp.ok) throw new Error('Not available');
+        const data = await resp.json();
+        const blob = new Blob([data.content], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'COBOL_PRD_Report.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        alert('HTML report not ready yet. Try again after conversion completes.');
+    } finally {
+        if (btn) btn.textContent = origText;
+    }
 }
 
 // Close comparison modal

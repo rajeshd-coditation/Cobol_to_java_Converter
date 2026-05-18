@@ -1562,6 +1562,47 @@ function analyzeConversionAccuracy(cobolSource, javaCode) {
 }
 
 /**
+ * Extract business rules from COBOL source using Azure AI
+ * Runs in parallel with convertCobolToJava for zero extra wall-clock time
+ */
+async function extractBusinessRules(cobolSource, programName) {
+    if (!azureConfig) return null;
+
+    try {
+        const systemPrompt = `You are a business analyst reviewing legacy COBOL code.
+Extract all business rules from this COBOL program and return ONLY a JSON object with no extra text.
+Use this exact structure:
+{
+  "programName": "${programName}",
+  "description": "One sentence describing what this program does",
+  "businessRules": ["rule in plain English", ...],
+  "dataEntities": [{"name": "FIELD-NAME", "picClause": "PIC 9(7)V99", "description": "what it represents"}],
+  "processFlow": [
+    {"step": "Clear description of what happens in this step", "type": "start|process|decision|io|end", "rules": ["business rule that applies to this specific step"]}
+  ],
+  "externalDependencies": ["FILENAME", "PROGRAMNAME", ...]
+}
+For processFlow: use type "start" for program entry, "end" for termination, "decision" for IF/EVALUATE/conditional steps, "io" for file reads/writes/opens/closes, "process" for computation/transformation steps. Include only rules that specifically govern that step in the "rules" array. Keep step descriptions under 50 characters. Be specific and use plain English, not COBOL jargon.`;
+
+        const response = await makeOpenAIRequest([
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Extract business rules from this COBOL program:\n\n${cobolSource.substring(0, 8000)}` }
+        ], { temperature: 0.3, maxTokens: 2000 });
+
+        if (!response || !response.choices || !response.choices[0]) return null;
+
+        let content = response.choices[0].message?.content || '';
+        content = content.replace(/^```json\n?/i, '').replace(/\n?```$/i, '');
+        content = content.replace(/^```\n?/, '').replace(/\n?```$/, '').trim();
+
+        return JSON.parse(content);
+    } catch (err) {
+        console.error(`   ⚠️ Business rule extraction failed for ${programName}:`, err.message);
+        return null;
+    }
+}
+
+/**
  * Check if Azure AI is available
  */
 function isAvailable() {
@@ -1586,6 +1627,7 @@ function getConfig() {
 module.exports = {
     initializeAzure,
     convertCobolToJava,
+    extractBusinessRules,
     predictProgramOutput,
     analyzeConversionFailure,
     analyzeConversionAccuracy,

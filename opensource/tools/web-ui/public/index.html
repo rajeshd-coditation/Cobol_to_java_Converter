@@ -153,6 +153,71 @@
                     </div>
                 </div>
 
+                <!-- Business Intelligence Section (PRD + Diagrams) -->
+                <div id="prdSection" class="glass-card hidden" style="margin-bottom: 32px; padding: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+                        <div>
+                            <h3 class="section-subtitle" style="margin: 0 0 4px 0;">Business Intelligence</h3>
+                            <p style="color: var(--text-secondary); font-size: 0.85rem; margin: 0;">Auto-extracted business rules, process flows, and system relationships from COBOL source</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-shrink:0;margin-left:16px;">
+                            <button class="btn-primary" id="downloadPrdBtn" onclick="downloadPRD()" style="padding: 8px 16px; font-size: 0.85rem;">
+                                ⬇ Markdown
+                            </button>
+                            <button class="btn-primary" id="downloadHtmlBtn" onclick="downloadPRDHtml()" style="padding: 8px 16px; font-size: 0.85rem; background: linear-gradient(135deg, #0a3d2e, #1a6e4a);">
+                                ⬇ HTML Report
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- BI Tabs -->
+                    <div class="bi-tabs" style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:0;">
+                        <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-primary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid #6c3de8;font-family:inherit;font-weight:600;">Document</button>
+                        <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-secondary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;">Process Flow</button>
+                        <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-secondary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;">Knowledge Graph</button>
+                    </div>
+
+                    <!-- Document Tab -->
+                    <div id="biPanelDoc" class="bi-panel">
+                        <div id="prdPreview" style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px; max-height: 320px; overflow-y: auto;">
+                            <p style="color: var(--text-secondary); margin: 0;">Loading business rules document...</p>
+                        </div>
+                    </div>
+
+                    <!-- Process Flow Tab -->
+                    <div id="biPanelFlow" class="bi-panel" style="display:none;">
+                        <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+                            <label style="color:var(--text-secondary);font-size:0.85rem;">Program:</label>
+                            <select id="flowProgramSelect" onchange="renderFlowForProgram(this.value)" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text-primary);padding:6px 10px;font-family:inherit;font-size:0.85rem;">
+                                <option value="">— select a program —</option>
+                            </select>
+                        </div>
+                        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+                            <div id="flowDiagramWrap" style="flex:1;min-width:260px;background:rgba(0,0,0,0.25);border-radius:8px;padding:16px;overflow:auto;min-height:200px;display:flex;align-items:center;justify-content:center;">
+                                <p style="color:var(--text-secondary);margin:0;font-size:0.85rem;">Select a program to view its process flow diagram</p>
+                            </div>
+                            <div id="flowRulesPanel" style="width:280px;background:rgba(0,0,0,0.2);border-radius:8px;padding:14px;min-height:200px;">
+                                <p style="color:var(--text-secondary);font-size:0.8rem;margin:0;">Click a step node in the diagram to see its business rules here.</p>
+                            </div>
+                        </div>
+                        <!-- Step rules list (always visible below diagram) -->
+                        <div id="flowStepRules" style="margin-top:16px;"></div>
+                    </div>
+
+                    <!-- Knowledge Graph Tab -->
+                    <div id="biPanelGraph" class="bi-panel" style="display:none;">
+                        <p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 10px 0;">Relationships between programs, external files, and system dependencies. Drag nodes to explore.</p>
+                        <div id="knowledgeGraphContainer" style="width:100%;height:480px;background:rgba(0,0,0,0.25);border-radius:8px;border:1px solid rgba(255,255,255,0.08);position:relative;">
+                            <p id="graphPlaceholder" style="color:var(--text-secondary);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;font-size:0.85rem;">Loading knowledge graph...</p>
+                        </div>
+                        <div id="graphLegend" style="display:flex;gap:18px;margin-top:10px;flex-wrap:wrap;font-size:0.8rem;color:var(--text-secondary);">
+                            <span><span style="display:inline-block;width:12px;height:12px;background:#6c3de8;border-radius:3px;margin-right:5px;vertical-align:middle;"></span>Program</span>
+                            <span><span style="display:inline-block;width:12px;height:12px;background:#2ecc71;border-radius:3px;margin-right:5px;vertical-align:middle;"></span>External File</span>
+                            <span><span style="display:inline-block;width:12px;height:12px;background:#4a9eff;border-radius:3px;margin-right:5px;vertical-align:middle;"></span>Called Program</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Why Some Files Don't Convert - Dynamic Section -->
                 <div id="conversionInfoSection" class="conversion-info glass-card hidden">
                     <div class="info-header">
@@ -287,6 +352,10 @@
         </div>
     </div>
 
+    <!-- Mermaid.js for process flow diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <!-- vis.js Network for knowledge graph -->
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9/standalone/umd/vis-network.min.js"></script>
     <script src="app.js"></script>
 </body>
 
