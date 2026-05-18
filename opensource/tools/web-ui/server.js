@@ -747,6 +747,8 @@ app.post('/api/convert-azure', async (req, res) => {
                     reportEntry: null
                 };
 
+                let coveragePromise = null;
+
                 try {
                     const cobolSource = fs.readFileSync(cobolPath, 'utf-8');
 
@@ -781,7 +783,6 @@ app.post('/api/convert-azure', async (req, res) => {
 
                     // Start coverage analysis as soon as we have both rules and Java code —
                     // runs in parallel with the Java compile/run steps below (free wall-clock time)
-                    let coveragePromise = null;
                     if (conversionResult.success && businessRulesResult?.businessRules?.length > 0) {
                         coveragePromise = azureAgent.analyzeBusinessRuleCoverage(
                             businessRulesResult.businessRules,
