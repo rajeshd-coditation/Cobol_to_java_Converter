@@ -197,6 +197,25 @@ function generatePRD(allBusinessRules, repoPath) {
             md += `\n`;
         }
 
+        if (rules.coverage && rules.coverage.coverage && rules.coverage.coverage.length > 0) {
+            const s = rules.coverage.summary || {};
+            const total = s.total || rules.coverage.coverage.length;
+            const covered = s.covered || 0;
+            const partial = s.partial || 0;
+            const missing = s.missing || 0;
+            md += `**Business Rule Coverage:** ${covered}/${total} covered`;
+            if (partial > 0) md += `, ${partial} partial`;
+            if (missing > 0) md += `, ${missing} missing`;
+            md += `\n\n`;
+            md += `| # | Business Rule | COBOL | Java |\n`;
+            md += `|---|--------------|-------|------|\n`;
+            rules.coverage.coverage.forEach((c, i) => {
+                const icon = c.status === 'COVERED' ? '✅' : c.status === 'PARTIAL' ? '⚠️' : '❌';
+                md += `| ${i + 1} | ${c.rule} | ✅ | ${icon} ${c.status}${c.note ? ` — ${c.note}` : ''} |\n`;
+            });
+            md += `\n`;
+        }
+
         if (rules.externalDependencies && rules.externalDependencies.length > 0) {
             md += `**External Dependencies:** ${rules.externalDependencies.join(', ')}\n\n`;
         }
@@ -273,6 +292,39 @@ function generatePRDHtml(allBusinessRules, repoPath) {
             dataHtml += `</tbody></table>`;
         }
 
+        // Business rule coverage table
+        let coverageHtml = '';
+        if (r.coverage && r.coverage.coverage && r.coverage.coverage.length > 0) {
+            const s = r.coverage.summary || {};
+            const total = s.total || r.coverage.coverage.length;
+            const covered = s.covered || 0;
+            const partial = s.partial || 0;
+            const missing = s.missing || 0;
+            const pct = Math.round((covered + partial * 0.5) / total * 100);
+            coverageHtml += `<h3>Business Rule Coverage</h3>`;
+            coverageHtml += `<div class="coverage-summary">`;
+            coverageHtml += `<div class="coverage-bar-wrap"><div class="coverage-bar" style="width:${pct}%"></div></div>`;
+            coverageHtml += `<div class="coverage-stats">`;
+            coverageHtml += `<span class="cov-pill covered">${covered} Covered</span>`;
+            if (partial > 0) coverageHtml += `<span class="cov-pill partial">${partial} Partial</span>`;
+            if (missing > 0) coverageHtml += `<span class="cov-pill missing">${missing} Missing</span>`;
+            coverageHtml += `<span class="cov-total">${covered}/${total} rules fully implemented</span>`;
+            coverageHtml += `</div></div>`;
+            coverageHtml += `<table><thead><tr><th>#</th><th>Business Rule</th><th>COBOL</th><th>Java</th><th>Note</th></tr></thead><tbody>`;
+            r.coverage.coverage.forEach((c, i) => {
+                const icon = c.status === 'COVERED' ? '✅' : c.status === 'PARTIAL' ? '⚠️' : '❌';
+                const cls = c.status === 'COVERED' ? 'covered' : c.status === 'PARTIAL' ? 'partial' : 'missing';
+                coverageHtml += `<tr>`;
+                coverageHtml += `<td>${i + 1}</td>`;
+                coverageHtml += `<td>${esc(c.rule)}</td>`;
+                coverageHtml += `<td style="text-align:center">✅</td>`;
+                coverageHtml += `<td><span class="cov-badge ${cls}">${icon} ${esc(c.status)}</span></td>`;
+                coverageHtml += `<td style="color:var(--text2);font-size:0.8rem">${esc(c.note || '')}</td>`;
+                coverageHtml += `</tr>`;
+            });
+            coverageHtml += `</tbody></table>`;
+        }
+
         // External dependencies
         const depsHtml = (r.externalDependencies || []).length > 0
             ? `<h3>External Dependencies</h3><div class="tags">${r.externalDependencies.map(d => `<span class="tag">${esc(d)}</span>`).join('')}</div>`
@@ -283,6 +335,7 @@ function generatePRDHtml(allBusinessRules, repoPath) {
   <h2>${esc(r.programName)}</h2>
   ${r.description ? `<p class="desc">${esc(r.description)}</p>` : ''}
   ${rulesHtml}
+  ${coverageHtml}
   ${flowHtml}
   ${dataHtml}
   ${depsHtml}
@@ -375,6 +428,21 @@ function generatePRDHtml(allBusinessRules, repoPath) {
   /* Tags */
   .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .tag { background: rgba(10,61,46,0.5); border: 1px solid rgba(46,204,113,0.3); color: var(--green); border-radius: 16px; padding: 3px 12px; font-size: 0.78rem; font-family: monospace; }
+
+  /* Coverage */
+  .coverage-summary { margin-bottom: 14px; }
+  .coverage-bar-wrap { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+  .coverage-bar { height: 100%; background: linear-gradient(90deg, #2ecc71, #6c3de8); border-radius: 4px; transition: width 0.4s; }
+  .coverage-stats { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .cov-pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 12px; }
+  .cov-pill.covered { background: rgba(46,204,113,0.2); color: var(--green); border: 1px solid rgba(46,204,113,0.35); }
+  .cov-pill.partial { background: rgba(241,196,15,0.15); color: #f1c40f; border: 1px solid rgba(241,196,15,0.3); }
+  .cov-pill.missing { background: rgba(231,76,60,0.15); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); }
+  .cov-total { font-size: 0.78rem; color: var(--text2); margin-left: auto; }
+  .cov-badge { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .cov-badge.covered { background: rgba(46,204,113,0.2); color: var(--green); }
+  .cov-badge.partial { background: rgba(241,196,15,0.15); color: #f1c40f; }
+  .cov-badge.missing { background: rgba(231,76,60,0.15); color: #e74c3c; }
 
   /* Print */
   @media print {
@@ -711,6 +779,17 @@ app.post('/api/convert-azure', async (req, res) => {
                     ]);
                     fileResult.businessRules = businessRulesResult;
 
+                    // Start coverage analysis as soon as we have both rules and Java code —
+                    // runs in parallel with the Java compile/run steps below (free wall-clock time)
+                    let coveragePromise = null;
+                    if (conversionResult.success && businessRulesResult?.businessRules?.length > 0) {
+                        coveragePromise = azureAgent.analyzeBusinessRuleCoverage(
+                            businessRulesResult.businessRules,
+                            conversionResult.javaCode,
+                            baseName
+                        );
+                    }
+
                     if (conversionResult.success) {
                         // Create work directory for this file (for UI buttons)
                         const workDir = path.join(outputDir, 'work', baseName);
@@ -937,6 +1016,14 @@ app.post('/api/convert-azure', async (req, res) => {
                         java_status: 'FAIL',
                         error: fileErr.message
                     };
+                }
+
+                // Attach coverage analysis result if it completed
+                if (coveragePromise && fileResult.businessRules) {
+                    try {
+                        const coverageResult = await coveragePromise;
+                        if (coverageResult) fileResult.businessRules.coverage = coverageResult;
+                    } catch (_) {}
                 }
 
                 return fileResult;

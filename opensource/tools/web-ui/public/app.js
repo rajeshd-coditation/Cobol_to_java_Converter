@@ -1267,12 +1267,13 @@ let _prdData = null;       // raw businessRules JSON
 let _activeBiTab = 'doc';
 let _visNetwork = null;    // vis.js network instance
 
-// Switch between BI tabs (Document / Process Flow / Knowledge Graph)
+// Switch between BI tabs (Document / Process Flow / Knowledge Graph / Rule Coverage)
 function switchBiTab(tab) {
     _activeBiTab = tab;
-    ['doc', 'flow', 'graph'].forEach(t => {
-        const btn = document.getElementById(`biTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
-        const panel = document.getElementById(`biPanel${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    ['doc', 'flow', 'graph', 'coverage'].forEach(t => {
+        const key = t.charAt(0).toUpperCase() + t.slice(1);
+        const btn = document.getElementById(`biTab${key}`);
+        const panel = document.getElementById(`biPanel${key}`);
         if (!btn || !panel) return;
         const active = t === tab;
         btn.style.color = active ? 'var(--text-primary)' : 'var(--text-secondary)';
@@ -1280,11 +1281,9 @@ function switchBiTab(tab) {
         btn.style.fontWeight = active ? '600' : 'normal';
         panel.style.display = active ? '' : 'none';
     });
-    // Lazy-render knowledge graph when tab is first opened
     if (tab === 'graph' && _prdData && _visNetwork === null) {
         renderKnowledgeGraph(_prdData);
     }
-    // Fit vis network if already rendered
     if (tab === 'graph' && _visNetwork) {
         setTimeout(() => _visNetwork.fit(), 100);
     }
@@ -1505,6 +1504,7 @@ async function showPRDSection(conversionId) {
                 if (dataJson.programs && dataJson.programs.length > 0) {
                     _prdData = dataJson.programs;
                     populateFlowProgramSelect(_prdData);
+                    populateCoverageProgramSelect(_prdData);
                 }
             }
 
@@ -1530,12 +1530,105 @@ function populateFlowProgramSelect(programs) {
         opt.textContent = p.programName;
         sel.appendChild(opt);
     });
-    // Auto-select first program with flow data
     const first = programs.find(p => p.processFlow && p.processFlow.length > 0);
     if (first) {
         sel.value = first.programName;
         renderFlowForProgram(first.programName);
     }
+}
+
+// Populate the coverage program selector and auto-select first program with coverage data
+function populateCoverageProgramSelect(programs) {
+    const sel = document.getElementById('coverageProgramSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— select a program —</option>';
+    programs.forEach(p => {
+        if (!p || !p.programName) return;
+        const opt = document.createElement('option');
+        opt.value = p.programName;
+        const cov = p.coverage?.summary;
+        const tag = cov ? ` (${cov.covered}/${cov.total})` : '';
+        opt.textContent = p.programName + tag;
+        sel.appendChild(opt);
+    });
+    const first = programs.find(p => p.coverage?.coverage?.length > 0);
+    if (first) {
+        sel.value = first.programName;
+        renderCoverageForProgram(first.programName);
+    }
+}
+
+// Render the business rule coverage table for a program
+function renderCoverageForProgram(programName) {
+    const wrap = document.getElementById('coverageTableWrap');
+    const progressWrap = document.getElementById('coverageProgressWrap');
+    const progressBar = document.getElementById('coverageProgressBar');
+    const badge = document.getElementById('coverageSummaryBadge');
+
+    if (!wrap) return;
+
+    if (!programName || !_prdData) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;margin:0;">Select a program to see its business rule coverage.</p>';
+        if (progressWrap) progressWrap.style.display = 'none';
+        if (badge) badge.textContent = '';
+        return;
+    }
+
+    const program = _prdData.find(p => p.programName === programName);
+    if (!program?.coverage?.coverage?.length) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;margin:0;">No coverage data for this program — it may not have been converted successfully.</p>';
+        if (progressWrap) progressWrap.style.display = 'none';
+        if (badge) badge.textContent = '';
+        return;
+    }
+
+    const items = program.coverage.coverage;
+    const s = program.coverage.summary || {};
+    const total = s.total || items.length;
+    const covered = s.covered || 0;
+    const partial = s.partial || 0;
+    const missing = s.missing || 0;
+    const pct = Math.round((covered + partial * 0.5) / total * 100);
+
+    // Progress bar
+    if (progressWrap) progressWrap.style.display = '';
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    if (badge) {
+        badge.innerHTML =
+            `<span style="color:#2ecc71;font-weight:700;">${covered} covered</span>` +
+            (partial > 0 ? ` &nbsp;·&nbsp; <span style="color:#f1c40f;font-weight:700;">${partial} partial</span>` : '') +
+            (missing > 0 ? ` &nbsp;·&nbsp; <span style="color:#e74c3c;font-weight:700;">${missing} missing</span>` : '') +
+            ` &nbsp;·&nbsp; ${pct}% implemented`;
+    }
+
+    // Table
+    let html = `<table style="width:100%;border-collapse:collapse;font-size:0.84rem;">`;
+    html += `<thead><tr>`;
+    html += `<th style="text-align:left;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);width:28px">#</th>`;
+    html += `<th style="text-align:left;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);">Business Rule</th>`;
+    html += `<th style="text-align:center;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);width:60px">COBOL</th>`;
+    html += `<th style="text-align:center;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);width:100px">Java</th>`;
+    html += `<th style="text-align:left;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);">Note</th>`;
+    html += `</tr></thead><tbody>`;
+
+    items.forEach((c, i) => {
+        const { icon, color, bg } = c.status === 'COVERED'
+            ? { icon: '✅', color: '#2ecc71', bg: 'rgba(46,204,113,0.07)' }
+            : c.status === 'PARTIAL'
+            ? { icon: '⚠️', color: '#f1c40f', bg: 'rgba(241,196,15,0.07)' }
+            : { icon: '❌', color: '#e74c3c', bg: 'rgba(231,76,60,0.07)' };
+
+        html += `<tr style="background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'};border-left:3px solid ${bg === 'transparent' ? 'transparent' : color};">`;
+        html += `<td style="padding:9px 10px;color:var(--text-secondary);vertical-align:top;">${i + 1}</td>`;
+        html += `<td style="padding:9px 10px;color:var(--text-primary);vertical-align:top;">${escapeHtml(c.rule)}</td>`;
+        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;">✅</td>`;
+        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;"><span style="font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:10px;background:${bg};color:${color};white-space:nowrap;">${icon} ${c.status}</span></td>`;
+        html += `<td style="padding:9px 10px;color:var(--text-secondary);font-size:0.8rem;vertical-align:top;">${escapeHtml(c.note || '')}</td>`;
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
 }
 
 function downloadPRD() {

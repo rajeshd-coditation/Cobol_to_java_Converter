@@ -175,6 +175,7 @@
                         <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-primary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid #6c3de8;font-family:inherit;font-weight:600;">Document</button>
                         <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-secondary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;">Process Flow</button>
                         <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-secondary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;">Knowledge Graph</button>
+                        <button class="bi-tab" id="biTabCoverage" onclick="switchBiTab('coverage')" style="padding:8px 18px;border:none;background:transparent;color:var(--text-secondary);font-size:0.88rem;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;">Rule Coverage</button>
                     </div>
 
                     <!-- Document Tab -->
@@ -202,6 +203,25 @@
                         </div>
                         <!-- Step rules list (always visible below diagram) -->
                         <div id="flowStepRules" style="margin-top:16px;"></div>
+                    </div>
+
+                    <!-- Rule Coverage Tab -->
+                    <div id="biPanelCoverage" class="bi-panel" style="display:none;">
+                        <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+                            <label style="color:var(--text-secondary);font-size:0.85rem;">Program:</label>
+                            <select id="coverageProgramSelect" onchange="renderCoverageForProgram(this.value)" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text-primary);padding:6px 10px;font-family:inherit;font-size:0.85rem;">
+                                <option value="">— select a program —</option>
+                            </select>
+                            <span id="coverageSummaryBadge" style="margin-left:auto;font-size:0.8rem;color:var(--text-secondary);"></span>
+                        </div>
+                        <div id="coverageProgressWrap" style="display:none;margin-bottom:16px;">
+                            <div style="height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                                <div id="coverageProgressBar" style="height:100%;background:linear-gradient(90deg,#2ecc71,#6c3de8);border-radius:4px;transition:width 0.4s;width:0%"></div>
+                            </div>
+                        </div>
+                        <div id="coverageTableWrap">
+                            <p style="color:var(--text-secondary);font-size:0.85rem;margin:0;">Select a program to see its business rule coverage.</p>
+                        </div>
                     </div>
 
                     <!-- Knowledge Graph Tab -->

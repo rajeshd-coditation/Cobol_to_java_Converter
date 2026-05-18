@@ -1624,10 +1624,58 @@ function getConfig() {
     };
 }
 
+/**
+ * Analyse which business rules from the COBOL source are present in the generated Java code.
+ * Returns a coverage object attached to the program's business rules data.
+ */
+async function analyzeBusinessRuleCoverage(businessRules, javaCode, programName) {
+    if (!azureConfig || !businessRules || businessRules.length === 0 || !javaCode) return null;
+
+    try {
+        const rulesJson = JSON.stringify(businessRules);
+        const prompt = `You are a code auditor. Below are business rules extracted from a COBOL program called "${programName}", followed by the Java code generated from it.
+
+For EACH business rule, determine whether it is implemented in the Java code:
+- "COVERED"  — clearly and fully implemented
+- "PARTIAL"  — partly implemented or implemented with caveats
+- "MISSING"  — not found in the Java code at all
+
+Return ONLY a JSON object, no extra text:
+{
+  "coverage": [
+    {"rule": "<exact rule text>", "status": "COVERED|PARTIAL|MISSING", "note": "<one sentence explaining why>"}
+  ],
+  "summary": {"covered": N, "partial": N, "missing": N, "total": N}
+}
+
+Business Rules:
+${rulesJson}
+
+Generated Java Code:
+\`\`\`java
+${javaCode.substring(0, 6000)}
+\`\`\``;
+
+        const response = await makeOpenAIRequest([
+            { role: 'user', content: prompt }
+        ], { temperature: 0.2, maxTokens: 2000 });
+
+        if (!response?.choices?.[0]) return null;
+
+        let content = response.choices[0].message?.content || '';
+        content = content.replace(/^```json\n?/i, '').replace(/\n?```$/i, '').trim();
+        return JSON.parse(content);
+    } catch (err) {
+        console.error(`   ⚠️ Coverage analysis failed for ${programName}:`, err.message);
+        return null;
+    }
+}
+
 module.exports = {
     initializeAzure,
     convertCobolToJava,
     extractBusinessRules,
+    analyzeBusinessRuleCoverage,
     predictProgramOutput,
     analyzeConversionFailure,
     analyzeConversionAccuracy,
