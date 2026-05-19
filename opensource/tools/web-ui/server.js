@@ -2,7 +2,9 @@
 require('dotenv').config();
 
 const express = require('express');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -622,13 +624,12 @@ app.post('/api/convert-azure', async (req, res) => {
             if (inputPath.startsWith('http') || inputPath.startsWith('git@')) {
                 conversion.logs.push('📥 Cloning repository...\n');
                 const cloneDir = path.join(os.tmpdir(), `repo_${conversionId}`);
-                const { execSync } = require('child_process');
                 try {
-                    execSync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });
+                    await execAsync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });
                     inputPath = cloneDir;
-                    conversion.logs.push('✅ Repository cloned successfully\n');
+                    conversion.logs.push('Repository cloned successfully\n');
                 } catch (cloneErr) {
-                    conversion.logs.push(`❌ Failed to clone repository: ${cloneErr.message}\n`);
+                    conversion.logs.push(`Failed to clone repository: ${cloneErr.message}\n`);
                     conversion.status = 'completed';
                     conversion.result = results;
                     return;
@@ -732,7 +733,7 @@ app.post('/api/convert-azure', async (req, res) => {
 
 
             // Parallel processing configuration
-            const BATCH_SIZE = 5; // Process 5 files concurrently
+            const BATCH_SIZE = 8; // Process 8 files concurrently
 
             // Helper function to process a single file
             async function processFile(cobolPath, index, total, inputPath) {
@@ -750,7 +751,7 @@ app.post('/api/convert-azure', async (req, res) => {
                 let coveragePromise = null;
 
                 try {
-                    const cobolSource = fs.readFileSync(cobolPath, 'utf-8');
+                    const cobolSource = await fs.promises.readFile(cobolPath, 'utf-8');
 
                     // Skip if it looks like a copybook (no PROGRAM-ID)
                     if (!cobolSource.match(/PROGRAM-ID/i)) {
@@ -794,7 +795,7 @@ app.post('/api/convert-azure', async (req, res) => {
                     if (conversionResult.success) {
                         // Create work directory for this file (for UI buttons)
                         const workDir = path.join(outputDir, 'work', baseName);
-                        fs.mkdirSync(workDir, { recursive: true });
+                        await fs.promises.mkdir(workDir, { recursive: true });
 
                         // Get the correct class name (PascalCase)
                         const javaClassName = toPascalCase(baseName);
@@ -892,13 +893,12 @@ app.post('/api/convert-azure', async (req, res) => {
                             );
                         }
 
-                        fs.writeFileSync(javaPath, fixedJavaCode);
-
-                        // Also save to work dir for UI access
-                        fs.writeFileSync(path.join(workDir, javaFileName), fixedJavaCode);
-
-                        // Copy original COBOL source to work dir
-                        fs.copyFileSync(cobolPath, path.join(workDir, path.basename(cobolPath)));
+                        // Write java file + copy cobol source in parallel (non-blocking)
+                        await Promise.all([
+                            fs.promises.writeFile(javaPath, fixedJavaCode),
+                            fs.promises.writeFile(path.join(workDir, javaFileName), fixedJavaCode),
+                            fs.promises.copyFile(cobolPath, path.join(workDir, path.basename(cobolPath)))
+                        ]);
 
                         // Compile and run Java code to get REAL output
                         let javaOutput = '';
@@ -906,78 +906,65 @@ app.post('/api/convert-azure', async (req, res) => {
                         let compilationError = null;
 
                         try {
-                            const { execSync } = require('child_process');
                             const javaFileInWorkDir = path.join(workDir, javaFileName);
 
-                            // Compile the Java file
+                            // Compile the Java file — async so event loop stays free for other batch files
                             try {
-                                execSync(`javac "${javaFileInWorkDir}"`, {
+                                await execAsync(`javac "${javaFileInWorkDir}"`, {
                                     cwd: workDir,
-                                    timeout: 30000,
-                                    stdio: ['pipe', 'pipe', 'pipe']
+                                    timeout: 30000
                                 });
 
-                                // Run the compiled Java class with empty input (for programs that expect Scanner input)
+                                // Run the compiled Java class — async spawn with stdin + timeout
                                 try {
-                                    // Use spawnSync to capture both stdout and stderr properly
-                                    const { spawnSync } = require('child_process');
-                                    const result = spawnSync('java', ['-cp', workDir, javaClassName], {
-                                        cwd: workDir,
-                                        timeout: 10000,
-                                        encoding: 'utf-8',
-                                        shell: false,
-                                        input: '\n\n\n'  // Provide empty input lines for Scanner
+                                    const runResult = await new Promise((resolve) => {
+                                        const proc = spawn('java', ['-cp', workDir, javaClassName], {
+                                            cwd: workDir, shell: false
+                                        });
+                                        let stdout = '', stderr = '';
+                                        proc.stdout.on('data', d => { stdout += d; });
+                                        proc.stderr.on('data', d => { stderr += d; });
+                                        const timer = setTimeout(() => {
+                                            proc.kill();
+                                            resolve({ stdout: '', stderr: '[Program timed out - may require interactive input]', status: 1, timedOut: true });
+                                        }, 10000);
+                                        proc.on('close', (status) => {
+                                            clearTimeout(timer);
+                                            resolve({ stdout, stderr, status, timedOut: false });
+                                        });
+                                        proc.stdin.write('\n\n\n');
+                                        proc.stdin.end();
                                     });
 
-                                    const stdout = result.stdout || '';
-                                    const stderr = result.stderr || '';
-                                    const exitCode = result.status;
-
-                                    // Combine stdout and stderr for complete output
-                                    let combinedOutput = '';
-                                    if (stdout.trim()) {
-                                        combinedOutput = stdout.trim();
-                                    }
-                                    if (stderr.trim()) {
-                                        // Include stderr output - it often contains useful program output
-                                        if (combinedOutput) {
-                                            combinedOutput += '\n' + stderr.trim();
-                                        } else {
-                                            combinedOutput = stderr.trim();
-                                        }
-                                    }
+                                    const combinedOutput = [runResult.stdout.trim(), runResult.stderr.trim()].filter(Boolean).join('\n');
 
                                     if (combinedOutput.length > 0) {
                                         javaOutput = combinedOutput;
                                         compareStatus = 'MATCH';
-                                    } else if (exitCode === 0) {
+                                    } else if (runResult.timedOut) {
+                                        javaOutput = '[Program timed out - may require interactive input]';
+                                    } else if (runResult.status === 0) {
                                         javaOutput = '[Program executed successfully but produced no console output]';
-                                    } else if (result.error) {
-                                        // Check for specific error types
-                                        const errMsg = result.error.message || '';
-                                        if (errMsg.includes('ETIMEDOUT') || errMsg.includes('timeout')) {
-                                            javaOutput = '[Program timed out - may require interactive input]';
-                                        } else {
-                                            javaOutput = `[Runtime Error] ${errMsg}`;
-                                        }
                                     } else {
-                                        javaOutput = `[Program exited with code ${exitCode}]`;
+                                        javaOutput = `[Program exited with code ${runResult.status}]`;
                                     }
                                 } catch (runErr) {
                                     javaOutput = `[Runtime Error] ${runErr.message}`;
                                 }
                             } catch (compileErr) {
-                                compilationError = compileErr.stderr ? compileErr.stderr.toString() : compileErr.message;
+                                compilationError = compileErr.stderr || compileErr.message;
                                 javaOutput = `[Compilation Error]\n${compilationError}`;
                             }
 
-                            fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
-                            fs.writeFileSync(path.join(workDir, 'native_output.txt'),
-                                'COBOL native execution not available (requires mainframe environment)');
+                            await Promise.all([
+                                fs.promises.writeFile(path.join(workDir, 'java_output.txt'), javaOutput),
+                                fs.promises.writeFile(path.join(workDir, 'native_output.txt'),
+                                    'COBOL native execution not available (requires mainframe environment)')
+                            ]);
 
                         } catch (execErr) {
                             javaOutput = `[Execution Error] ${execErr.message}`;
-                            fs.writeFileSync(path.join(workDir, 'java_output.txt'), javaOutput);
+                            await fs.promises.writeFile(path.join(workDir, 'java_output.txt'), javaOutput);
                         }
 
                         fileResult.status = 'success';
@@ -1076,12 +1063,7 @@ app.post('/api/convert-azure', async (req, res) => {
                     }
                 }
 
-                conversion.logs.push(`   📊 Progress: ${completedCount}/${cobolFiles.length} files (${Math.round(completedCount / cobolFiles.length * 100)}%)\n\n`);
-
-                // Small delay between batches to avoid rate limiting
-                if (i + BATCH_SIZE < cobolFiles.length) {
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay to avoid rate limits
-                }
+                conversion.logs.push(`   Progress: ${completedCount}/${cobolFiles.length} files (${Math.round(completedCount / cobolFiles.length * 100)}%)\n\n`);
             }
 
             // Calculate average conversion accuracy
@@ -1123,15 +1105,15 @@ app.post('/api/convert-azure', async (req, res) => {
             // Generate PRD from collected business rules
             if (results.businessRulesData.length > 0) {
                 try {
-                    const prdContent = generatePRD(results.businessRulesData, inputPath);
-                    const prdPath = path.join(outputDir, 'PRD.md');
-                    fs.writeFileSync(prdPath, prdContent);
-                    const htmlContent = generatePRDHtml(results.businessRulesData, inputPath);
-                    const htmlPath = path.join(outputDir, 'PRD.html');
-                    fs.writeFileSync(htmlPath, htmlContent);
-                    // Save raw JSON for diagram rendering in the UI
-                    const dataPath = path.join(outputDir, 'businessRules.json');
-                    fs.writeFileSync(dataPath, JSON.stringify(results.businessRulesData, null, 2));
+                    const [prdContent, htmlContent] = [
+                        generatePRD(results.businessRulesData, inputPath),
+                        generatePRDHtml(results.businessRulesData, inputPath)
+                    ];
+                    await Promise.all([
+                        fs.promises.writeFile(path.join(outputDir, 'PRD.md'), prdContent),
+                        fs.promises.writeFile(path.join(outputDir, 'PRD.html'), htmlContent),
+                        fs.promises.writeFile(path.join(outputDir, 'businessRules.json'), JSON.stringify(results.businessRulesData, null, 2))
+                    ]);
                     results.prdGenerated = true;
                     conversion.logs.push(`📄 Business Rules PRD generated (${results.businessRulesData.length} programs documented)\n`);
                 } catch (prdErr) {
