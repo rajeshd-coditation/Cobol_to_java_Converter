@@ -210,8 +210,8 @@ function generatePRD(allBusinessRules, repoPath) {
             md += `| # | Business Rule | COBOL | Java |\n`;
             md += `|---|--------------|-------|------|\n`;
             rules.coverage.coverage.forEach((c, i) => {
-                const icon = c.status === 'COVERED' ? '✅' : c.status === 'PARTIAL' ? '⚠️' : '❌';
-                md += `| ${i + 1} | ${c.rule} | ✅ | ${icon} ${c.status}${c.note ? ` — ${c.note}` : ''} |\n`;
+                const label = c.status === 'COVERED' ? 'Covered' : c.status === 'PARTIAL' ? 'Partial' : 'Missing';
+                md += `| ${i + 1} | ${c.rule} | Yes | ${label}${c.note ? ` — ${c.note}` : ''} |\n`;
             });
             md += `\n`;
         }
@@ -312,13 +312,13 @@ function generatePRDHtml(allBusinessRules, repoPath) {
             coverageHtml += `</div></div>`;
             coverageHtml += `<table><thead><tr><th>#</th><th>Business Rule</th><th>COBOL</th><th>Java</th><th>Note</th></tr></thead><tbody>`;
             r.coverage.coverage.forEach((c, i) => {
-                const icon = c.status === 'COVERED' ? '✅' : c.status === 'PARTIAL' ? '⚠️' : '❌';
                 const cls = c.status === 'COVERED' ? 'covered' : c.status === 'PARTIAL' ? 'partial' : 'missing';
+                const label = c.status === 'COVERED' ? 'Covered' : c.status === 'PARTIAL' ? 'Partial' : 'Missing';
                 coverageHtml += `<tr>`;
                 coverageHtml += `<td>${i + 1}</td>`;
                 coverageHtml += `<td>${esc(c.rule)}</td>`;
-                coverageHtml += `<td style="text-align:center">✅</td>`;
-                coverageHtml += `<td><span class="cov-badge ${cls}">${icon} ${esc(c.status)}</span></td>`;
+                coverageHtml += `<td style="text-align:center;color:var(--green);font-size:0.78rem;font-weight:600;">Yes</td>`;
+                coverageHtml += `<td><span class="cov-badge ${cls}">${label}</span></td>`;
                 coverageHtml += `<td style="color:var(--text2);font-size:0.8rem">${esc(c.note || '')}</td>`;
                 coverageHtml += `</tr>`;
             });

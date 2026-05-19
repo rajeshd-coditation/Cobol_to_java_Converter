@@ -1612,17 +1612,17 @@ function renderCoverageForProgram(programName) {
     html += `</tr></thead><tbody>`;
 
     items.forEach((c, i) => {
-        const { icon, color, bg } = c.status === 'COVERED'
-            ? { icon: '✅', color: '#2ecc71', bg: 'rgba(46,204,113,0.07)' }
+        const { label, color, bg } = c.status === 'COVERED'
+            ? { label: 'Covered', color: '#2ecc71', bg: 'rgba(46,204,113,0.12)' }
             : c.status === 'PARTIAL'
-            ? { icon: '⚠️', color: '#f1c40f', bg: 'rgba(241,196,15,0.07)' }
-            : { icon: '❌', color: '#e74c3c', bg: 'rgba(231,76,60,0.07)' };
+            ? { label: 'Partial', color: '#f1c40f', bg: 'rgba(241,196,15,0.12)' }
+            : { label: 'Missing', color: '#e74c3c', bg: 'rgba(231,76,60,0.12)' };
 
-        html += `<tr style="background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'};border-left:3px solid ${bg === 'transparent' ? 'transparent' : color};">`;
+        html += `<tr style="background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'};border-left:3px solid ${color}40;">`;
         html += `<td style="padding:9px 10px;color:var(--text-secondary);vertical-align:top;">${i + 1}</td>`;
         html += `<td style="padding:9px 10px;color:var(--text-primary);vertical-align:top;">${escapeHtml(c.rule)}</td>`;
-        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;">✅</td>`;
-        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;"><span style="font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:10px;background:${bg};color:${color};white-space:nowrap;">${icon} ${c.status}</span></td>`;
+        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;color:#2ecc71;font-size:0.78rem;font-weight:600;">Yes</td>`;
+        html += `<td style="padding:9px 10px;text-align:center;vertical-align:top;"><span style="font-size:0.75rem;font-weight:700;padding:2px 10px;border-radius:10px;background:${bg};color:${color};white-space:nowrap;">${label}</span></td>`;
         html += `<td style="padding:9px 10px;color:var(--text-secondary);font-size:0.8rem;vertical-align:top;">${escapeHtml(c.note || '')}</td>`;
         html += `</tr>`;
     });
