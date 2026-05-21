@@ -36,6 +36,7 @@ const { convertCobolToJava } = require('./src/ai/convert-cobol');
 const { fixJavaCode } = require('./src/ai/fix-java');
 const { analyzeConversionFailure } = require('./src/ai/analyze-failure');
 const { compareRunOutputs } = require('./src/ai/compare-runs');
+const { extractBusinessRules, analyzeBusinessRuleCoverage } = require('./src/ai/business-rules');
 const { scanForCobolFiles, scanForAllMainframeFiles } = require('./src/scan/cobol-scanner');
 const { analyzeConversionAccuracy } = require('./src/core/accuracy-scorer');
 
@@ -47,6 +48,8 @@ module.exports = {
     fixJavaCode,
     analyzeConversionFailure,
     compareRunOutputs,
+    extractBusinessRules,
+    analyzeBusinessRuleCoverage,
     scanForCobolFiles,
     scanForAllMainframeFiles,
     analyzeConversionAccuracy

@@ -51,6 +51,7 @@ const {
     runCompileAndRepair,
     buildReportEntry
 } = require('./convert-azure-helpers');
+const { generatePRD, generatePRDHtml } = require('../core/prd-generator');
 
 function createHandler(deps) {
     const {
@@ -134,6 +135,7 @@ function createHandler(deps) {
             convertedFiles: [],
             skippedFiles: [],
             errorFiles: [],
+            businessRulesData: [],
             report: { files: [], summary: {} }
         };
 
@@ -402,11 +404,13 @@ function createHandler(deps) {
                     baseName,
                     cobolPath,
                     status: null,
-                    reportEntry: null
+                    reportEntry: null,
+                    businessRules: null
                 };
 
                 let divisionalSplit = null;
                 let cobolSource;
+                let coveragePromise = null;
                 try {
                     cobolSource = fs.readFileSync(cobolPath, 'utf-8');
 
@@ -514,15 +518,30 @@ function createHandler(deps) {
                             }
                         }
                     } else {
-                        conversionResult = await azureAgent.convertCobolToJava(cobolSource, 0, {
-                            calledPrograms,
-                            copybooks,
-                            programIdToJavaClass,
-                            copybookBodies,
-                            siblingSignatures: conversion.siblingSignatures,
-                            jclInvocations,
-                            reviewerFeedback
-                        });
+                        // Run conversion + business rule extraction in parallel (free wall-clock time)
+                        const [_conv, _bizRules] = await Promise.all([
+                            azureAgent.convertCobolToJava(cobolSource, 0, {
+                                calledPrograms,
+                                copybooks,
+                                programIdToJavaClass,
+                                copybookBodies,
+                                siblingSignatures: conversion.siblingSignatures,
+                                jclInvocations,
+                                reviewerFeedback
+                            }),
+                            azureAgent.extractBusinessRules(cobolSource, baseName)
+                        ]);
+                        conversionResult = _conv;
+                        fileResult.businessRules = _bizRules;
+
+                        // Start coverage analysis immediately — runs parallel to compile/run below
+                        if (conversionResult.success && _bizRules?.businessRules?.length > 0) {
+                            coveragePromise = azureAgent.analyzeBusinessRuleCoverage(
+                                _bizRules.businessRules,
+                                conversionResult.javaCode,
+                                baseName
+                            );
+                        }
                     }
                     pushTimeline(relativePath, 'ai_done', conversionResult.success ? 'AI returned Java' : 'AI conversion failed', {
                         ms: Date.now() - _tAI,
@@ -695,6 +714,14 @@ function createHandler(deps) {
                     };
                 }
 
+                // Await coverage analysis (started in parallel with compilation)
+                if (coveragePromise && fileResult.businessRules) {
+                    try {
+                        const coverageResult = await coveragePromise;
+                        if (coverageResult) fileResult.businessRules.coverage = coverageResult;
+                    } catch {}
+                }
+
                 return fileResult;
             }
 
@@ -833,6 +860,9 @@ function createHandler(deps) {
                                 if (fileResult.reportEntry) {
                                     results.report.files.push(fileResult.reportEntry);
                                 }
+                                if (fileResult.businessRules) {
+                                    results.businessRulesData.push(fileResult.businessRules);
+                                }
                                 return fileResult;
                             })
                     );
@@ -893,6 +923,25 @@ function createHandler(deps) {
                 conversion.logs.push(`[error] Errors: ${results.skippedError}\n`);
             }
             conversion.logs.push(`\n Powered by Azure AI Agent\n`);
+
+            // Generate PRD from collected business rules
+            if (results.businessRulesData.length > 0) {
+                try {
+                    const [prdContent, htmlContent] = [
+                        generatePRD(results.businessRulesData, inputPath),
+                        generatePRDHtml(results.businessRulesData, inputPath)
+                    ];
+                    await Promise.all([
+                        fs.promises.writeFile(path.join(outputDir, 'PRD.md'), prdContent),
+                        fs.promises.writeFile(path.join(outputDir, 'PRD.html'), htmlContent),
+                        fs.promises.writeFile(path.join(outputDir, 'businessRules.json'), JSON.stringify(results.businessRulesData, null, 2))
+                    ]);
+                    results.prdGenerated = true;
+                    conversion.logs.push(`Business Rules PRD generated (${results.businessRulesData.length} programs documented)\n`);
+                } catch (prdErr) {
+                    console.error('PRD generation error:', prdErr.message);
+                }
+            }
 
         } catch (err) {
             conversion.logs.push(`\n[error] Conversion error: ${err.message}\n`);

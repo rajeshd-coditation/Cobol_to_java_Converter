@@ -620,6 +620,51 @@
                 </div>
 
             </section>
+
+            <!-- Business Intelligence Panel -->
+            <section id="biSection" class="bi-section hidden">
+                <div class="bi-header">
+                    <h2 class="bi-title">Business Intelligence</h2>
+                    <div class="bi-actions">
+                        <button id="downloadPRDBtn" class="btn btn-secondary btn-sm">Download Markdown</button>
+                        <button id="downloadPRDHtmlBtn" class="btn btn-green btn-sm">HTML Report</button>
+                    </div>
+                </div>
+                <div class="bi-tabs">
+                    <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')">Document</button>
+                    <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')">Process Flow</button>
+                    <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')">Knowledge Graph</button>
+                    <button class="bi-tab" id="biTabCoverage" onclick="switchBiTab('coverage')">Rule Coverage</button>
+                </div>
+                <div id="biPanelDoc" class="bi-panel">
+                    <div id="prdContent" class="prd-content"></div>
+                </div>
+                <div id="biPanelFlow" class="bi-panel hidden">
+                    <div class="bi-controls">
+                        <select id="flowProgramSelect" class="bi-select"></select>
+                    </div>
+                    <div class="flow-layout">
+                        <div id="flowDiagramWrap" class="flow-diagram-wrap"></div>
+                        <div id="flowRulesPanel" class="flow-rules-panel hidden">
+                            <h4 class="flow-rules-title">Step Business Rules</h4>
+                            <div id="flowStepRules"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="biPanelGraph" class="bi-panel hidden">
+                    <div id="knowledgeGraphContainer" style="height:520px;background:rgba(0,0,0,0.2);border-radius:10px;"></div>
+                </div>
+                <div id="biPanelCoverage" class="bi-panel hidden">
+                    <div class="bi-controls">
+                        <select id="coverageProgramSelect" class="bi-select"></select>
+                    </div>
+                    <div id="coverageSummaryBadge" class="coverage-summary-wrap"></div>
+                    <div id="coverageProgressBar" class="coverage-bar-outer hidden">
+                        <div class="coverage-bar-inner" id="coverageBarFill"></div>
+                    </div>
+                    <div id="coverageTableWrap"></div>
+                </div>
+            </section>
         </main>
 
         <footer>
@@ -872,6 +917,8 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://unpkg.com/vis-network@9/standalone/umd/vis-network.min.js"></script>
     <script src="js/helpers.js"></script>
     <script src="js/dialogs.js"></script>
     <script src="js/accuracy-panel.js"></script>

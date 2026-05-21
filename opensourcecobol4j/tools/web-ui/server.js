@@ -322,6 +322,7 @@ require('./src/routes/ai-analyze').mount(app, { aiAgent, azureAgent, buildAnalys
 // /api/ai/provider, /api/dependencies → src/routes/misc.js
 // Mount routes now that AI_PROVIDER / aiAgent / azureAgent are all in scope.
 require('./src/routes/misc').mount(app, { AI_PROVIDER, aiAgent, azureAgent, activeConversions });
+require('./src/routes/prd').mount(app, { activeConversions });
 require('./src/routes/status').mount(app, { activeConversions });
 require('./src/routes/health').mount(app, { activeConversions, AI_PROVIDER, aiAgent, azureAgent });
 require('./src/routes/stats').mount(app, { activeConversions });
