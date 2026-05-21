@@ -5922,13 +5922,32 @@ actuallyStartConversion = async function (...args) {
     tryWrap();
 })();
 
-// When conversion completes → results phase
+// Graph collapse toggle
+function toggleGraphCollapse() {
+    const section = document.getElementById('graphSection');
+    const btn = document.getElementById('graphCollapseBtn');
+    if (!section) return;
+    const collapsed = section.classList.toggle('graph-collapsed');
+    if (btn) btn.textContent = collapsed ? 'Show' : 'Hide';
+}
+window.toggleGraphCollapse = toggleGraphCollapse;
+
+function collapseGraph() {
+    const section = document.getElementById('graphSection');
+    const btn = document.getElementById('graphCollapseBtn');
+    if (!section || section.classList.contains('graph-collapsed')) return;
+    section.classList.add('graph-collapsed');
+    if (btn) btn.textContent = 'Show';
+}
+
+// When conversion completes → results phase + collapse graph
 const _origCompleteForPhase = window.onConversionComplete;
 window.onConversionComplete = async function () {
     if (_origCompleteForPhase) {
         try { await _origCompleteForPhase(); } catch {}
     }
     setPhase('results');
+    collapseGraph();
 };
 
 // Initialize on page load
@@ -6727,6 +6746,12 @@ function resetSession() {
     localStorage.removeItem('lastConversionPhase');
     currentConversionId = null;
     setPhase('input');
+
+    // Re-expand graph for the next conversion
+    const gs = document.getElementById('graphSection');
+    const gcb = document.getElementById('graphCollapseBtn');
+    if (gs) gs.classList.remove('graph-collapsed');
+    if (gcb) gcb.textContent = 'Hide';
 
     // Hide all results
     document.getElementById('kpiBar')?.classList.add('hidden');

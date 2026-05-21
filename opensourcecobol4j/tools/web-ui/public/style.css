@@ -1015,6 +1015,7 @@ body.theme-light .kpi-help { background: rgba(0, 0, 0, 0.08); }
     grid-template-columns: 240px 1fr 1fr;
     gap: 12px;
     height: 580px;
+    min-height: 400px;
 }
 @media (max-width: 1280px) { .browser-grid { grid-template-columns: 220px 1fr 1fr; } }
 
@@ -5843,3 +5844,36 @@ body.theme-light .tree-caret { color: #555 !important; }
 .prd-content { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 18px; max-height: 500px; overflow-y: auto; }
 .btn-green { background: rgba(46,204,113,0.15); border-color: rgba(46,204,113,0.35); color: #2ecc71; }
 .btn-green:hover { background: rgba(46,204,113,0.25); }
+
+/* ── Graph collapse toggle ── */
+.graph-collapse-btn {
+    background: none;
+    border: 1px solid var(--c-border);
+    color: var(--c-text-mute);
+    border-radius: var(--r-sm);
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    margin-left: auto;
+    transition: color .15s, border-color .15s;
+    white-space: nowrap;
+}
+.graph-collapse-btn:hover { color: var(--c-text); border-color: var(--c-accent); }
+
+#graphSection.graph-collapsed .graph-canvas-wrap,
+#graphSection.graph-collapsed .graph-legend,
+#graphSection.graph-collapsed .graph-legend-edges {
+    display: none;
+}
+#graphSection.graph-collapsed {
+    padding: 10px 18px;
+}
+#graphSection.graph-collapsed .graph-header {
+    margin-bottom: 0;
+}
+#graphSection.graph-collapsed .graph-collapse-btn::before {
+    content: "▼ ";
+}
+#graphSection:not(.graph-collapsed) .graph-collapse-btn::before {
+    content: "▲ ";
+}

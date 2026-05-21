@@ -342,9 +342,10 @@
 
             <main class="canvas-area">
                 <!-- Live dependency graph -->
-                <div class="graph-section phase-hide" data-show-phases="analyze convert review results">
+                <div class="graph-section phase-hide" data-show-phases="analyze convert review results" id="graphSection">
                     <div class="graph-header">
                         <h3>Dependency Graph</h3>
+                        <button id="graphCollapseBtn" class="graph-collapse-btn" onclick="toggleGraphCollapse()" title="Collapse graph">&#x25B2; Hide</button>
                         <div class="graph-legend">
                             <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
                             <span class="legend-item"><span class="legend-dot active"></span>Converting</span>
