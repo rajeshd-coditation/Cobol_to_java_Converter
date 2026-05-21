@@ -11,7 +11,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const CHECKPOINT_DIR = path.join(os.tmpdir(), 'cobol_converter_checkpoints');
+// Use mounted persistent volume if available, fall back to tmpdir for local dev
+const DATA_DIR = process.env.COBOL_DATA_DIR || os.tmpdir();
+const CHECKPOINT_DIR = path.join(DATA_DIR, 'checkpoints');
 fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
 function checkpointPath(id) { return path.join(CHECKPOINT_DIR, `${id}.json`); }

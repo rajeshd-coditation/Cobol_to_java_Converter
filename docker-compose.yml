@@ -9,6 +9,12 @@ services:
     volumes:
       # CardDemo COBOL sample app — available inside container as /cobol-source/carddemo
       - ./opensourcecobol4j/carddemo-app:/cobol-source/carddemo:ro
+      # Persistent conversion output + checkpoints — survives rebuilds
+      - ./conversion-data:/app/conversion-data
+      # Live UI reload — HTML/JS/CSS changes apply instantly (no rebuild needed)
+      - ./opensourcecobol4j/tools/web-ui/public:/app/tools/web-ui/public
+    environment:
+      COBOL_DATA_DIR: /app/conversion-data
     env_file:
       - .env
     restart: unless-stopped

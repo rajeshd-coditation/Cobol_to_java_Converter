@@ -43,6 +43,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const DATA_DIR = process.env.COBOL_DATA_DIR || os.tmpdir();
 const {
     preflightCheck,
     buildContext,
@@ -78,7 +79,7 @@ function createHandler(deps) {
     // rewrites files it re-converts this time.
     const outputDir = (resumeState && resumeState.outputDir)
         ? resumeState.outputDir
-        : path.join(os.tmpdir(), `azure_cobol_output_${conversionId}`);
+        : path.join(DATA_DIR, `azure_cobol_output_${conversionId}`);
     const javaDir = path.join(outputDir, 'java');
 
     // Create output directories
@@ -146,7 +147,7 @@ function createHandler(deps) {
 
             if (urlCheck.kind === 'url') {
                 conversion.logs.push(' Cloning repository...\n');
-                const cloneDir = path.join(os.tmpdir(), `repo_${conversionId}`);
+                const cloneDir = path.join(DATA_DIR, `repo_${conversionId}`);
                 const { execSync } = require('child_process');
                 try {
                     execSync(`git clone --depth 1 "${inputPath}" "${cloneDir}"`, { timeout: 60000 });

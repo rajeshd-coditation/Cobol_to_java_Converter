@@ -360,3 +360,17 @@ httpServer.listen(PORT, () => {
     console.log(` AI Provider: ${AI_PROVIDER.toUpperCase()}`);
     console.log('='.repeat(50) + '\n');
 });
+
+// On docker-compose down (SIGTERM) or Ctrl+C (SIGINT): wipe the local
+// conversion-data folder so the host doesn't accumulate stale output.
+const DATA_DIR = process.env.COBOL_DATA_DIR;
+function cleanDataDir() {
+    if (!DATA_DIR) return;
+    try {
+        const { execSync } = require('child_process');
+        execSync(`rm -rf "${DATA_DIR}/"*`, { stdio: 'ignore' });
+        console.log(' Conversion data cleared from local folder.');
+    } catch {}
+}
+process.on('SIGTERM', () => { cleanDataDir(); process.exit(0); });
+process.on('SIGINT',  () => { cleanDataDir(); process.exit(0); });

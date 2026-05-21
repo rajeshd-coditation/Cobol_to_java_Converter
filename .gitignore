@@ -115,3 +115,6 @@ graphify-out/
 opensourcecobol4j/tools/web-ui/graphify-out/
 
 CLAUDE.md
+
+# Persistent conversion output (mounted into Docker, wiped on docker-compose down)
+conversion-data/
