@@ -19,7 +19,7 @@ RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - \
 
 # ── Build cobj (COBOL → Java compiler) from source ───────────────────────────
 WORKDIR /build
-COPY opensource/ .
+COPY opensourcecobol4j/ .
 RUN chmod +x configure libcobj/gradlew \
     && ./configure --prefix=/usr/ \
     && make \
@@ -36,7 +36,7 @@ RUN chmod +x configure libcobj/gradlew \
 ENV CLASSPATH=:/usr/lib/opensourcecobol4j/libcobj.jar
 
 # ── Web app (preserve structure so server.js finds ../cobol_repo_scanner.sh) ─
-COPY opensource/tools/ /app/tools/
+COPY opensourcecobol4j/tools/ /app/tools/
 WORKDIR /app/tools/web-ui
 RUN npm install
 
