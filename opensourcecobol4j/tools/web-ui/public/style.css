@@ -5822,28 +5822,68 @@ body.theme-light .tree-caret { color: #555 !important; }
     outline-offset: 2px !important;
 }
 
-/* ── Business Intelligence Panel ── */
-.bi-section { margin: 24px 0; padding: 0; }
-.bi-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
-.bi-title { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+/* ── Business Intelligence — fixed full-viewport page ── */
+/* position:fixed + own overflow-y is the only scroll approach that
+   can't be blocked by any ancestor's overflow:hidden. */
+.bi-page {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 800;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--c-bg, #07061f);
+}
+body.bi-mode .bi-page { display: block; }
+.bi-page-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 70px 32px 60px; /* 70px clears the fixed app-header */
+}
+.bi-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+.bi-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); margin: 0; }
 .bi-actions { display: flex; gap: 8px; }
-.bi-tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 18px; }
-.bi-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 18px; font-size: 0.87rem; color: var(--text-secondary); cursor: pointer; transition: color .15s, border-color .15s; font-weight: 500; }
+.bi-tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; }
+.bi-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 22px; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: color .15s, border-color .15s; font-weight: 500; }
 .bi-tab.active { color: var(--text-primary); border-bottom-color: #6c3de8; font-weight: 600; }
 .bi-tab:hover { color: var(--text-primary); }
 .bi-panel { padding: 4px 0; }
 .bi-controls { margin-bottom: 14px; }
 .bi-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text-primary); padding: 7px 12px; border-radius: 6px; font-size: 0.85rem; min-width: 220px; cursor: pointer; }
-.flow-layout { display: grid; grid-template-columns: 1fr auto; gap: 18px; }
-.flow-diagram-wrap { min-height: 200px; }
-.flow-rules-panel { width: 260px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px; overflow-y: auto; max-height: 480px; }
+
+/* Process Flow — scrollable diagram + side rules panel */
+.flow-scroll-wrap {
+    width: 100%;
+    overflow: auto;
+    max-height: calc(100vh - 280px);
+    min-height: 300px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.07);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.flow-scroll-wrap svg { display: block; }
+.flow-diagram-wrap { min-width: 0; }
+.flow-rules-panel { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px; overflow-y: auto; max-height: 300px; margin-top: 10px; }
 .flow-rules-title { font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .07em; margin: 0 0 12px 0; }
+
+/* Knowledge Graph */
+.kg-container { width: 100%; height: calc(100vh - 280px); min-height: 400px; background: rgba(0,0,0,0.2); border-radius: 10px; }
+
+/* Coverage */
 .coverage-summary-wrap { font-size: 0.85rem; margin-bottom: 10px; }
 .coverage-bar-outer { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; margin-bottom: 14px; overflow: hidden; }
 .coverage-bar-inner { height: 100%; background: linear-gradient(90deg,#2ecc71,#6c3de8); border-radius: 4px; transition: width .4s; }
-.prd-content { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 18px; max-height: 500px; overflow-y: auto; }
+
+/* PRD Document */
+.prd-content { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 18px; overflow-y: auto; max-height: calc(100vh - 280px); }
+
 .btn-green { background: rgba(46,204,113,0.15); border-color: rgba(46,204,113,0.35); color: #2ecc71; }
 .btn-green:hover { background: rgba(46,204,113,0.25); }
+
+/* Nav button active state */
+#biNavBtn.bi-active { background: rgba(108,61,232,0.25); color: #a78bfa; border-color: rgba(108,61,232,0.4); }
 
 /* ── Graph collapse toggle ── */
 .graph-collapse-btn {

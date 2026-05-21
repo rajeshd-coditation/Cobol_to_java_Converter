@@ -99,6 +99,10 @@
                     Activity
                     <span id="drawerBadge" class="drawer-badge hidden">0</span>
                 </button>
+                <button id="biNavBtn" class="btn-pill btn-ghost hidden" type="button"
+                    onclick="toggleBiPage()" title="Business Intelligence — PRD, process flows, knowledge graph, rule coverage">
+                    Business
+                </button>
                 <!-- Settings cog — opens a dropdown with theme, AI provider
                      status, and future knobs (concurrency, budget). Replaces
                      the standalone theme button; the toggle lives inside the
@@ -622,50 +626,52 @@
 
             </section>
 
-            <!-- Business Intelligence Panel -->
-            <section id="biSection" class="bi-section hidden">
-                <div class="bi-header">
-                    <h2 class="bi-title">Business Intelligence</h2>
-                    <div class="bi-actions">
-                        <button id="downloadPRDBtn" class="btn btn-secondary btn-sm">Download Markdown</button>
-                        <button id="downloadPRDHtmlBtn" class="btn btn-green btn-sm">HTML Report</button>
+            <!-- Business Intelligence full-page view (toggled via body.bi-mode) -->
+            <div id="biSection" class="bi-page">
+                <div class="bi-page-inner">
+                    <div class="bi-header">
+                        <h2 class="bi-title">Business Intelligence</h2>
+                        <div class="bi-actions">
+                            <button id="downloadPRDBtn" class="btn btn-secondary btn-sm">Download Markdown</button>
+                            <button id="downloadPRDHtmlBtn" class="btn btn-green btn-sm">HTML Report</button>
+                        </div>
                     </div>
-                </div>
-                <div class="bi-tabs">
-                    <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')">Document</button>
-                    <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')">Process Flow</button>
-                    <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')">Knowledge Graph</button>
-                    <button class="bi-tab" id="biTabCoverage" onclick="switchBiTab('coverage')">Rule Coverage</button>
-                </div>
-                <div id="biPanelDoc" class="bi-panel">
-                    <div id="prdContent" class="prd-content"></div>
-                </div>
-                <div id="biPanelFlow" class="bi-panel hidden">
-                    <div class="bi-controls">
-                        <select id="flowProgramSelect" class="bi-select"></select>
+                    <div class="bi-tabs">
+                        <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')">Document</button>
+                        <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')">Process Flow</button>
+                        <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')">Knowledge Graph</button>
+                        <button class="bi-tab" id="biTabCoverage" onclick="switchBiTab('coverage')">Rule Coverage</button>
                     </div>
-                    <div class="flow-layout">
-                        <div id="flowDiagramWrap" class="flow-diagram-wrap"></div>
+                    <div id="biPanelDoc" class="bi-panel">
+                        <div id="prdContent" class="prd-content"></div>
+                    </div>
+                    <div id="biPanelFlow" class="bi-panel hidden">
+                        <div class="bi-controls">
+                            <select id="flowProgramSelect" class="bi-select"></select>
+                        </div>
+                        <div class="flow-scroll-wrap">
+                            <div id="flowDiagramWrap" class="flow-diagram-wrap"></div>
+                        </div>
                         <div id="flowRulesPanel" class="flow-rules-panel hidden">
                             <h4 class="flow-rules-title">Step Business Rules</h4>
                             <div id="flowStepRules"></div>
                         </div>
                     </div>
-                </div>
-                <div id="biPanelGraph" class="bi-panel hidden">
-                    <div id="knowledgeGraphContainer" style="height:520px;background:rgba(0,0,0,0.2);border-radius:10px;"></div>
-                </div>
-                <div id="biPanelCoverage" class="bi-panel hidden">
-                    <div class="bi-controls">
-                        <select id="coverageProgramSelect" class="bi-select"></select>
+                    <div id="biPanelGraph" class="bi-panel hidden">
+                        <div id="knowledgeGraphContainer" class="kg-container"></div>
                     </div>
-                    <div id="coverageSummaryBadge" class="coverage-summary-wrap"></div>
-                    <div id="coverageProgressBar" class="coverage-bar-outer hidden">
-                        <div class="coverage-bar-inner" id="coverageBarFill"></div>
+                    <div id="biPanelCoverage" class="bi-panel hidden">
+                        <div class="bi-controls">
+                            <select id="coverageProgramSelect" class="bi-select"></select>
+                        </div>
+                        <div id="coverageSummaryBadge" class="coverage-summary-wrap"></div>
+                        <div id="coverageProgressBar" class="coverage-bar-outer hidden">
+                            <div class="coverage-bar-inner" id="coverageBarFill"></div>
+                        </div>
+                        <div id="coverageTableWrap"></div>
                     </div>
-                    <div id="coverageTableWrap"></div>
                 </div>
-            </section>
+            </div>
         </main>
 
         <footer>
@@ -679,8 +685,6 @@
             </div>
         </footer>
 
-
-    </div>
 
     <div id="codeModal" class="modal hidden">
         <div class="modal-content glass-card">

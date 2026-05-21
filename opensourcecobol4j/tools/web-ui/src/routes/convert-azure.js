@@ -926,6 +926,7 @@ function createHandler(deps) {
             conversion.logs.push(`\n Powered by Azure AI Agent\n`);
 
             // Generate PRD from collected business rules
+            console.log(`[bi] businessRulesData count: ${results.businessRulesData.length}`);
             if (results.businessRulesData.length > 0) {
                 try {
                     const [prdContent, htmlContent] = [

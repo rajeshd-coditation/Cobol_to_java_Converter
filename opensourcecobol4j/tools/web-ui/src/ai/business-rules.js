@@ -17,8 +17,25 @@
 
 const { isAvailable, makeOpenAIRequest } = require('./azure-client');
 
+function extractJson(raw) {
+    // Strip markdown fences
+    let s = raw.replace(/^```json\n?/i, '').replace(/\n?```$/i, '')
+               .replace(/^```\n?/, '').replace(/\n?```$/, '').trim();
+    try { return JSON.parse(s); } catch (_) {}
+    // Fall back: find first { ... } block
+    const start = s.indexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+        try { return JSON.parse(s.slice(start, end + 1)); } catch (_) {}
+    }
+    return null;
+}
+
 async function extractBusinessRules(cobolSource, programName) {
-    if (!isAvailable()) return null;
+    if (!isAvailable()) {
+        console.warn(`   [bi] Azure not available — skipping business rules for ${programName}`);
+        return null;
+    }
 
     try {
         const systemPrompt = `You are a business analyst reviewing legacy COBOL code.
@@ -36,20 +53,27 @@ Use this exact structure:
 }
 For processFlow: use type "start" for program entry, "end" for termination, "decision" for IF/EVALUATE/conditional steps, "io" for file reads/writes/opens/closes, "process" for computation/transformation steps. Include only rules that specifically govern that step in the "rules" array. Keep step descriptions under 50 characters. Be specific and use plain English, not COBOL jargon.`;
 
+        console.log(`   [bi] Extracting business rules for ${programName}...`);
         const response = await makeOpenAIRequest([
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Extract business rules from this COBOL program:\n\n${cobolSource.substring(0, 8000)}` }
-        ], { temperature: 0.3, maxTokens: 2000 });
+        ], { maxTokens: 2000 });
 
-        if (!response?.choices?.[0]) return null;
+        if (!response?.choices?.[0]) {
+            console.warn(`   [bi] No response choices for ${programName}`);
+            return null;
+        }
 
-        let content = response.choices[0].message?.content || '';
-        content = content.replace(/^```json\n?/i, '').replace(/\n?```$/i, '');
-        content = content.replace(/^```\n?/, '').replace(/\n?```$/, '').trim();
-
-        return JSON.parse(content);
+        const content = response.choices[0].message?.content || '';
+        const parsed = extractJson(content);
+        if (!parsed) {
+            console.warn(`   [bi] JSON parse failed for ${programName}, raw snippet: ${content.substring(0, 200)}`);
+            return null;
+        }
+        console.log(`   [bi] Extracted ${parsed.businessRules?.length || 0} rules, ${parsed.processFlow?.length || 0} flow steps for ${programName}`);
+        return parsed;
     } catch (err) {
-        console.error(`   Business rule extraction failed for ${programName}:`, err.message);
+        console.error(`   [bi] Business rule extraction failed for ${programName}:`, err.message);
         return null;
     }
 }
@@ -88,11 +112,12 @@ ${javaCode.substring(0, 6000)}
 
         if (!response?.choices?.[0]) return null;
 
-        let content = response.choices[0].message?.content || '';
-        content = content.replace(/^```json\n?/i, '').replace(/\n?```$/i, '').trim();
-        return JSON.parse(content);
+        const content = response.choices[0].message?.content || '';
+        const parsed = extractJson(content);
+        if (!parsed) console.warn(`   [bi] Coverage JSON parse failed for ${programName}`);
+        return parsed;
     } catch (err) {
-        console.error(`   Coverage analysis failed for ${programName}:`, err.message);
+        console.error(`   [bi] Coverage analysis failed for ${programName}:`, err.message);
         return null;
     }
 }

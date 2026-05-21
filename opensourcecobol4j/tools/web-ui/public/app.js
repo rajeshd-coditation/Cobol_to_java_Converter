@@ -5940,6 +5940,38 @@ function collapseGraph() {
     if (btn) btn.textContent = 'Show';
 }
 
+// ── Business Intelligence page toggle ──────────────────────────────────────
+let _biPageOpen = false;
+
+function toggleBiPage() {
+    _biPageOpen ? hideBiPage() : showBiPageOverlay();
+}
+
+function showBiPageOverlay() {
+    const btn = document.getElementById('biNavBtn');
+    document.body.classList.add('bi-mode');
+    if (btn) { btn.textContent = '← Results'; btn.classList.add('bi-active'); }
+    _biPageOpen = true;
+    // Push a history entry so browser back closes BI instead of navigating away
+    history.pushState({ biPage: true }, '');
+    // Load data if not yet populated
+    if (!_prdContent && currentConversionId) showPRDSection(currentConversionId);
+}
+
+function hideBiPage() {
+    const btn = document.getElementById('biNavBtn');
+    document.body.classList.remove('bi-mode');
+    if (btn) { btn.textContent = 'Business'; btn.classList.remove('bi-active'); }
+    _biPageOpen = false;
+}
+
+// Browser back button while BI is open → close BI instead of navigating
+window.addEventListener('popstate', (e) => {
+    if (_biPageOpen) hideBiPage();
+});
+
+window.toggleBiPage = toggleBiPage;
+
 // When conversion completes → results phase + collapse graph
 const _origCompleteForPhase = window.onConversionComplete;
 window.onConversionComplete = async function () {
@@ -5948,6 +5980,9 @@ window.onConversionComplete = async function () {
     }
     setPhase('results');
     collapseGraph();
+    // Show Business nav button
+    const biBtn = document.getElementById('biNavBtn');
+    if (biBtn) biBtn.classList.remove('hidden');
 };
 
 // Initialize on page load
@@ -6624,8 +6659,21 @@ async function restoreSession() {
     // for any /c/* path; we parse it here so the SPA drives into the
     // right conversion.
     const bookmarkMatch = window.location.pathname.match(/^\/c\/([^/]+)\/?$/);
-    const savedId = bookmarkMatch ? bookmarkMatch[1] : localStorage.getItem('lastConversionId');
+    let savedId = bookmarkMatch ? bookmarkMatch[1] : localStorage.getItem('lastConversionId');
     const savedPhase = bookmarkMatch ? 'results' : localStorage.getItem('lastConversionPhase');
+
+    // If localStorage has no ID (e.g. after Docker rebuild), fall back to the
+    // most recent completed conversion the server knows about.
+    if (!savedId) {
+        try {
+            const r = await fetch('/api/conversions');
+            if (r.ok) {
+                const { conversions } = await r.json();
+                const latest = (conversions || []).find(c => c.status === 'completed');
+                if (latest) savedId = latest.id;
+            }
+        } catch (_) {}
+    }
     if (!savedId) return;
 
     try {
@@ -6747,6 +6795,11 @@ function resetSession() {
     currentConversionId = null;
     setPhase('input');
 
+    // Hide BI page and nav button
+    document.body.classList.remove('bi-mode');
+    _biPageOpen = false;
+    document.getElementById('biNavBtn')?.classList.add('hidden');
+
     // Re-expand graph for the next conversion
     const gs = document.getElementById('graphSection');
     const gcb = document.getElementById('graphCollapseBtn');
@@ -6843,7 +6896,21 @@ async function renderMermaid(containerId, chartDef) {
         const { svg } = await mermaid.render(id, chartDef);
         el.innerHTML = svg;
         const svgEl = el.querySelector('svg');
-        if (svgEl) { svgEl.style.maxWidth = '100%'; svgEl.style.height = 'auto'; }
+        if (svgEl) {
+            // Mermaid sets explicit px width/height — remove them and ensure
+            // viewBox exists so CSS max-width/height can scale the diagram.
+            const w = parseFloat(svgEl.getAttribute('width')) || 800;
+            const h = parseFloat(svgEl.getAttribute('height')) || 600;
+            if (!svgEl.getAttribute('viewBox')) {
+                svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            }
+            svgEl.removeAttribute('width');
+            svgEl.removeAttribute('height');
+            svgEl.style.width = '100%';
+            svgEl.style.height = 'auto';
+            svgEl.style.maxHeight = '70vh';
+            svgEl.style.display = 'block';
+        }
     } catch (err) {
         el.innerHTML = `<p style="color:#ff6b6b;font-size:0.8rem;margin:0;">Diagram error: ${escapeHtml(err.message)}</p>`;
     }
@@ -6958,10 +7025,10 @@ function renderKnowledgeGraph(programs) {
 }
 
 async function showPRDSection(conversionId) {
-    const biSection = document.getElementById('biSection');
     const prdContent = document.getElementById('prdContent');
-    if (!biSection) return;
-    biSection.classList.remove('hidden');
+    // Show nav button so user can access BI page after data loads
+    const biNavBtn = document.getElementById('biNavBtn');
+    if (biNavBtn) biNavBtn.classList.remove('hidden');
     if (prdContent) prdContent.innerHTML = '<p style="color:var(--text-secondary);margin:0;">Extracting business rules...</p>';
     _prdContent = null; _prdData = null; _visNetwork = null;
     switchBiTab('doc');
@@ -6973,8 +7040,12 @@ async function showPRDSection(conversionId) {
                 fetch(`/api/prd/${conversionId}`),
                 fetch(`/api/prd-data/${conversionId}`)
             ]);
+            console.log(`[bi] attempt ${attempt}: prd=${prdResp.status} data=${dataResp.status}`);
+            if (!prdResp.ok) { const e = await prdResp.json().catch(() => ({})); console.warn('[bi] prd error:', e); }
+            if (!dataResp.ok) { const e = await dataResp.json().catch(() => ({})); console.warn('[bi] prd-data error:', e); }
             if (prdResp.ok) {
                 const prdJson = await prdResp.json();
+                console.log(`[bi] prd content length: ${prdJson.content?.length}, programCount: ${prdJson.programCount}`);
                 if (prdJson.content) {
                     _prdContent = prdJson.content;
                     const preview = prdJson.content.substring(0, 1200) + (prdJson.content.length > 1200 ? '\n...(download for full document)' : '');
@@ -6983,6 +7054,7 @@ async function showPRDSection(conversionId) {
             }
             if (dataResp.ok) {
                 const dataJson = await dataResp.json();
+                console.log(`[bi] prd-data programs: ${dataJson.programs?.length}`);
                 if (dataJson.programs && dataJson.programs.length > 0) {
                     _prdData = dataJson.programs;
                     populateFlowProgramSelect(_prdData);
