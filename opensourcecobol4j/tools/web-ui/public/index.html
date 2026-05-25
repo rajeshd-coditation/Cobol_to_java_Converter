@@ -99,10 +99,6 @@
                     Activity
                     <span id="drawerBadge" class="drawer-badge hidden">0</span>
                 </button>
-                <button id="biNavBtn" class="btn-pill btn-ghost hidden" type="button"
-                    onclick="toggleBiPage()" title="Business Intelligence — PRD, process flows, knowledge graph, rule coverage">
-                    Business
-                </button>
                 <!-- Settings cog — opens a dropdown with theme, AI provider
                      status, and future knobs (concurrency, budget). Replaces
                      the standalone theme button; the toggle lives inside the
@@ -349,7 +345,6 @@
                 <div class="graph-section phase-hide" data-show-phases="analyze convert review results" id="graphSection">
                     <div class="graph-header">
                         <h3>Dependency Graph</h3>
-                        <button id="graphCollapseBtn" class="graph-collapse-btn" onclick="toggleGraphCollapse()" title="Collapse graph">&#x25B2; Hide</button>
                         <div class="graph-legend">
                             <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
                             <span class="legend-item"><span class="legend-dot active"></span>Converting</span>
@@ -507,6 +502,7 @@
                         </div>
                     </div>
 
+                    <div id="browserBizRules" class="browser-biz-rules hidden"></div>
                     <div class="browser-grid">
                         <div class="browser-tree" id="browserTree">
                             <div class="empty-state">Loading…</div>
@@ -607,6 +603,10 @@
                             Orchestration
                             <span id="orchestrationTabCount" class="tab-count hidden">0</span>
                         </button>
+                        <button class="tab-btn" data-tab="businessrules" id="businessRulesTabBtn">
+                            Business Rules
+                            <span id="businessRulesTabCount" class="tab-count hidden">0</span>
+                        </button>
                     </div>
                     <div class="panel-content">
                         <div id="convertedPanel" class="file-list active">
@@ -621,6 +621,9 @@
                         <div id="orchestrationPanel" class="file-list">
                             <p class="empty-state">JCL orchestration will appear here once a conversion completes. Each job card shows its steps (EXEC PGM=…) with cross-references to the converted Java classes, the DD datasets each step reads/writes, and a suggested modern orchestrator (Spring Batch / Airflow / cron).</p>
                         </div>
+                        <div id="businessRulesPanel" class="file-list">
+                            <p class="empty-state">Business rules appear here once files are converted (AI conversion only).</p>
+                        </div>
                     </div>
                 </div>
 
@@ -630,25 +633,32 @@
             <div id="biSection" class="bi-page">
                 <div class="bi-page-inner">
                     <div class="bi-header">
-                        <h2 class="bi-title">Business Intelligence</h2>
+                        <div class="bi-header-left">
+                            <button id="biBackBtn" class="bi-back-btn" type="button" onclick="hideBiPage()" title="Back to results">
+                                <span aria-hidden="true">←</span> Back to results
+                            </button>
+                            <h2 class="bi-title">Business Intelligence</h2>
+                        </div>
                         <div class="bi-actions">
-                            <button id="downloadPRDBtn" class="btn btn-secondary btn-sm">Download Markdown</button>
-                            <button id="downloadPRDHtmlBtn" class="btn btn-green btn-sm">HTML Report</button>
+                            <button id="downloadPRDBtn" class="btn-pill btn-ghost" type="button">Download Markdown</button>
+                            <button id="downloadPRDHtmlBtn" class="btn-pill btn-ghost" type="button">HTML Report</button>
                         </div>
                     </div>
                     <div class="bi-tabs">
-                        <button class="bi-tab active" id="biTabDoc" onclick="switchBiTab('doc')">Document</button>
+                        <button class="bi-tab active" id="biTabCoverage" onclick="switchBiTab('coverage')">Rule Coverage</button>
                         <button class="bi-tab" id="biTabFlow" onclick="switchBiTab('flow')">Process Flow</button>
-                        <button class="bi-tab" id="biTabGraph" onclick="switchBiTab('graph')">Knowledge Graph</button>
-                        <button class="bi-tab" id="biTabCoverage" onclick="switchBiTab('coverage')">Rule Coverage</button>
+                        <button class="bi-tab" id="biTabDoc" onclick="switchBiTab('doc')">Document</button>
                     </div>
-                    <div id="biPanelDoc" class="bi-panel">
+                    <!-- One program selector shared across all per-program tabs
+                         (Coverage + Process Flow); hidden on the whole-report Document tab. -->
+                    <div class="bi-controls" id="biSharedControls">
+                        <label class="bi-select-label" for="biProgramSelect">Program</label>
+                        <select id="biProgramSelect" class="bi-select"></select>
+                    </div>
+                    <div id="biPanelDoc" class="bi-panel hidden">
                         <div id="prdContent" class="prd-content"></div>
                     </div>
                     <div id="biPanelFlow" class="bi-panel hidden">
-                        <div class="bi-controls">
-                            <select id="flowProgramSelect" class="bi-select"></select>
-                        </div>
                         <div class="flow-scroll-wrap">
                             <div id="flowDiagramWrap" class="flow-diagram-wrap"></div>
                         </div>
@@ -657,13 +667,7 @@
                             <div id="flowStepRules"></div>
                         </div>
                     </div>
-                    <div id="biPanelGraph" class="bi-panel hidden">
-                        <div id="knowledgeGraphContainer" class="kg-container"></div>
-                    </div>
-                    <div id="biPanelCoverage" class="bi-panel hidden">
-                        <div class="bi-controls">
-                            <select id="coverageProgramSelect" class="bi-select"></select>
-                        </div>
+                    <div id="biPanelCoverage" class="bi-panel">
                         <div id="coverageSummaryBadge" class="coverage-summary-wrap"></div>
                         <div id="coverageProgressBar" class="coverage-bar-outer hidden">
                             <div class="coverage-bar-inner" id="coverageBarFill"></div>
@@ -923,7 +927,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script src="https://unpkg.com/vis-network@9/standalone/umd/vis-network.min.js"></script>
     <script src="js/helpers.js"></script>
     <script src="js/dialogs.js"></script>
     <script src="js/accuracy-panel.js"></script>

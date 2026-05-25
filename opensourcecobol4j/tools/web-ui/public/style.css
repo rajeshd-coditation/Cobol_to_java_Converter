@@ -29,6 +29,12 @@
     --r-lg: 16px;
     --r-pill: 999px;
     --shadow-glow: 0 8px 32px rgba(117, 69, 255, 0.18);
+    /* Aliases — several modules (BI panel, fix-prompt) reference these names.
+       They resolve lazily, so they pick up the theme-light --c-* overrides. */
+    --text-primary:   var(--c-text);
+    --text-secondary: var(--c-text-dim);
+    --text-muted:     var(--c-text-mute);
+    --c-bg-elevated:  var(--c-surface-2);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -70,6 +76,11 @@ body {
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     margin-bottom: 22px;
+    /* Lift the header's stacking context above the results content (z-index ~5)
+       so header dropdowns/popovers aren't trapped behind it. Stays below the
+       activity drawer (400) and full-screen overlays (800+). */
+    position: relative;
+    z-index: 50;
 }
 
 .brand .coditation-logo { height: 30px; width: auto; display: block; }
@@ -4051,6 +4062,12 @@ body.theme-light {
     --c-text:      #1a1b2e;
     --c-text-dim:  #555;
     --c-text-mute: #999;
+    /* Re-declare the aliases here so var(--c-text) resolves to the LIGHT
+       values — a :root-only alias would freeze them at the dark value. */
+    --text-primary:   var(--c-text);
+    --text-secondary: var(--c-text-dim);
+    --text-muted:     var(--c-text-mute);
+    --c-bg-elevated:  var(--c-surface-2);
     --c-accent-light: #7545ff;
     --c-success-light: #16a34a;
     --c-error-light: #dc2626;
@@ -5838,25 +5855,30 @@ body.bi-mode .bi-page { display: block; }
 .bi-page-inner {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 70px 32px 60px; /* 70px clears the fixed app-header */
+    padding: 28px 32px 60px; /* BI overlay covers the header, so no clearance needed */
 }
 .bi-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
-.bi-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+.bi-header-left { display: flex; align-items: center; gap: 14px; }
+.bi-title { font-size: 1.3rem; font-weight: 700; color: var(--c-text); margin: 0; }
+.bi-back-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text-dim); padding: 7px 14px; border-radius: var(--r-pill); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
+.bi-back-btn:hover { color: var(--c-text); border-color: var(--c-border-strong); background: var(--c-surface-2); }
 .bi-actions { display: flex; gap: 8px; }
 .bi-tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; }
 .bi-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 22px; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: color .15s, border-color .15s; font-weight: 500; }
 .bi-tab.active { color: var(--text-primary); border-bottom-color: #6c3de8; font-weight: 600; }
 .bi-tab:hover { color: var(--text-primary); }
 .bi-panel { padding: 4px 0; }
-.bi-controls { margin-bottom: 14px; }
+.bi-controls { margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.bi-select-label { font-size: 0.78rem; font-weight: 600; color: var(--c-text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .bi-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text-primary); padding: 7px 12px; border-radius: 6px; font-size: 0.85rem; min-width: 220px; cursor: pointer; }
 
 /* Process Flow — scrollable diagram + side rules panel */
 .flow-scroll-wrap {
     width: 100%;
     overflow: auto;
-    max-height: calc(100vh - 280px);
-    min-height: 300px;
+    /* Show at least 1000px (or more on tall screens) before scrolling. */
+    max-height: max(1000px, calc(100vh - 220px));
+    min-height: 400px;
     background: rgba(0,0,0,0.15);
     border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.07);
@@ -5877,10 +5899,47 @@ body.bi-mode .bi-page { display: block; }
 .coverage-bar-inner { height: 100%; background: linear-gradient(90deg,#2ecc71,#6c3de8); border-radius: 4px; transition: width .4s; }
 
 /* PRD Document */
-.prd-content { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 18px; overflow-y: auto; max-height: calc(100vh - 280px); }
+.prd-content { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 18px; overflow-y: auto; max-height: max(1000px, calc(100vh - 220px)); }
+
+/* Light-theme overrides — BI panels default to dark-oriented rgba surfaces. */
+body.theme-light .bi-tabs { border-bottom-color: rgba(0,0,0,0.1); }
+body.theme-light .bi-tab.active { border-bottom-color: var(--c-accent); }
+body.theme-light .bi-select { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.14); }
+body.theme-light .flow-scroll-wrap { background: rgba(0,0,0,0.025); border-color: rgba(0,0,0,0.08); }
+body.theme-light .flow-rules-panel { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
+body.theme-light .kg-container { background: rgba(0,0,0,0.03); }
+body.theme-light .coverage-bar-outer { background: rgba(0,0,0,0.08); }
+body.theme-light .prd-content { background: rgba(0,0,0,0.03); }
+
+/* Business Rules results tab — per-file cards (themed via palette vars) */
+.br-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px 14px; flex-wrap: wrap; }
+.br-toolbar-label { font-size: 0.82rem; color: var(--c-text-dim); font-weight: 600; }
+.br-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 12px; }
+.br-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+.br-prog { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 600; color: var(--c-text); }
+.br-desc { font-size: 0.84rem; color: var(--c-text-dim); margin-bottom: 10px; line-height: 1.5; }
+.br-muted { opacity: 0.7; margin-bottom: 0; }
+.br-rules { margin: 0; padding-left: 18px; }
+.br-rules li { font-size: 0.84rem; color: var(--c-text-dim); margin-bottom: 5px; line-height: 1.5; }
+.br-cov { font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: var(--r-pill); white-space: nowrap; }
+.br-cov-sub { opacity: 0.75; font-weight: 600; }
+.br-cov-good { background: color-mix(in srgb, var(--c-success) 16%, transparent); color: var(--c-success); }
+.br-cov-warn { background: color-mix(in srgb, var(--c-warning) 18%, transparent); color: var(--c-warning); }
+.br-cov-poor { background: color-mix(in srgb, var(--c-error) 16%, transparent); color: var(--c-error); }
+.br-card-foot { margin-top: 10px; }
+.br-flow-link { background: none; border: none; color: var(--c-accent-light); font-size: 0.8rem; font-weight: 600; cursor: pointer; padding: 0; }
+.br-flow-link:hover { text-decoration: underline; }
+
+/* Per-file business rules strip inside the Results Browser */
+.browser-biz-rules { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-md); padding: 12px 16px; margin-bottom: 12px; max-height: 220px; overflow-y: auto; }
+.browser-biz-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.browser-biz-title { font-size: 0.85rem; font-weight: 700; color: var(--c-text); }
+.browser-biz-head .br-flow-link { margin-left: auto; }
 
 .btn-green { background: rgba(46,204,113,0.15); border-color: rgba(46,204,113,0.35); color: #2ecc71; }
 .btn-green:hover { background: rgba(46,204,113,0.25); }
+body.theme-light .btn-green { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.45); color: #15803d; }
+body.theme-light .btn-green:hover { background: rgba(34,197,94,0.2); }
 
 /* Nav button active state */
 #biNavBtn.bi-active { background: rgba(108,61,232,0.25); color: #a78bfa; border-color: rgba(108,61,232,0.4); }

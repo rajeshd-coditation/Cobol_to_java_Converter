@@ -1385,11 +1385,18 @@ function switchTab(tabName) {
     errorPanel.classList.toggle('active', tabName === 'error');
     const orchEl = document.getElementById('orchestrationPanel');
     if (orchEl) orchEl.classList.toggle('active', tabName === 'orchestration');
+    const brEl = document.getElementById('businessRulesPanel');
+    if (brEl) brEl.classList.toggle('active', tabName === 'businessrules');
     // Lazy-load the orchestration panel — we don't fetch JCL analysis until
     // the tab is actually opened to avoid hammering the server on every
     // conversion result. Cached via panel's data attribute.
     if (tabName === 'orchestration' && orchEl && !orchEl.dataset.loaded) {
         loadOrchestrationPanel();
+    }
+    // Same idea for Business Rules — if the data isn't in memory yet (e.g. a
+    // restored conversion), fetch it when the tab is opened.
+    if (tabName === 'businessrules' && !_prdData && currentConversionId) {
+        showPRDSection(currentConversionId);
     }
 }
 
@@ -2483,6 +2490,8 @@ async function selectBrowserFile(file, el) {
     document.querySelectorAll('.tree-file.selected').forEach(e => e.classList.remove('selected'));
     if (el) el.classList.add('selected');
     currentBrowserFile = file;
+    // Per-file business rules above the code panes (fire-and-forget).
+    renderBrowserBizRules(file);
 
     // Show "Fix with AI" for any file where the AI produced Java we can
     // inspect — SUCCESS, COMPILE_FAIL (compile error after repair),
@@ -5948,9 +5957,7 @@ function toggleBiPage() {
 }
 
 function showBiPageOverlay() {
-    const btn = document.getElementById('biNavBtn');
     document.body.classList.add('bi-mode');
-    if (btn) { btn.textContent = '← Results'; btn.classList.add('bi-active'); }
     _biPageOpen = true;
     // Push a history entry so browser back closes BI instead of navigating away
     history.pushState({ biPage: true }, '');
@@ -5959,9 +5966,7 @@ function showBiPageOverlay() {
 }
 
 function hideBiPage() {
-    const btn = document.getElementById('biNavBtn');
     document.body.classList.remove('bi-mode');
-    if (btn) { btn.textContent = 'Business'; btn.classList.remove('bi-active'); }
     _biPageOpen = false;
 }
 
@@ -5971,6 +5976,7 @@ window.addEventListener('popstate', (e) => {
 });
 
 window.toggleBiPage = toggleBiPage;
+window.hideBiPage = hideBiPage;
 
 // When conversion completes → results phase + collapse graph
 const _origCompleteForPhase = window.onConversionComplete;
@@ -5979,10 +5985,8 @@ window.onConversionComplete = async function () {
         try { await _origCompleteForPhase(); } catch {}
     }
     setPhase('results');
-    collapseGraph();
-    // Show Business nav button
-    const biBtn = document.getElementById('biNavBtn');
-    if (biBtn) biBtn.classList.remove('hidden');
+    // The Business Rules results tab reveals itself from showPRDSection once
+    // per-file rule data has loaded.
 };
 
 // Initialize on page load
@@ -6795,10 +6799,14 @@ function resetSession() {
     currentConversionId = null;
     setPhase('input');
 
-    // Hide BI page and nav button
+    // Hide BI page and reset the Business Rules results tab content. The tab
+    // button itself lives inside the results section (hidden with it), so we
+    // don't re-hide the button — only clear its data + count.
     document.body.classList.remove('bi-mode');
     _biPageOpen = false;
-    document.getElementById('biNavBtn')?.classList.add('hidden');
+    document.getElementById('businessRulesTabCount')?.classList.add('hidden');
+    const brPanel = document.getElementById('businessRulesPanel');
+    if (brPanel) brPanel.innerHTML = '<p class="empty-state">Business rules appear here once files are converted (AI conversion only).</p>';
 
     // Re-expand graph for the next conversion
     const gs = document.getElementById('graphSection');
@@ -6855,26 +6863,59 @@ window.resetSession = resetSession;
 
 // ── Business Intelligence (PRD / Process Flow / Knowledge Graph / Coverage) ──
 
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    themeVariables: {
-        primaryColor: '#6c3de8', primaryTextColor: '#e0e0ff', primaryBorderColor: '#9b6cff',
-        lineColor: '#9b6cff', secondaryColor: '#1a1550', tertiaryColor: '#0d3b6e',
-        background: '#0a0818', mainBkg: '#1a1550', nodeBorder: '#6c3de8',
-        clusterBkg: '#1a1550', titleColor: '#e0e0ff', edgeLabelBackground: '#1a1550',
-        fontFamily: 'Space Grotesk, sans-serif'
+// Read a CSS custom property off <body> (picks up theme-light overrides).
+function biCssVar(name, fallback) {
+    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+    return v || fallback;
+}
+
+// Mermaid can't use CSS vars, so seed its palette from the active theme.
+// Wrapped defensively — a throw here must not halt the rest of app.js
+// (which wires the result tabs and restores the last session below).
+function initMermaidTheme() {
+    try {
+        if (typeof mermaid === 'undefined') return;
+        const surface = biCssVar('--c-bg-3', '#211f54');
+        const text    = biCssVar('--c-text', '#fff');
+        const accent  = biCssVar('--c-accent', '#7545ff');
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: surface, primaryTextColor: text, primaryBorderColor: accent,
+                lineColor: accent, secondaryColor: surface, tertiaryColor: surface,
+                background: 'transparent', mainBkg: surface, nodeBorder: accent,
+                clusterBkg: surface, titleColor: text, edgeLabelBackground: surface,
+                fontFamily: 'Space Grotesk, sans-serif'
+            }
+        });
+    } catch (e) {
+        console.warn('[bi] mermaid theme init failed:', e);
     }
-});
+}
+initMermaidTheme();
 
 let _prdContent = null;
 let _prdData = null;
 let _activeBiTab = 'doc';
-let _visNetwork = null;
+// One program selection shared across the per-program tabs (Coverage + Flow).
+let _biSelectedProgram = null;
+
+// Re-theme diagrams when the user flips light/dark.
+window.addEventListener('themechange', () => {
+    initMermaidTheme();
+    if (_biPageOpen && _activeBiTab === 'flow') renderFlowForProgram(_biSelectedProgram);
+});
+
+// Render whichever per-program tab is active for the shared selection.
+function renderActiveBiTab() {
+    if (_activeBiTab === 'flow') renderFlowForProgram(_biSelectedProgram);
+    else if (_activeBiTab === 'coverage') renderCoverageForProgram(_biSelectedProgram);
+}
 
 function switchBiTab(tab) {
     _activeBiTab = tab;
-    ['doc', 'flow', 'graph', 'coverage'].forEach(t => {
+    ['coverage', 'flow', 'doc'].forEach(t => {
         const key = t.charAt(0).toUpperCase() + t.slice(1);
         const btn = document.getElementById(`biTab${key}`);
         const panel = document.getElementById(`biPanel${key}`);
@@ -6883,8 +6924,10 @@ function switchBiTab(tab) {
         btn.classList.toggle('active', active);
         panel.classList.toggle('hidden', !active);
     });
-    if (tab === 'graph' && _prdData && _visNetwork === null) renderKnowledgeGraph(_prdData);
-    if (tab === 'graph' && _visNetwork) setTimeout(() => _visNetwork.fit(), 100);
+    // Shared program selector applies to Coverage + Flow, not the whole-report Document.
+    const controls = document.getElementById('biSharedControls');
+    if (controls) controls.classList.toggle('hidden', tab === 'doc');
+    renderActiveBiTab();
 }
 window.switchBiTab = switchBiTab;
 
@@ -6906,10 +6949,14 @@ async function renderMermaid(containerId, chartDef) {
             }
             svgEl.removeAttribute('width');
             svgEl.removeAttribute('height');
-            svgEl.style.width = '100%';
+            // Render at natural size (don't upscale a narrow top-down flow),
+            // shrink only if wider than the container, no height cap — the
+            // scroll-wrap provides the tall view and scrolls past it.
+            svgEl.style.width = `${w}px`;
+            svgEl.style.maxWidth = '100%';
             svgEl.style.height = 'auto';
-            svgEl.style.maxHeight = '70vh';
             svgEl.style.display = 'block';
+            svgEl.style.margin = '0 auto';
         }
     } catch (err) {
         el.innerHTML = `<p style="color:#ff6b6b;font-size:0.8rem;margin:0;">Diagram error: ${escapeHtml(err.message)}</p>`;
@@ -6924,11 +6971,17 @@ function buildFlowchartDef(programRules) {
         return { id: `S${i}`, step: s.step || `Step ${i + 1}`, type: s.type || 'process', rules: s.rules || [] };
     });
     const safe = t => (t || '').replace(/"/g, "'").replace(/[<>{}[\]|]/g, ' ').replace(/\n/g, ' ').trim().substring(0, 50);
+    // Node-type colors derived from the active theme palette.
+    const accent  = biCssVar('--c-accent', '#7545ff');
+    const blue    = biCssVar('--c-teal', '#38bdf8');
+    const green   = biCssVar('--c-success', '#22c55e');
+    const surface = biCssVar('--c-bg-3', '#211f54');
+    const text    = biCssVar('--c-text', '#fff');
     let chart = `flowchart TD\n`;
-    chart += `    classDef startEnd fill:#6c3de8,stroke:#9b6cff,color:#fff\n`;
-    chart += `    classDef process fill:#1a1550,stroke:#6c3de8,color:#e0e0ff\n`;
-    chart += `    classDef decision fill:#0d3b6e,stroke:#4a9eff,color:#e0f0ff\n`;
-    chart += `    classDef io fill:#0a3d2e,stroke:#2ecc71,color:#d0ffe8\n`;
+    chart += `    classDef startEnd fill:${accent},stroke:${accent},color:#fff\n`;
+    chart += `    classDef process fill:${surface},stroke:${accent},color:${text}\n`;
+    chart += `    classDef decision fill:${blue},stroke:${blue},color:#fff\n`;
+    chart += `    classDef io fill:${green},stroke:${green},color:#fff\n`;
     steps.forEach(s => {
         const label = safe(s.step);
         switch (s.type) {
@@ -6967,7 +7020,7 @@ function renderFlowForProgram(programName) {
             let html = '';
             result.steps.forEach(s => {
                 if (!s.rules || s.rules.length === 0) return;
-                html += `<div style="margin-bottom:12px;"><div style="font-size:0.82rem;font-weight:600;color:#9b6cff;margin-bottom:4px;">${escapeHtml(s.step)}</div><ul style="margin:0;padding-left:18px;">`;
+                html += `<div style="margin-bottom:12px;"><div style="font-size:0.82rem;font-weight:600;color:var(--c-accent-light);margin-bottom:4px;">${escapeHtml(s.step)}</div><ul style="margin:0;padding-left:18px;">`;
                 s.rules.forEach(r => { html += `<li style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:2px;">${escapeHtml(r)}</li>`; });
                 html += `</ul></div>`;
             });
@@ -6978,7 +7031,7 @@ function renderFlowForProgram(programName) {
     }
     const rulesPanel = document.getElementById('flowRulesPanel');
     if (rulesPanel && program.businessRules && program.businessRules.length > 0) {
-        let html = `<div style="font-size:0.82rem;font-weight:600;color:#9b6cff;margin-bottom:8px;">${escapeHtml(programName)}</div>`;
+        let html = `<div style="font-size:0.82rem;font-weight:600;color:var(--c-accent-light);margin-bottom:8px;">${escapeHtml(programName)}</div>`;
         html += `<ul style="margin:0;padding-left:16px;">`;
         program.businessRules.forEach(r => { html += `<li style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;">${escapeHtml(r)}</li>`; });
         html += `</ul>`;
@@ -6986,52 +7039,18 @@ function renderFlowForProgram(programName) {
     }
 }
 
-function renderKnowledgeGraph(programs) {
-    const container = document.getElementById('knowledgeGraphContainer');
-    if (!container || typeof vis === 'undefined') return;
-    const nodes = [], edges = [], seen = new Set();
-    const programNames = new Set(programs.map(p => p.programName).filter(Boolean));
-    programs.forEach(p => {
-        if (!p || !p.programName) return;
-        if (!seen.has(p.programName)) {
-            seen.add(p.programName);
-            nodes.push({ id: p.programName, label: p.programName, title: p.description || p.programName,
-                color: { background: '#6c3de8', border: '#9b6cff', highlight: { background: '#8b5cf6', border: '#c4b5fd' } },
-                font: { color: '#ffffff', size: 13 }, shape: 'box', shadow: true });
-        }
-        (p.externalDependencies || []).forEach(dep => {
-            if (!seen.has(dep)) {
-                seen.add(dep);
-                const isProg = programNames.has(dep);
-                nodes.push({ id: dep, label: dep,
-                    color: isProg
-                        ? { background: '#4a9eff', border: '#7bbfff', highlight: { background: '#60a8f8', border: '#a8d4ff' } }
-                        : { background: '#2ecc71', border: '#5de68e', highlight: { background: '#3dd681', border: '#82edb0' } },
-                    font: { color: '#ffffff', size: 11 }, shape: isProg ? 'ellipse' : 'database', shadow: true });
-            }
-            edges.push({ from: p.programName, to: dep, arrows: 'to',
-                color: { color: '#555580', highlight: '#9b6cff' }, smooth: { type: 'curvedCW', roundness: 0.2 } });
-        });
-    });
-    if (nodes.length === 0) return;
-    const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
-    const options = {
-        layout: { improvedLayout: true },
-        physics: { enabled: true, stabilization: { iterations: 150 }, barnesHut: { gravitationalConstant: -6000, springLength: 140, springConstant: 0.04 } },
-        interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true },
-        nodes: { borderWidth: 2, borderWidthSelected: 3 }, edges: { width: 1.5, selectionWidth: 2.5 }
-    };
-    _visNetwork = new vis.Network(container, data, options);
-}
-
 async function showPRDSection(conversionId) {
     const prdContent = document.getElementById('prdContent');
-    // Show nav button so user can access BI page after data loads
-    const biNavBtn = document.getElementById('biNavBtn');
-    if (biNavBtn) biNavBtn.classList.remove('hidden');
     if (prdContent) prdContent.innerHTML = '<p style="color:var(--text-secondary);margin:0;">Extracting business rules...</p>';
-    _prdContent = null; _prdData = null; _visNetwork = null;
-    switchBiTab('doc');
+    _prdContent = null; _prdData = null;
+    switchBiTab('coverage');
+
+    // Reveal the Business Rules results tab right away — it's the entry point
+    // now that the nav button is gone. Data fills in over the retry loop below.
+    const tabBtn = document.getElementById('businessRulesTabBtn');
+    if (tabBtn) tabBtn.classList.remove('hidden');
+    const brPanel = document.getElementById('businessRulesPanel');
+    if (brPanel) brPanel.innerHTML = '<p class="empty-state">Extracting business rules…</p>';
 
     const maxAttempts = 10;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -7057,36 +7076,27 @@ async function showPRDSection(conversionId) {
                 console.log(`[bi] prd-data programs: ${dataJson.programs?.length}`);
                 if (dataJson.programs && dataJson.programs.length > 0) {
                     _prdData = dataJson.programs;
-                    populateFlowProgramSelect(_prdData);
-                    populateCoverageProgramSelect(_prdData);
+                    populateBiProgramSelect(_prdData);
+                    renderActiveBiTab();
+                    renderBusinessRulesPanel(_prdData);
                 }
             }
-            if (_prdContent) return;
+            // Wait for BOTH the PRD doc and the per-file program data so the
+            // Business Rules tab gets populated (programs arrive independently).
+            if (_prdContent && _prdData) return;
         } catch (_) {}
         if (attempt < maxAttempts - 1) await new Promise(r => setTimeout(r, 2000));
     }
     if (!_prdContent && prdContent) prdContent.innerHTML = '<p style="color:var(--text-secondary);margin:0;">Business rules not available for this conversion.</p>';
+    if (!_prdData && brPanel) brPanel.innerHTML = '<p class="empty-state">No business rules were extracted for this conversion.</p>';
 }
 
-function populateFlowProgramSelect(programs) {
-    const sel = document.getElementById('flowProgramSelect');
+// One shared program selector for the whole BI page (Coverage + Flow tabs).
+// Selecting a program here persists across tab switches.
+function populateBiProgramSelect(programs) {
+    const sel = document.getElementById('biProgramSelect');
     if (!sel) return;
-    sel.innerHTML = '<option value="">— select a program —</option>';
-    programs.forEach(p => {
-        if (!p || !p.programName) return;
-        const opt = document.createElement('option');
-        opt.value = p.programName; opt.textContent = p.programName;
-        sel.appendChild(opt);
-    });
-    sel.onchange = () => renderFlowForProgram(sel.value);
-    const first = programs.find(p => p.processFlow && p.processFlow.length > 0);
-    if (first) { sel.value = first.programName; renderFlowForProgram(first.programName); }
-}
-
-function populateCoverageProgramSelect(programs) {
-    const sel = document.getElementById('coverageProgramSelect');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">— select a program —</option>';
+    sel.innerHTML = '';
     programs.forEach(p => {
         if (!p || !p.programName) return;
         const opt = document.createElement('option');
@@ -7095,9 +7105,10 @@ function populateCoverageProgramSelect(programs) {
         opt.textContent = p.programName + (cov ? ` (${cov.covered}/${cov.total})` : '');
         sel.appendChild(opt);
     });
-    sel.onchange = () => renderCoverageForProgram(sel.value);
-    const first = programs.find(p => p.coverage?.coverage?.length > 0);
-    if (first) { sel.value = first.programName; renderCoverageForProgram(first.programName); }
+    sel.onchange = () => { _biSelectedProgram = sel.value; renderActiveBiTab(); };
+    // Default to the first program that actually has flow or coverage data.
+    const first = programs.find(p => (p.processFlow && p.processFlow.length) || (p.coverage?.coverage?.length)) || programs[0];
+    if (first) { _biSelectedProgram = first.programName; sel.value = first.programName; }
 }
 
 function renderCoverageForProgram(programName) {
@@ -7126,28 +7137,32 @@ function renderCoverageForProgram(programName) {
     const pct = Math.round((covered + partial * 0.5) / total * 100);
     if (bar) { bar.classList.remove('hidden'); }
     if (fill) fill.style.width = `${pct}%`;
+    const cSuccess = biCssVar('--c-success', '#22c55e');
+    const cWarning = biCssVar('--c-warning', '#f59e0b');
+    const cError   = biCssVar('--c-error', '#ef4444');
     if (badge) {
         badge.innerHTML =
-            `<span style="color:#2ecc71;font-weight:700;">${covered} covered</span>` +
-            (partial > 0 ? ` &nbsp;·&nbsp; <span style="color:#f1c40f;font-weight:700;">${partial} partial</span>` : '') +
-            (missing > 0 ? ` &nbsp;·&nbsp; <span style="color:#e74c3c;font-weight:700;">${missing} missing</span>` : '') +
+            `<span style="color:${cSuccess};font-weight:700;">${covered} covered</span>` +
+            (partial > 0 ? ` &nbsp;·&nbsp; <span style="color:${cWarning};font-weight:700;">${partial} partial</span>` : '') +
+            (missing > 0 ? ` &nbsp;·&nbsp; <span style="color:${cError};font-weight:700;">${missing} missing</span>` : '') +
             ` &nbsp;·&nbsp; ${pct}% implemented`;
     }
     let html = `<table style="width:100%;border-collapse:collapse;font-size:0.84rem;"><thead><tr>`;
     ['#','Business Rule','COBOL','Java','Note'].forEach(h => {
-        html += `<th style="text-align:left;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid rgba(255,255,255,0.1);">${h}</th>`;
+        html += `<th style="text-align:left;padding:8px 10px;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid var(--c-border);">${h}</th>`;
     });
     html += `</tr></thead><tbody>`;
     items.forEach((c, i) => {
-        const { label, color, bg } = c.status === 'COVERED'
-            ? { label: 'Covered', color: '#2ecc71', bg: 'rgba(46,204,113,0.12)' }
+        const { label, color } = c.status === 'COVERED'
+            ? { label: 'Covered', color: cSuccess }
             : c.status === 'PARTIAL'
-            ? { label: 'Partial', color: '#f1c40f', bg: 'rgba(241,196,15,0.12)' }
-            : { label: 'Missing', color: '#e74c3c', bg: 'rgba(231,76,60,0.12)' };
-        html += `<tr style="border-left:3px solid ${color}40;">`;
+            ? { label: 'Partial', color: cWarning }
+            : { label: 'Missing', color: cError };
+        const bg = `${color}22`;
+        html += `<tr style="border-left:3px solid ${color}66;">`;
         html += `<td style="padding:9px 10px;color:var(--text-secondary);">${i + 1}</td>`;
         html += `<td style="padding:9px 10px;color:var(--text-primary);">${escapeHtml(c.rule)}</td>`;
-        html += `<td style="padding:9px 10px;text-align:center;color:#2ecc71;font-size:0.78rem;font-weight:600;">Yes</td>`;
+        html += `<td style="padding:9px 10px;text-align:center;color:${cSuccess};font-size:0.78rem;font-weight:600;">Yes</td>`;
         html += `<td style="padding:9px 10px;text-align:center;"><span style="font-size:0.75rem;font-weight:700;padding:2px 10px;border-radius:10px;background:${bg};color:${color};white-space:nowrap;">${label}</span></td>`;
         html += `<td style="padding:9px 10px;color:var(--text-secondary);font-size:0.8rem;">${escapeHtml(c.note || '')}</td>`;
         html += `</tr>`;
@@ -7155,6 +7170,114 @@ function renderCoverageForProgram(programName) {
     html += `</tbody></table>`;
     wrap.innerHTML = html;
 }
+
+// Per-file business rules, rendered inline in the results "Business Rules" tab.
+// Leads with coverage (the decision-relevant number), then the rule list, with
+// a link into the full-page report for the process-flow diagram.
+function renderBusinessRulesPanel(programs) {
+    const panel = document.getElementById('businessRulesPanel');
+    const tabBtn = document.getElementById('businessRulesTabBtn');
+    const countEl = document.getElementById('businessRulesTabCount');
+    if (!panel) return;
+    const list = (programs || []).filter(p => p && p.programName);
+    if (list.length === 0) {
+        panel.innerHTML = '<p class="empty-state">No business rules extracted for this conversion.</p>';
+        return;
+    }
+    if (tabBtn) tabBtn.classList.remove('hidden');
+    if (countEl) { countEl.textContent = list.length; countEl.classList.remove('hidden'); }
+
+    let html = `<div class="br-toolbar"><span class="br-toolbar-label">${list.length} program${list.length === 1 ? '' : 's'} documented</span>` +
+        `<button class="btn-pill btn-ghost" type="button" onclick="toggleBiPage()">Open full report →</button></div>`;
+    list.forEach(p => {
+        const cov = p.coverage?.summary;
+        const rules = p.businessRules || [];
+        let covBadge = '';
+        if (cov && cov.total) {
+            const pct = Math.round(((cov.covered || 0) + (cov.partial || 0) * 0.5) / cov.total * 100);
+            const tone = pct >= 80 ? 'good' : pct >= 50 ? 'warn' : 'poor';
+            covBadge = `<span class="br-cov br-cov-${tone}">${pct}% covered <span class="br-cov-sub">${cov.covered}/${cov.total}</span></span>`;
+        }
+        html += `<div class="br-card">`;
+        html += `<div class="br-card-head"><span class="br-prog">${escapeHtml(p.programName)}</span>${covBadge}</div>`;
+        if (p.description) html += `<div class="br-desc">${escapeHtml(p.description)}</div>`;
+        if (rules.length) {
+            html += `<ul class="br-rules">`;
+            rules.forEach(r => { html += `<li>${escapeHtml(r)}</li>`; });
+            html += `</ul>`;
+        } else {
+            html += `<div class="br-desc br-muted">No business rules extracted.</div>`;
+        }
+        if (p.processFlow && p.processFlow.length) {
+            html += `<div class="br-card-foot"><button class="br-flow-link" type="button" data-prog="${escapeHtml(p.programName)}">View process flow →</button></div>`;
+        }
+        html += `</div>`;
+    });
+    panel.innerHTML = html;
+    panel.querySelectorAll('.br-flow-link').forEach(btn => {
+        btn.addEventListener('click', () => openBiFlow(btn.dataset.prog));
+    });
+}
+
+// Per-file business rules shown inside the Results Browser, above the
+// COBOL/Java panes, for the currently-selected file. Matches the file to its
+// program in _prdData by PROGRAM-ID ≈ file base name.
+async function renderBrowserBizRules(file) {
+    const wrap = document.getElementById('browserBizRules');
+    if (!wrap) return;
+    // Ensure rule data is loaded (the user may open the browser before the
+    // post-conversion BI fetch has populated _prdData).
+    if (!_prdData && currentConversionId) {
+        try {
+            const r = await fetch(`/api/prd-data/${currentConversionId}`);
+            if (r.ok) { const j = await r.json(); if (j.programs) _prdData = j.programs; }
+        } catch (_) {}
+    }
+    // Guard against a newer selection having superseded this one mid-fetch.
+    if (!currentBrowserFile || currentBrowserFile.cobolPath !== file.cobolPath) return;
+    if (!_prdData || !_prdData.length) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+
+    const base = (file.cobolPath || '').split('/').pop().replace(/\.[^.]+$/, '').toUpperCase();
+    const prog = _prdData.find(p => (p.programName || '').toUpperCase() === base)
+              || (base && _prdData.find(p => (p.programName || '').toUpperCase().includes(base)));
+    if (!prog) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+
+    const rules = prog.businessRules || [];
+    const cov = prog.coverage && prog.coverage.summary;
+    let covBadge = '';
+    if (cov && cov.total) {
+        const pct = Math.round(((cov.covered || 0) + (cov.partial || 0) * 0.5) / cov.total * 100);
+        const tone = pct >= 80 ? 'good' : pct >= 50 ? 'warn' : 'poor';
+        covBadge = `<span class="br-cov br-cov-${tone}">${pct}% covered <span class="br-cov-sub">${cov.covered}/${cov.total}</span></span>`;
+    }
+    let html = `<div class="browser-biz-head"><span class="browser-biz-title">Business Rules — ${escapeHtml(prog.programName)}</span>${covBadge}`;
+    if (prog.processFlow && prog.processFlow.length) {
+        html += `<button type="button" class="br-flow-link" data-prog="${escapeHtml(prog.programName)}">Process flow & full report →</button>`;
+    }
+    html += `</div>`;
+    if (prog.description) html += `<div class="br-desc">${escapeHtml(prog.description)}</div>`;
+    if (rules.length) {
+        html += `<ul class="br-rules">`;
+        rules.forEach(r => { html += `<li>${escapeHtml(r)}</li>`; });
+        html += `</ul>`;
+    } else {
+        html += `<div class="br-desc br-muted">No business rules extracted for this program.</div>`;
+    }
+    wrap.innerHTML = html;
+    wrap.classList.remove('hidden');
+    const link = wrap.querySelector('.br-flow-link');
+    if (link) link.addEventListener('click', () => openBiFlow(link.dataset.prog));
+}
+
+// Open the full-page BI report focused on one program's process flow.
+function openBiFlow(programName) {
+    showBiPageOverlay();
+    _biSelectedProgram = programName;
+    const sel = document.getElementById('biProgramSelect');
+    if (sel) sel.value = programName;
+    switchBiTab('flow');
+}
+window.openBiFlow = openBiFlow;
 
 function downloadPRD() {
     if (!_prdContent) return;

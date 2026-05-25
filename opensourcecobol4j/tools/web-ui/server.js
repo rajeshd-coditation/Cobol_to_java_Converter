@@ -72,8 +72,14 @@ const { lookupCobolTypo } = require('./src/core/cobol-typo-dictionary');
 // when a user selects a few thousand files (the body is a selectedFiles path
 // list, not file contents, but long paths x large selections can exceed 100KB
 // and Express returns a silent 413 that looks like a network failure in the UI).
-app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Compare/run payloads carry full program outputs + output-file contents;
+// 2mb overflowed and surfaced as an HTML PayloadTooLargeError page.
+app.use(express.json({ limit: '25mb' }));
+app.use(express.static(path.join(__dirname, 'public'), {
+    // Dev tool: force revalidation so UI edits always reach the browser
+    // (avoids "I don't see my change" from heuristic disk caching).
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+}));
 
 // Bookmark URL — serve index.html for /c/<conversionId> so users can
 // deep-link into a previous run. The frontend inspects window.location
@@ -326,6 +332,26 @@ require('./src/routes/prd').mount(app, { activeConversions });
 require('./src/routes/status').mount(app, { activeConversions });
 require('./src/routes/health').mount(app, { activeConversions, AI_PROVIDER, aiAgent, azureAgent });
 require('./src/routes/stats').mount(app, { activeConversions });
+
+// Any /api/* request that didn't match a route returns JSON, not the SPA
+// HTML — so the frontend's response.json() never chokes on "<!DOCTYPE ...".
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: `No such API route: ${req.method} ${req.path}` });
+});
+
+// Final error handler — converts thrown/propagated errors (e.g. express.json
+// PayloadTooLargeError) into JSON instead of Express's default HTML page.
+app.use((err, req, res, next) => {
+    const status = err.status || err.statusCode || 500;
+    console.error(`[api-error] ${req.method} ${req.originalUrl}: ${err.message}`);
+    if (res.headersSent) return next(err);
+    res.status(status).json({
+        error: err.type === 'entity.too.large'
+            ? 'Request too large to compare (output exceeded the size limit).'
+            : (err.message || 'Internal server error'),
+        code: err.type || undefined
+    });
+});
 
 
 // Start server — use http.createServer explicitly so we can attach a

@@ -129,6 +129,8 @@ function applyTheme(theme) {
     const btn = document.getElementById('themeToggleBtn');
     if (btn) btn.title = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
     localStorage.setItem('theme', theme);
+    // Let canvas/SVG renderers (mermaid, vis) that can't use CSS vars re-theme.
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
 }
 
 function toggleTheme() {
