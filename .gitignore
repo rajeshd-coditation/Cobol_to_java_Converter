@@ -103,6 +103,9 @@ opensourcecobol4j/tools/test_output/
 opensourcecobol4j/tools/test_proj/
 opensourcecobol4j/tools/test_src/
 
+# Old directory left over from opensource/ → opensourcecobol4j/ rename
+opensource/
+
 # OS / Editor
 .DS_Store
 Thumbs.db
