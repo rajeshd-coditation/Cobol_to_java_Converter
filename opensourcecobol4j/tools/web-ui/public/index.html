@@ -65,21 +65,23 @@
             </div>
 
             <div class="header-input-group">
-                <input type="text" id="repoInput"
-                    placeholder="Git URL or local repository path"
-                    autocomplete="off">
-                <div class="sample-wrap">
-                    <button id="sampleBtn" class="btn-pill btn-ghost" type="button"
-                        title="Pick a bundled sample repo">
-                        Try sample 
+                <div class="header-repo-group" id="headerRepoGroup">
+                    <input type="text" id="repoInput"
+                        placeholder="Git URL or local repository path"
+                        autocomplete="off">
+                    <div class="sample-wrap">
+                        <button id="sampleBtn" class="btn-pill btn-ghost" type="button"
+                            title="Pick a bundled sample repo">
+                            Try sample
+                        </button>
+                        <div id="sampleMenu" class="sample-menu hidden"></div>
+                    </div>
+                    <button id="convertBtn" class="btn-pill btn-primary" disabled
+                        title="Enter a repository URL or pick a sample first">
+                        <span class="btn-text">Convert</span>
+                        <span class="btn-loader hidden"></span>
                     </button>
-                    <div id="sampleMenu" class="sample-menu hidden"></div>
                 </div>
-                <button id="convertBtn" class="btn-pill btn-primary" disabled
-                    title="Enter a repository URL or pick a sample first">
-                    <span class="btn-text">Convert</span>
-                    <span class="btn-loader hidden"></span>
-                </button>
                 <div id="activeFileBreadcrumb" class="active-file-breadcrumb hidden">
                     <span class="breadcrumb-spinner"></span>
                     <span class="breadcrumb-label">Converting</span>
@@ -95,8 +97,8 @@
                     Reset
                 </button>
                 <button id="drawerToggleBtn" class="btn-pill btn-ghost" type="button"
-                    onclick="toggleRightDrawer()" title="Show activity / stream / history">
-                    Activity
+                    onclick="toggleRightDrawer()" title="Show logs / stream / history">
+                    Logs
                     <span id="drawerBadge" class="drawer-badge hidden">0</span>
                 </button>
                 <!-- Settings cog — opens a dropdown with theme, AI provider
@@ -138,6 +140,14 @@
                             <button type="button" class="settings-btn" onclick="openCompareConversions(); toggleSettingsMenu(false)" title="A/B compare two past conversions file-by-file">
                                 Open
                             </button>
+                        </div>
+                        <!-- LLM token usage (moved from sidebar) -->
+                        <div id="tokenPanel" class="token-panel hidden">
+                            <div class="token-header">LLM tokens</div>
+                            <div class="token-row"><span>Prompt in</span><span id="tokenIn" class="token-value">0</span></div>
+                            <div class="token-row"><span>Completion out</span><span id="tokenOut" class="token-value">0</span></div>
+                            <div class="token-row total"><span>Total</span><span id="tokenTotal" class="token-value">0</span></div>
+                            <div class="token-row dim"><span>API calls</span><span id="tokenCalls" class="token-value">0</span></div>
                         </div>
                     </div>
                 </div>
@@ -206,13 +216,8 @@
                 <span class="wf-num">4</span>
                 <span class="wf-label">Convert</span>
             </div>
-            <!-- "Review" + its leading connector are hidden when HITL is off.
-                 Toggled live by syncReviewStepVisibility() against
-                 #reviewModeToggle. Step numbers are still 5/6 in the DOM —
-                 only display flips, so existing setPhase('review') logic
-                 keeps working if HITL is later turned back on mid-flow. -->
-            <div class="wf-connector wf-review-only"></div>
-            <div class="wf-step wf-review-only" data-step="review">
+            <div class="wf-connector"></div>
+            <div class="wf-step" data-step="review">
                 <span class="wf-num">5</span>
                 <span class="wf-label">Review</span>
             </div>
@@ -234,82 +239,43 @@
         <!-- Workspace: sidebar + main canvas -->
         <div class="workspace">
             <aside class="sidebar phase-hide" data-show-phases="analyze convert review results">
-                <div class="hero-copy">
-                    <h1 class="hero-title">COBOL <span class="highlight">→</span> Java</h1>
-                    <p class="hero-tagline">Live, AI-driven legacy modernization</p>
-                </div>
+                <button class="sidebar-collapse-btn" id="sidebarCollapseBtn"
+                        onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
 
-                <!-- Activity moved to right drawer; legacy stub keeps JS happy -->
-                <div id="chatMessages" class="hidden"></div>
-                <div id="chatActions" class="hidden"></div>
+                <div class="sidebar-content">
+                    <div class="hero-copy">
+                        <h1 class="hero-title">COBOL <span class="highlight">→</span> Java</h1>
+                        <p class="hero-tagline">Live, AI-driven legacy modernization</p>
+                    </div>
 
-                <!-- Live counts (populated during conversion) -->
-                <div id="liveCounts" class="live-counts hidden">
-                    <div class="live-row">
-                        <span class="live-label">Total</span>
-                        <span class="live-value" id="liveTotal">0</span>
-                    </div>
-                    <div class="live-row done">
-                        <span class="live-label"><span class="live-dot done"></span>Done</span>
-                        <span class="live-value" id="liveDone">0</span>
-                    </div>
-                    <div class="live-row active">
-                        <span class="live-label"><span class="live-dot active"></span>Converting</span>
-                        <span class="live-value" id="liveActive">0</span>
-                    </div>
-                    <div class="live-row awaiting">
-                        <span class="live-label"><span class="live-dot awaiting"></span>Awaiting review</span>
-                        <span class="live-value" id="liveAwaiting">0</span>
-                    </div>
-                    <div class="live-row failed">
-                        <span class="live-label"><span class="live-dot failed"></span>Failed</span>
-                        <span class="live-value" id="liveFailed">0</span>
-                    </div>
-                    <div class="live-row skipped">
-                        <span class="live-label"><span class="live-dot skipped"></span>Skipped</span>
-                        <span class="live-value" id="liveSkipped">0</span>
-                    </div>
-                </div>
+                    <!-- Repo group injected here by JS during conversion phases -->
+                    <div id="sidebarRepoSlot"></div>
 
-                <!-- Status + progress -->
-                <div id="statusSection" class="status-section hidden">
-                    <div class="status-header">
-                        <span class="status-label">Status</span>
-                        <span id="statusBadge" class="status-badge">Running</span>
-                    </div>
-                    <div id="progressContainer" class="progress-container">
-                        <div class="progress-info">
-                            <span id="progressStep" class="progress-step">Initializing…</span>
-                            <span id="progressPercent" class="progress-percent">0%</span>
+                    <!-- Activity moved to right drawer; legacy stub keeps JS happy -->
+                    <div id="chatMessages" class="hidden"></div>
+                    <div id="chatActions" class="hidden"></div>
+
+                    <!-- Live counts moved to dependency graph legend; keep stub so getElementById doesn't error -->
+                    <div id="liveCounts" class="live-counts hidden"></div>
+
+                    <!-- Status + progress -->
+                    <div id="statusSection" class="status-section hidden">
+                        <div class="status-header">
+                            <span class="status-label">Status</span>
+                            <span id="statusBadge" class="status-badge">Running</span>
                         </div>
-                        <div class="progress-track">
-                            <div id="progressBar" class="progress-bar-fill"></div>
+                        <div id="progressContainer" class="progress-container">
+                            <div class="progress-info">
+                                <span id="progressStep" class="progress-step">Initializing…</span>
+                                <span id="progressPercent" class="progress-percent">0%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div id="progressBar" class="progress-bar-fill"></div>
+                            </div>
                         </div>
                     </div>
+
                 </div>
-
-                <!-- Risks / warnings panel -->
-                <div id="risksPanel" class="risks-panel hidden">
-                    <div class="risks-header">
-                        <span>Risks &amp; warnings</span>
-                        <span id="risksCount" class="risks-count">0</span>
-                    </div>
-                    <div id="risksList" class="risks-list"></div>
-                </div>
-
-                <!-- Token usage panel -->
-                <div id="tokenPanel" class="token-panel hidden">
-                    <div class="token-header">LLM tokens</div>
-                    <div class="token-row"><span>Prompt in</span><span id="tokenIn" class="token-value">0</span></div>
-                    <div class="token-row"><span>Completion out</span><span id="tokenOut" class="token-value">0</span></div>
-                    <div class="token-row total"><span>Total</span><span id="tokenTotal" class="token-value">0</span></div>
-                    <div class="token-row dim"><span>API calls</span><span id="tokenCalls" class="token-value">0</span></div>
-                </div>
-
-                <!-- Coming-soon / disabled features (transparency for the demo) -->
-                <!-- All "Coming soon" features have been implemented -->
-
-                <p class="sidebar-hint">Supports Git URLs and local filesystem paths.</p>
             </aside>
 
             <!-- Empty state: shown before anything is loaded (OUTSIDE workspace, centered over full area) -->
@@ -344,14 +310,14 @@
                 <!-- Live dependency graph -->
                 <div class="graph-section phase-hide" data-show-phases="analyze convert review results" id="graphSection">
                     <div class="graph-header">
-                        <h3>Dependency Graph</h3>
+                        <h3>Dependency Graph <span id="liveTotal" class="graph-total-badge hidden">0</span></h3>
                         <div class="graph-legend">
                             <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
-                            <span class="legend-item"><span class="legend-dot active"></span>Converting</span>
-                            <span class="legend-item"><span class="legend-dot awaiting"></span>Awaiting review</span>
-                            <span class="legend-item"><span class="legend-dot done"></span>Done</span>
-                            <span class="legend-item"><span class="legend-dot failed"></span>Failed</span>
-                            <span class="legend-item"><span class="legend-dot skipped"></span>Skipped</span>
+                            <span class="legend-item"><span class="legend-dot active"></span>Converting<span id="liveActive" class="legend-count">0</span></span>
+                            <span class="legend-item"><span class="legend-dot awaiting"></span>Awaiting review<span id="liveAwaiting" class="legend-count">0</span></span>
+                            <span class="legend-item"><span class="legend-dot done"></span>Done<span id="liveDone" class="legend-count">0</span></span>
+                            <span class="legend-item"><span class="legend-dot failed"></span>Failed<span id="liveFailed" class="legend-count">0</span></span>
+                            <span class="legend-item"><span class="legend-dot skipped"></span>Skipped<span id="liveSkipped" class="legend-count">0</span></span>
                         </div>
                         <details class="graph-legend-edges" style="margin-top: .35rem;">
                             <summary style="cursor: pointer; font-size: .78rem; color: var(--text-muted, #888);">Edge &amp; node kinds</summary>
@@ -384,6 +350,15 @@
                             <button class="graph-ctrl fit" onclick="graphFit()" title="Fit all nodes">Fit</button>
                         </div>
                     </div>
+                </div>
+
+                <!-- Risks / warnings panel (sits between graph and results) -->
+                <div id="risksPanel" class="risks-panel risks-panel-main phase-hide" data-show-phases="analyze convert review results">
+                    <div class="risks-header">
+                        <span>Risks &amp; warnings</span>
+                        <span id="risksCount" class="risks-count">0</span>
+                    </div>
+                    <div id="risksList" class="risks-list"></div>
                 </div>
 
                 <!-- KPI summary bar (appears on completion) -->

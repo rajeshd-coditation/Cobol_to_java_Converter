@@ -295,12 +295,12 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
 
     try {
         let hasCobc = false;
-        try { execSync('which cobc', { stdio: 'ignore' }); hasCobc = true; } catch {}
+        try { execSync('cobc --version', { stdio: 'ignore' }); hasCobc = true; } catch {}
         if (!hasCobc) {
             result.cobol = {
                 ok: false,
                 output: '',
-                error: 'GnuCOBOL (cobc) is not installed on this server. Install with `brew install gnu-cobol` to enable native COBOL execution.'
+                error: 'GnuCOBOL (cobc) is not installed on this server. Rebuild the Docker image to enable native COBOL execution.'
             };
             return;
         }
@@ -391,9 +391,16 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
                 cpyDirs.add(path.dirname(f.source_path));
             }
         }
+        // Search inputPath and its parent — copybooks are often one level up
+        // from the cbl/ directory (e.g. carddemo: cbl/ siblings cpy/).
+        const cpySearchRoots = new Set([conversion.inputPath].filter(Boolean));
         if (conversion.inputPath) {
-            for (const candidate of ['cpy', 'copybooks', 'copy', 'include']) {
-                const p = path.join(conversion.inputPath, candidate);
+            const parent = path.dirname(conversion.inputPath);
+            if (parent !== conversion.inputPath) cpySearchRoots.add(parent);
+        }
+        for (const root of cpySearchRoots) {
+            for (const candidate of ['cpy', 'copybooks', 'copy', 'include', '.']) {
+                const p = path.join(root, candidate);
                 if (fs.existsSync(p) && fs.statSync(p).isDirectory()) cpyDirs.add(p);
             }
         }

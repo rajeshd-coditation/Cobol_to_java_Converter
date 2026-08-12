@@ -65,23 +65,22 @@ body {
 }
 
 .app-header {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
+    display: flex;
     align-items: center;
-    gap: 18px;
-    padding: 14px 22px;
+    gap: 12px;
+    padding: 10px 18px;
     background: var(--c-surface);
     border: 1px solid var(--c-border);
     border-radius: var(--r-lg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     margin-bottom: 22px;
-    /* Lift the header's stacking context above the results content (z-index ~5)
-       so header dropdowns/popovers aren't trapped behind it. Stays below the
-       activity drawer (400) and full-screen overlays (800+). */
     position: relative;
     z-index: 50;
 }
+.app-header .brand { flex-shrink: 0; }
+.app-header .header-input-group { flex: 1; display: flex; align-items: center; gap: 10px; }
+.app-header .header-meta { flex-shrink: 0; }
 
 .brand .coditation-logo { height: 30px; width: auto; display: block; }
 
@@ -91,6 +90,8 @@ body {
     width: 100%;
     align-items: center;
 }
+.header-repo-group { display: flex; align-items: center; gap: 10px; flex: 1; }
+.sidebar-repo-group { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .header-input-group input#repoInput {
     flex: 1;
     height: 36px;
@@ -409,23 +410,98 @@ body {
     grid-template-columns: 290px 1fr;
     gap: 22px;
     align-items: start;
+    transition: grid-template-columns 0.25s ease;
 }
 @media (max-width: 1024px) { .workspace { grid-template-columns: 1fr; } }
 
+/* ── Sidebar collapse ──────────────────────────────────────────────────── */
+body.sidebar-collapsed .workspace { grid-template-columns: 44px 1fr !important; }
+body.sidebar-collapsed .sidebar { padding: 10px 6px !important; overflow: hidden !important; min-width: 0 !important; width: 44px !important; }
+body.sidebar-collapsed .sidebar-content { display: none !important; }
+
 .sidebar {
-    padding: 22px 20px;
+    padding: 14px 16px 22px;
     background: var(--c-surface);
     border: 1px solid var(--c-border);
     border-radius: var(--r-lg);
     backdrop-filter: blur(8px);
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 0;
     position: sticky;
     top: 22px;
     max-height: calc(100vh - 44px);
     overflow-y: auto;
+    overflow-x: hidden;
+    transition: padding 0.25s ease;
 }
+
+/* Collapse toggle button */
+.sidebar-collapse-btn {
+    align-self: flex-end;
+    width: 26px; height: 26px;
+    background: rgba(117, 69, 255, 0.08);
+    border: 1px solid rgba(117, 69, 255, 0.18);
+    border-radius: 6px;
+    color: var(--c-text-dim);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    transition: background 0.15s, color 0.15s;
+}
+.sidebar-collapse-btn:hover { background: rgba(117, 69, 255, 0.2); color: var(--c-text); }
+body.sidebar-collapsed .sidebar-collapse-btn { align-self: center; margin-bottom: 0; }
+
+/* Sidebar content wrapper */
+.sidebar-content {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Input / action section inside sidebar */
+.sidebar-input-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.sidebar-input-section #repoInput,
+.sidebar-repo-group #repoInput {
+    width: 100%;
+    box-sizing: border-box;
+    height: 36px;
+    padding: 0 14px;
+    background: rgba(7, 6, 31, 0.75);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-pill);
+    color: var(--c-text);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 200ms, box-shadow 200ms;
+}
+.sidebar-input-section #repoInput::placeholder,
+.sidebar-repo-group #repoInput::placeholder { color: var(--c-text-mute); }
+.sidebar-input-section #repoInput:focus,
+.sidebar-repo-group #repoInput:focus {
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 3px rgba(117, 69, 255, 0.18);
+}
+.sidebar-input-section #convertBtn,
+.sidebar-input-section #sampleBtn,
+.sidebar-repo-group #convertBtn,
+.sidebar-repo-group #sampleBtn { width: 100%; justify-content: center; }
+.sidebar-action-row { display: flex; gap: 8px; }
+.sidebar-action-row .btn-pill { flex: 1; justify-content: center; }
+.sidebar-input-section .sample-wrap,
+.sidebar-repo-group .sample-wrap { position: relative; }
+.sidebar-input-section .sample-menu,
+.sidebar-repo-group .sample-menu { right: 0; left: 0; top: calc(100% + 4px); }
 
 .hero-copy { }
 .hero-title {
@@ -575,6 +651,9 @@ body {
     font-variant-numeric: tabular-nums;
 }
 .risks-list { display: flex; flex-direction: column; gap: 8px; }
+.risks-empty { font-size: 12px; color: var(--c-text-mute); font-style: italic; padding: 2px 0; }
+/* Risks panel in main canvas — full-width card with breathing room */
+.risks-panel-main { margin: 12px 16px 0; }
 .risk-item {
     padding: 10px 12px;
     background: var(--c-surface-2);
@@ -809,6 +888,19 @@ body {
 }
 .graph-legend { display: flex; gap: 14px; flex-wrap: wrap; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--c-text-dim); }
+.legend-count {
+    font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 0 5px; min-width: 18px; text-align: center;
+    color: var(--c-text); line-height: 16px;
+    transition: opacity .2s;
+}
+.graph-total-badge {
+    font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 1px 8px; color: var(--c-text-dim);
+    vertical-align: middle; margin-left: 6px;
+}
 
 /* Edge-kind legend: descriptions live in title= for native tooltips
    so the row stays a compact wrap of swatch+name pills. The cursor cue
@@ -4088,12 +4180,17 @@ body.theme-light .app-header {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 body.theme-light .brand .coditation-logo { filter: brightness(0) saturate(100%); }
-body.theme-light .header-input-group input#repoInput {
+body.theme-light .header-input-group input#repoInput,
+body.theme-light .sidebar-input-section #repoInput,
+body.theme-light .sidebar-repo-group #repoInput {
     background: #f0f1f4 !important;
     border-color: rgba(0, 0, 0, 0.10) !important;
     color: #1a1b2e !important;
 }
-body.theme-light .header-input-group input#repoInput::placeholder { color: #999 !important; }
+body.theme-light .header-input-group input#repoInput::placeholder,
+body.theme-light .sidebar-input-section #repoInput::placeholder,
+body.theme-light .sidebar-repo-group #repoInput::placeholder { color: #999 !important; }
+body.theme-light .sidebar-collapse-btn { background: rgba(117,69,255,.06) !important; border-color: rgba(117,69,255,.15) !important; color: #555 !important; }
 
 /* Light theme: buttons */
 body.theme-light .btn-pill.btn-ghost {
@@ -4155,6 +4252,8 @@ body.theme-light .graph-section {
 }
 body.theme-light .graph-header h3 { color: #1a1b2e !important; }
 body.theme-light .legend-item { color: #555 !important; }
+body.theme-light .legend-count { background: rgba(0,0,0,.06) !important; border-color: rgba(0,0,0,.12) !important; color: #1a1b2e !important; }
+body.theme-light .graph-total-badge { background: rgba(0,0,0,.06) !important; border-color: rgba(0,0,0,.12) !important; color: #555 !important; }
 body.theme-light .graph-canvas {
     background: #fafbfc !important;
     border-color: rgba(0, 0, 0, 0.08) !important;
@@ -4329,6 +4428,16 @@ body.theme-light .settings-row + .settings-row { border-top-color: rgba(0, 0, 0,
 .settings-value-warn { color: var(--c-warning-light, #f59e0b); }
 .settings-value.muted { color: var(--c-text-mute); font-style: italic; }
 .settings-reserved { opacity: 0.6; cursor: not-allowed; }
+/* LLM token panel lives inside the settings dropdown — strip the card look */
+.settings-menu .token-panel {
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255,255,255,.07);
+    border-radius: 0;
+    padding: 8px 14px 6px;
+    gap: 4px;
+}
+body.theme-light .settings-menu .token-panel { border-top-color: rgba(0,0,0,.07); }
 .settings-btn {
     background: rgba(117, 69, 255, 0.12);
     border: 1px solid rgba(117, 69, 255, 0.35);

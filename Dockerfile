@@ -9,6 +9,7 @@ RUN dnf update -y \
         gcc make bison flex automake autoconf libtool \
         gettext gettext-devel diffutils \
         java-21-openjdk-devel \
+        gnucobol \
         git \
     && dnf clean all && rm -rf /var/cache/dnf
 

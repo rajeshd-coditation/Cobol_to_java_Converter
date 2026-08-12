@@ -61,19 +61,43 @@ function resolveDataAssignments(reportFile, conversion) {
                 out.push({ expected: exp, matchedPath: cached, variants: buildVariants(exp) });
                 continue;
             }
-            // Fallback: walk the full report for a basename match. This covers
-            // older conversions where the lookup wasn't built, and cancelled
-            // runs that didn't reach the data-file resolution step.
+            // Fallback 1: walk the full report for a basename match.
             const pool = reportFiles
                 .filter(f => f.source_path && (f.java_status === 'SKIPPED_DATA' || f.java_status === 'SKIPPED_OTHER') && fs.existsSync(f.source_path))
                 .map(f => f.source_path);
-            const hit = pool.find(p => {
+            const E = exp.toUpperCase();
+            let hit = pool.find(p => {
                 const base = path.basename(p).toUpperCase();
                 const stem = path.basename(p, path.extname(p)).toUpperCase();
-                const E = exp.toUpperCase();
                 return base === E || stem === E || base === E + '.TXT' || base === E + '.DAT';
             });
-            if (hit) out.push({ expected: exp, matchedPath: hit, variants: buildVariants(exp) });
+            if (hit) { out.push({ expected: exp, matchedPath: hit, variants: buildVariants(exp) }); continue; }
+
+            // Fallback 2: search data/ directories relative to inputPath and
+            // its parent. Matches by exact stem or by shared prefix (covers
+            // ACCTFILE → acctdata.txt, CARDFILE → carddata.txt, etc.).
+            if (!hit && conversion && conversion.inputPath) {
+                const prefix = E.replace(/FILE$/, '').slice(0, 4).toLowerCase();
+                const searchRoots = [conversion.inputPath, path.dirname(conversion.inputPath)];
+                outer: for (const root of searchRoots) {
+                    for (const dataDir of ['data/ASCII', 'data/EBCDIC', 'data', 'testdata', 'input']) {
+                        const dir = path.join(root, dataDir);
+                        if (!fs.existsSync(dir)) continue;
+                        let files;
+                        try { files = fs.readdirSync(dir); } catch { continue; }
+                        const match = files.find(f => {
+                            const fu = f.toUpperCase();
+                            const stem = fu.replace(/\.[^.]+$/, '');
+                            return stem === E || fu === E || (prefix.length >= 3 && stem.toLowerCase().startsWith(prefix));
+                        });
+                        if (match) {
+                            hit = path.join(dir, match);
+                            out.push({ expected: exp, matchedPath: hit, variants: buildVariants(exp) });
+                            break outer;
+                        }
+                    }
+                }
+            }
         }
     } catch { /* non-fatal */ }
     return out;

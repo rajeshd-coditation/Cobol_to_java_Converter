@@ -11,8 +11,11 @@ services:
       - ./opensourcecobol4j/carddemo-app:/cobol-source/carddemo:ro
       # Persistent conversion output + checkpoints — survives rebuilds
       - ./conversion-data:/app/conversion-data
-      # Live UI reload — HTML/JS/CSS changes apply instantly (no rebuild needed)
+      # Live reload — changes apply after: docker-compose restart cobol-converter
       - ./opensourcecobol4j/tools/web-ui/public:/app/tools/web-ui/public
+      - ./opensourcecobol4j/tools/web-ui/src:/app/tools/web-ui/src
+      - ./opensourcecobol4j/tools/web-ui/server.js:/app/tools/web-ui/server.js
+      - ./opensourcecobol4j/tools/web-ui/azureAgent.js:/app/tools/web-ui/azureAgent.js
     environment:
       COBOL_DATA_DIR: /app/conversion-data
     env_file:

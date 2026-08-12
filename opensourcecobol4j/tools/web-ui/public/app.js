@@ -406,12 +406,10 @@ async function actuallyStartConversion(inputPath, selectedFiles) {
         browserLoaded = false;
         const browserSection = document.getElementById('browserSection');
         if (browserSection) browserSection.classList.add('hidden');
-        const risksPanelEl = document.getElementById('risksPanel');
-        if (risksPanelEl) risksPanelEl.classList.add('hidden');
+        if (window.updateRisksPanel) window.updateRisksPanel([]);
 
         // Kick off the live dependency graph view
-        const liveCountsEl = document.getElementById('liveCounts');
-        if (liveCountsEl) liveCountsEl.classList.remove('hidden');
+        document.getElementById('liveTotal')?.classList.remove('hidden');
 
         if (window.cobolGraph) {
             window.cobolGraph.destroy();
@@ -2292,11 +2290,12 @@ window.updateRisksPanel = function (risks) {
     const list  = document.getElementById('risksList');
     const count = document.getElementById('risksCount');
     if (!panel || !list || !count) return;
+    panel.classList.remove('hidden');
     if (!risks || risks.length === 0) {
-        panel.classList.add('hidden');
+        count.textContent = '0';
+        list.innerHTML = '<div class="risks-empty">No risks or warnings detected</div>';
         return;
     }
-    panel.classList.remove('hidden');
     count.textContent = risks.length;
     list.innerHTML = risks.map(r => {
         const items = (r.items || []).map(i => `<li>${escapeHtml(i)}</li>`).join('');
@@ -2807,6 +2806,15 @@ async function runCompareConversions() {
     }
 }
 window.runCompareConversions = runCompareConversions;
+
+function toggleSidebar() {
+    const collapsed = document.body.classList.toggle('sidebar-collapsed');
+    const btn = document.getElementById('sidebarCollapseBtn');
+    if (btn) btn.textContent = collapsed ? '›' : '‹';
+    // clear any inline grid override left by old phase logic
+    const workspace = document.querySelector('.workspace');
+    if (workspace) workspace.style.gridTemplateColumns = '';
+}
 
 function toggleSettingsMenu(force) {
     const menu = document.getElementById('settingsMenu');
@@ -5872,13 +5880,20 @@ function updatePhaseVisibility() {
         const visible = showPhases.includes(currentPhase);
         el.classList.toggle('phase-visible', visible);
     });
-    // Workspace grid: if sidebar is hidden, let canvas fill the width
-    const sidebar = document.querySelector('.sidebar');
-    const workspace = document.querySelector('.workspace');
-    if (sidebar && workspace) {
-        const sidebarVisible = sidebar.classList.contains('phase-visible');
-        workspace.style.gridTemplateColumns = sidebarVisible ? '280px 1fr' : '1fr';
-        workspace.style.gap = sidebarVisible ? '' : '0';
+
+    // Move repo input group between header (home) and sidebar (conversion)
+    const repoGroup = document.getElementById('headerRepoGroup');
+    const sidebarSlot = document.getElementById('sidebarRepoSlot');
+    const headerInputGroup = document.querySelector('.header-input-group');
+    if (repoGroup && sidebarSlot && headerInputGroup) {
+        const inConversion = ['analyze', 'convert', 'review', 'results'].includes(currentPhase);
+        if (inConversion && !sidebarSlot.contains(repoGroup)) {
+            sidebarSlot.appendChild(repoGroup);
+            repoGroup.classList.add('sidebar-repo-group');
+        } else if (!inConversion && !headerInputGroup.contains(repoGroup)) {
+            headerInputGroup.insertBefore(repoGroup, headerInputGroup.firstChild);
+            repoGroup.classList.remove('sidebar-repo-group');
+        }
     }
 }
 
@@ -6721,9 +6736,8 @@ async function restoreSession() {
                 });
             }
 
-            // Show live counts
-            const liveCountsEl = document.getElementById('liveCounts');
-            if (liveCountsEl) liveCountsEl.classList.remove('hidden');
+            // Show live counts in graph legend
+            document.getElementById('liveTotal')?.classList.remove('hidden');
 
             // Set to results phase
             setPhase('results');
@@ -6754,8 +6768,7 @@ async function restoreSession() {
             // Conversion still in progress — reconnect
             setPhase(savedPhase || 'convert');
 
-            const liveCountsEl = document.getElementById('liveCounts');
-            if (liveCountsEl) liveCountsEl.classList.remove('hidden');
+            document.getElementById('liveTotal')?.classList.remove('hidden');
 
             if (window.cobolGraph) {
                 window.cobolGraph.load(savedId, {
@@ -6818,8 +6831,8 @@ function resetSession() {
     document.getElementById('kpiBar')?.classList.add('hidden');
     document.getElementById('browserSection')?.classList.add('hidden');
     document.getElementById('runOutputPanel')?.classList.add('hidden');
-    document.getElementById('liveCounts')?.classList.add('hidden');
-    document.getElementById('risksPanel')?.classList.add('hidden');
+    document.getElementById('liveTotal')?.classList.add('hidden');
+    if (window.updateRisksPanel) window.updateRisksPanel([]);
     document.getElementById('tokenPanel')?.classList.add('hidden');
     if (window.cobolGraph) window.cobolGraph.destroy();
 
