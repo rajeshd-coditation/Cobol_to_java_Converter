@@ -250,12 +250,28 @@ function analyzeConversionAccuracy(cobolSource, javaCode) {
                 }
             }
 
-            // 5. RECORDING MODE V (variable length records)
-            const hasRecordingModeV = cobolLower.includes('recording mode') && cobolLower.includes(' v');
+            // 5. RECORDING MODE V (variable length records).
+            // Must match the clause itself — the previous form tested
+            // 'recording mode' and ' v' as INDEPENDENT substrings, so any file
+            // with `RECORDING MODE F` plus a `VALUE` clause was reported as
+            // variable-length (CBL0001 in the course repo hit exactly this).
+            const hasRecordingModeV = /recording\s+mode\s+(?:is\s+)?v\b/.test(cobolLower);
             if (hasRecordingModeV) {
                 // Very specific COBOL feature - hard to replicate properly
                 semanticScore -= 2;
                 penalties.push('Variable records approximated');
+            }
+
+            // 5b. Fixed-length BINARY records read as text. RECORDING MODE F
+            // plus packed/binary fields means a byte-oriented dataset with no
+            // line terminators — BufferedReader.readLine() then returns one
+            // giant "line" (or nothing), so the program reads 0 records while
+            // still exiting 0. Observed on CBL0001: COBOL wrote 45 records,
+            // the Java wrote 1.
+            const hasRecordingModeF = /recording\s+mode\s+(?:is\s+)?f\b/.test(cobolLower);
+            if (hasRecordingModeF && hasPackedDecimal && /\breadLine\s*\(/.test(javaCode)) {
+                semanticScore -= 6;
+                penalties.push('Fixed-length records read as text');
             }
 
             // 6. Check for obvious simulation comments

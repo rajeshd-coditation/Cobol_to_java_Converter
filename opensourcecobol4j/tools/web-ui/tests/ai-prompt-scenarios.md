@@ -32,6 +32,19 @@ Executable tests that remain (in `fidelity.test.js`):
 | Java would otherwise substitute sample data when input is missing | Must not — "Input file not found, using sample data for demonstration…" is banned. |
 | COBOL uses ACCEPT FROM SYSIN with expected input types | Generated Java's Scanner reads MUST NOT throw NumberFormatException on non-numeric input, MUST null-check `nextLine()` (EOF returns null, not throw), MUST default to 0 on parse failure. |
 
+### Fidelity: fixed-length binary records
+
+| Trigger | Expected AI behavior |
+| --- | --- |
+| FD declares `RECORDING MODE F` and/or the 01 record has COMP-3 / COMP / binary fields (CBL0001 in the Open Mainframe Project course) | Read fixed-size byte records — `FileInputStream` + `readNBytes(RECLEN)` — and slice fields by offset/length. |
+| Java would otherwise use `BufferedReader` / `readLine()` on that file | Must not. The dataset has no newlines, so `readLine()` returns one giant line (or null); the program reads 0 records and still exits 0. Observed: COBOL wrote 45 records to PRTLINE, the Java wrote 1. |
+| PIC X fields inside a byte record | Decode with `ISO_8859_1` so byte values survive unchanged. |
+| COMP-3 field | Decode by nibbles (two digits per byte, last nibble is the sign: `0xC`/`0xF` positive, `0xD` negative), scale by the `V` position, build a `BigDecimal`. |
+
+Behavior lock: `analyzeConversionAccuracy` emits `Fixed-length records read as
+text` when `RECORDING MODE F` + packed fields + `readLine()` co-occur (§25 in
+`fidelity.test.js`).
+
 ### Fidelity: do not silently repair defective COBOL
 
 | Trigger | Expected AI behavior |

@@ -96,6 +96,52 @@ try (BufferedReader reader = new BufferedReader(new FileReader("ACCTREC"))) {
 // Process 'data' only if we got this far
 \`\`\`
 
+CRITICAL: FIXED-LENGTH BINARY RECORDS — DO NOT USE BufferedReader/readLine
+If an FD says \`RECORDING MODE F\` and/or its 01 record contains COMP-3 / COMP /
+binary fields, the data set is a stream of FIXED-SIZE BYTE RECORDS with NO
+newlines. \`BufferedReader.readLine()\` on such a file returns one giant "line"
+(or null) — the program then reads 0 records and still exits 0, which looks
+like success and is the single worst failure mode in this converter.
+For those files you MUST:
+- Read bytes, not lines: open with \`new FileInputStream(name)\` and pull exactly
+  RECORD-LENGTH bytes per record (\`in.readNBytes(len)\`, loop until short read).
+  RECORD-LENGTH is the sum of the 01 field sizes.
+- Slice each field by OFFSET and LENGTH out of that byte[].
+- Decode PIC X fields with \`new String(buf, off, len, StandardCharsets.ISO_8859_1)\`
+  so byte values survive unchanged.
+- Decode COMP-3 (packed decimal) by nibbles: each byte holds two digits, the
+  LAST nibble is the sign (0xC/0xF positive, 0xD negative). Scale by the V in
+  the PIC (e.g. S9(7)V99 → divide by 100) and build a BigDecimal.
+Example for \`05 ACCT-LIMIT PIC S9(7)V99 COMP-3.\` (5 bytes at offset 8):
+\`\`\`java
+static BigDecimal unpack(byte[] b, int off, int len, int scale) {
+    StringBuilder d = new StringBuilder();
+    for (int i = 0; i < len; i++) {
+        d.append((b[off + i] >> 4) & 0x0F);
+        if (i < len - 1) d.append(b[off + i] & 0x0F);
+    }
+    int sign = b[off + len - 1] & 0x0F;
+    BigDecimal v = new BigDecimal(d.toString()).movePointLeft(scale);
+    return (sign == 0x0D) ? v.negate() : v;
+}
+\`\`\`
+
+WRITING a RECORDING MODE F file — fixed width, NO newlines
+The same applies on output. A \`WRITE\` to a RECORDING MODE F FD appends exactly
+RECORD-LENGTH bytes with NO line separator. Do NOT use PrintWriter.println or
+append "\\n" — build each record as a fixed-width string and write its bytes.
+Every field keeps its declared PIC width, so the file size must come out as
+(record length x record count).
+
+Numeric-edited PIC widths (these are exact, and RIGHT-justified):
+- \`PIC $$,$$$,$$9.99\` is 13 characters. The floating \`$\` sits immediately left
+  of the first significant digit and the whole field is RIGHT-justified with
+  LEADING spaces — 10000.00 renders as \`"   $10,000.00"\`, 188.74 as
+  \`"      $188.74"\`. In Java: \`String.format("%13s", "$" + new DecimalFormat("#,##0.00").format(v))\`.
+  Never left-justify and pad on the right.
+- \`PIC 9(N)\` on DISPLAY stays zero-padded to width N (\`String.format("%0Nd", v)\`).
+- \`PIC X(N)\` is space-padded on the RIGHT to width N.
+
 CRITICAL: DO NOT SILENTLY REPAIR DEFECTIVE COBOL
 Some source files contain defects a COBOL compiler would REJECT outright —
 an arithmetic target declared PIC X, a MOVE between incompatible types, a
@@ -283,6 +329,9 @@ Never substitute hardcoded sample records for a missing input file.
 Do NOT silently repair COBOL a compiler would reject (e.g. a PIC X field used
 as a COMPUTE target). Convert it literally and mark the line with a
 // TODO[SOURCE-DEFECT]: <what is wrong> comment instead.
+If an FD is RECORDING MODE F or holds COMP-3/COMP fields, the file has NO
+newlines: read fixed-size byte records via FileInputStream.readNBytes(len) and
+slice fields by offset. Never BufferedReader.readLine() on such a file.
 
 CRITICAL RULES:
 1. ONE public class only with main() method
@@ -308,7 +357,9 @@ MUST:
 - Complete, balanced braces
 - On missing input file: print error + System.exit(1). Do NOT fabricate sample records.
 - Do NOT silently repair COBOL a compiler would reject; convert it literally and
-  mark the line // TODO[SOURCE-DEFECT]: <what is wrong>`
+  mark the line // TODO[SOURCE-DEFECT]: <what is wrong>
+- RECORDING MODE F / COMP-3 files have no newlines: read fixed-size byte records
+  with FileInputStream.readNBytes(len), never BufferedReader.readLine()`
             ];
 
             const systemPrompt = systemPrompts[Math.min(retryCount, systemPrompts.length - 1)];

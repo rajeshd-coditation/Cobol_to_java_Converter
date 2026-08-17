@@ -2053,3 +2053,115 @@ test('PENALTY_GUIDANCE has an entry for "Source defect flagged"', () => {
     assert.match(src, /'Source defect flagged':/,
         'accuracy-panel.js must carry reviewer guidance for the Source defect penalty');
 });
+
+// ─── 25. Fixed-length binary records must not be read as text ──────────
+//
+// Context: CBL0001 in the Open Mainframe Project course reads a 170-byte
+// RECORDING MODE F dataset whose amount fields are COMP-3. The converter
+// emitted BufferedReader.readLine() against it, so the Java read 0 records
+// and still exited 0 — COBOL wrote 45 records to PRTLINE, the Java wrote 1.
+// A green run that silently processed nothing is the worst failure mode
+// here, so the scorer flags the shape. Prompt wording lives in
+// tests/ai-prompt-scenarios.md per §23.
+const COBOL_FIXED_BINARY = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ACCTRPT.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCT-REC ASSIGN TO ACCTREC.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCT-REC RECORDING MODE F.
+       01  ACCT-FIELDS.
+           05  ACCT-NO       PIC X(8).
+           05  ACCT-LIMIT    PIC S9(7)V99 COMP-3.
+           05  ACCT-BALANCE  PIC S9(7)V99 COMP-3.
+       WORKING-STORAGE SECTION.
+       01  FLAGS.
+           05  LASTREC       PIC X VALUE SPACE.
+       PROCEDURE DIVISION.
+           STOP RUN.
+`;
+
+const JAVA_READS_BINARY_AS_TEXT = `
+import java.io.*;
+public class Acctrpt {
+    public void run() throws IOException {
+        BufferedReader r = new BufferedReader(new FileReader("ACCTREC"));
+        String line;
+        while ((line = r.readLine()) != null) { process(line); }
+        r.close();
+    }
+    void process(String line) { }
+    public static void main(String[] a) throws IOException { new Acctrpt().run(); }
+}
+`;
+
+const JAVA_READS_BINARY_AS_BYTES = `
+import java.io.*;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+public class Acctrpt {
+    static final int RECLEN = 18;
+    public void run() throws IOException {
+        try (FileInputStream in = new FileInputStream("ACCTREC")) {
+            byte[] buf;
+            while ((buf = in.readNBytes(RECLEN)).length == RECLEN) {
+                String acctNo = new String(buf, 0, 8, StandardCharsets.ISO_8859_1);
+                BigDecimal limit = unpack(buf, 8, 5, 2);
+            }
+        }
+    }
+    static BigDecimal unpack(byte[] b, int off, int len, int scale) {
+        StringBuilder d = new StringBuilder();
+        for (int i = 0; i < len; i++) {
+            d.append((b[off + i] >> 4) & 0x0F);
+            if (i < len - 1) d.append(b[off + i] & 0x0F);
+        }
+        int sign = b[off + len - 1] & 0x0F;
+        BigDecimal v = new BigDecimal(d.toString()).movePointLeft(scale);
+        return (sign == 0x0D) ? v.negate() : v;
+    }
+    public static void main(String[] a) throws IOException { new Acctrpt().run(); }
+}
+`;
+
+test('analyzeConversionAccuracy flags readLine() on a RECORDING MODE F / COMP-3 file', () => {
+    const result = azureAgent.analyzeConversionAccuracy(COBOL_FIXED_BINARY, JAVA_READS_BINARY_AS_TEXT);
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        penalties.includes('Fixed-length records read as text'),
+        `expected 'Fixed-length records read as text'; got: ${JSON.stringify(penalties)}`
+    );
+});
+
+test('analyzeConversionAccuracy accepts byte-oriented reads of fixed binary records', () => {
+    const result = azureAgent.analyzeConversionAccuracy(COBOL_FIXED_BINARY, JAVA_READS_BINARY_AS_BYTES);
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        !penalties.includes('Fixed-length records read as text'),
+        `readNBytes conversion should not be penalized; got: ${JSON.stringify(penalties)}`
+    );
+});
+
+// Regression: the old check tested 'recording mode' and ' v' as INDEPENDENT
+// substrings, so RECORDING MODE F + any VALUE clause reported variable-length.
+test('RECORDING MODE F with a VALUE clause is not reported as variable-length', () => {
+    const result = azureAgent.analyzeConversionAccuracy(COBOL_FIXED_BINARY, JAVA_READS_BINARY_AS_BYTES);
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        !penalties.includes('Variable records approximated'),
+        `RECORDING MODE F must not trigger the V rule; got: ${JSON.stringify(penalties)}`
+    );
+});
+
+test('RECORDING MODE V is still reported as variable-length', () => {
+    const cobolV = COBOL_FIXED_BINARY.replace('RECORDING MODE F', 'RECORDING MODE V');
+    const result = azureAgent.analyzeConversionAccuracy(cobolV, JAVA_READS_BINARY_AS_BYTES);
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        penalties.includes('Variable records approximated'),
+        `RECORDING MODE V must still be flagged; got: ${JSON.stringify(penalties)}`
+    );
+});
