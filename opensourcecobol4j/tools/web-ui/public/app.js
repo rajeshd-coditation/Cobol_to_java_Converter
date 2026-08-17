@@ -1975,10 +1975,10 @@ function updateAIComparison(withoutAI, withAI, runNumber = 1) {
     const statusMessage = document.getElementById('aiStatusMessage');
     const runCounter = document.getElementById('runCounter');
 
-    if (!section) {
-        console.error('AI Comparison section not found!');
-        return;
-    }
+    // #aiComparisonSection was removed from index.html; the with/without-AI
+    // panel no longer ships. The other three call sites already no-op on it,
+    // so match them instead of logging an error on every completed run.
+    if (!section) return;
 
     // Update values
     if (filesWithoutAIEl) filesWithoutAIEl.textContent = withoutAI;
@@ -4782,6 +4782,14 @@ async function fixSelectedJavaFromRun() {
             }
         } catch { /* non-fatal */ }
 
+        // The fix just wrote a .before-fix backup, so the paired recovery
+        // buttons apply from here on. selectBrowserFile() is the only other
+        // place that unhides them, so without this they stayed hidden until
+        // the user clicked away and back — exactly when they'd want to
+        // inspect or roll back the fix they just triggered.
+        document.getElementById('fixDiffBtn')?.classList.remove('hidden');
+        document.getElementById('unfixJavaBtn')?.classList.remove('hidden');
+
         // Clear the stale verdict + banner so the next Run starts fresh.
         _lastRunContext = null;
         document.querySelectorAll('.run-diverge-banner').forEach(n => n.remove());
@@ -5616,6 +5624,75 @@ function resetTimeline() {
     const logsEl = document.getElementById('logsOutput');
     if (logsEl) logsEl.textContent = '';
     renderTimeline();
+}
+
+// Rebuild the activity drawer for a conversion restored from the server (page
+// reload or a /c/<id> deep link). pollTimeline() only diffs a *live* session,
+// so without this the drawer sat empty for every restored run. Everything used
+// here (logs, fileTimeline, fileStates, startedAt/completedAt) is persisted in
+// the checkpoint, so the original timestamps survive a server restart.
+function restoreTimelineFromLogs(data) {
+    if (!data) return;
+    const events = [];
+    const startedAt = data.startedAt || Date.now();
+    const timeline = data.fileTimeline || {};
+
+    events.push({ at: startedAt, type: 'system', html: 'Conversion started', fileId: null });
+
+    for (const line of (data.logs || [])) {
+        const text = String(line).trim();
+        if (!text) continue;
+        events.push({
+            at: startedAt, type: 'log', fileId: null,
+            html: `<span class="tl-log-text">${escapeHtml(text)}</span>`
+        });
+    }
+
+    // Per-file steps carry their own recorded `at`, so the restored drawer
+    // shows the real sequencing rather than everything at load time.
+    for (const [fileId, steps] of Object.entries(timeline)) {
+        for (const s of (steps || [])) {
+            const bits = [];
+            if (typeof s.ms === 'number') bits.push(`${(s.ms / 1000).toFixed(1)}s`);
+            if (typeof s.tokens === 'number' && s.tokens > 0) bits.push(`${s.tokens.toLocaleString()} tokens`);
+            if (typeof s.accuracy === 'number') bits.push(`accuracy ${s.accuracy}%`);
+            const detail = bits.length
+                ? `<div class="tl-file-detail">${escapeHtml(bits.join(' · '))}</div>`
+                : '';
+            events.push({
+                at: s.at || startedAt, type: 'step', fileId,
+                html: `<span class="tl-step-label">${escapeHtml(s.label || s.step || '')}</span>${detail}`
+            });
+        }
+    }
+
+    // Terminal state per file, emitted in the same shape pollTimeline() uses so
+    // the grouped view and the in-flight / errors filters behave identically.
+    for (const [fileId, state] of Object.entries(data.fileStates || {})) {
+        const label = state === 'done' ? 'Converted'
+            : state === 'failed' ? 'Failed'
+            : state === 'skipped' ? 'Skipped'
+            : state === 'awaiting_review' ? 'Ready for review'
+            : state;
+        const steps = timeline[fileId] || [];
+        const at = steps.length ? (steps[steps.length - 1].at || startedAt) : startedAt;
+        events.push({
+            at, type: 'state', fileId,
+            html: `<span class="tl-state-pill ${state}">${label}</span> ` +
+                  `<span class="tl-file-name">${escapeHtml(fileId.split('/').pop())}</span>`
+        });
+    }
+
+    if (data.completedAt) {
+        events.push({ at: data.completedAt, type: 'system', html: 'Conversion complete', fileId: null });
+    }
+
+    events.sort((a, b) => a.at - b.at);
+    timelineEvents = events;
+    // Seed the snapshot so a later pollTimeline() doesn't replay these states.
+    prevFileStatesSnapshot = { ...(data.fileStates || {}) };
+    renderTimeline();
+    bumpDrawerBadge();
 }
 
 // Poll: scrape new log lines, file state changes, review history into the timeline
@@ -6759,7 +6836,7 @@ async function restoreSession() {
                 }
             } catch {}
 
-            // Restore timeline from saved server logs
+            // Rebuild the activity drawer from the persisted logs + fileTimeline.
             restoreTimelineFromLogs(data);
 
             console.log('[session] Restored completed conversion:', savedId);

@@ -98,10 +98,13 @@
                 }
             },
             {
-                /* Data files (SELECT … ASSIGN TO targets) — distinct shape/colour */
+                /* Data files (SELECT … ASSIGN TO targets) — distinct shape/colour.
+                   'barrel' is the closest valid cytoscape shape to a datastore
+                   cylinder; 'cylinder' isn't in the 3.x shape list and silently
+                   fell back to a plain ellipse. */
                 selector: 'node[type="data"]',
                 style: {
-                    'shape': 'cylinder',
+                    'shape': 'barrel',
                     'width': 30,
                     'height': 36,
                     'background-color': '#b45309',
@@ -227,11 +230,12 @@
                     'border-width': 4,
                     'width': 44,
                     'height': 44,
-                    'shadow-blur': 24,
-                    'shadow-color': '#7c5cff',
-                    'shadow-opacity': 0.9,
-                    'shadow-offset-x': 0,
-                    'shadow-offset-y': 0,
+                    // Node shadow-* was dropped in cytoscape 3.x and logged as
+                    // invalid on every graph render; overlay-* is the supported
+                    // way to draw the "currently converting" halo.
+                    'overlay-color': '#7c5cff',
+                    'overlay-opacity': 0.35,
+                    'overlay-padding': 8,
                     'z-index': 10
                 }
             },
@@ -259,11 +263,9 @@
                     'border-width': 4,
                     'width': 44,
                     'height': 44,
-                    'shadow-blur': 28,
-                    'shadow-color': '#f59e0b',
-                    'shadow-opacity': 0.95,
-                    'shadow-offset-x': 0,
-                    'shadow-offset-y': 0,
+                    'overlay-color': '#f59e0b',
+                    'overlay-opacity': 0.4,
+                    'overlay-padding': 10,
                     'z-index': 12
                 }
             },
