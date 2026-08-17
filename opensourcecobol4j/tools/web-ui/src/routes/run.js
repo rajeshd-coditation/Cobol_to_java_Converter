@@ -27,8 +27,12 @@
  *             sibling is compiled as a callable module (-m) named by
  *             PROGRAM-ID so CALL 'FOO' resolves; then the target is
  *             compiled as the executable (-x). Tried across dialects
- *             (mf → default → minimal) and formats (free → fixed) until
- *             one combination works.
+ *             (mf → default → minimal) and formats (fixed → free) until
+ *             one combination works. "Compiled without error" is NOT
+ *             sufficient: fixed-format source compiled as -free compiles
+ *             clean but produces a do-nothing binary, so a build that
+ *             exits 0 having printed nothing is re-probed with the other
+ *             format (see COBC_FORMATS).
  *
  * Preprocessor (src/core/run/cobol-preprocess.js): auto-fixes header
  * periods, auto-applies curated typo dictionary (PRINT-REX → PRINT-REC
