@@ -32,6 +32,20 @@ Executable tests that remain (in `fidelity.test.js`):
 | Java would otherwise substitute sample data when input is missing | Must not — "Input file not found, using sample data for demonstration…" is banned. |
 | COBOL uses ACCEPT FROM SYSIN with expected input types | Generated Java's Scanner reads MUST NOT throw NumberFormatException on non-numeric input, MUST null-check `nextLine()` (EOF returns null, not throw), MUST default to 0 on parse failure. |
 
+### Fidelity: do not silently repair defective COBOL
+
+| Trigger | Expected AI behavior |
+| --- | --- |
+| COBOL a compiler would reject — e.g. `77 GROSS-PAY PIC X(5).` used as a `COMPUTE` target (PAYROL0X in the Open Mainframe Project course) | Convert it literally, still emitting compilable Java, and mark the line `// TODO[SOURCE-DEFECT]: <what is wrong>`. |
+| AI can infer the "intended" type of a defective field | Must NOT quietly substitute it. A silent repair yields Java that runs when the original cannot even build, which hides the defect and makes the COBOL-vs-Java comparison meaningless. |
+| Reference to an identifier never defined; MOVE between incompatible types | Same rule — convert literally + `TODO[SOURCE-DEFECT]` marker. |
+
+Behavior lock: `analyzeConversionAccuracy` penalizes the marker with the
+`Source defect flagged` badge (§24 in `fidelity.test.js`), and
+`PENALTY_GUIDANCE` explains it to the reviewer. The Java must stay
+compilable — the compile-gate still applies, so the marker is a flag for a
+human, not a licence to emit broken Java.
+
 ### Context surfaces that the prompt relies on
 
 | Context key | Where it appears in the prompt | Rationale |

@@ -96,6 +96,24 @@ try (BufferedReader reader = new BufferedReader(new FileReader("ACCTREC"))) {
 // Process 'data' only if we got this far
 \`\`\`
 
+CRITICAL: DO NOT SILENTLY REPAIR DEFECTIVE COBOL
+Some source files contain defects a COBOL compiler would REJECT outright —
+an arithmetic target declared PIC X, a MOVE between incompatible types, a
+reference to an identifier that is never defined. Do NOT quietly "fix" these
+by inferring the type the code looks like it wanted. A silent repair produces
+Java that runs cleanly when the original program cannot even be compiled,
+which hides a real defect and makes the COBOL-vs-Java comparison meaningless.
+Instead, for each such construct:
+- Convert it as literally as Java allows (still emit COMPILABLE Java), AND
+- Mark the exact line with a comment: // TODO[SOURCE-DEFECT]: <what is wrong>
+Example — COBOL declares \`77 GROSS-PAY PIC X(5).\` then does
+\`COMPUTE GROSS-PAY = HOURS * RATE\`:
+\`\`\`java
+// TODO[SOURCE-DEFECT]: GROSS-PAY is PIC X(5) (alphanumeric) but is the target
+// of a COMPUTE — a COBOL compiler rejects this. Represented as a String here.
+String grossPay = String.valueOf(hours * rate);
+\`\`\`
+
 CRITICAL: COBOL ACCEPT FROM SYSIN semantics — DO NOT THROW on invalid input
 COBOL's \`ACCEPT WS-VAR FROM SYSIN\` is LOSSY and FORGIVING, not strict:
   - Non-numeric text into a PIC 9(N) field → silently stored as zeroes (or garbled
@@ -262,6 +280,9 @@ Do NOT fabricate input data. If the COBOL opens a file and fails when it's
 missing, the Java MUST also fail when the file is missing — print a clear
 error (e.g. "File not found: ACCTREC (status = 35)") and call System.exit(1).
 Never substitute hardcoded sample records for a missing input file.
+Do NOT silently repair COBOL a compiler would reject (e.g. a PIC X field used
+as a COMPUTE target). Convert it literally and mark the line with a
+// TODO[SOURCE-DEFECT]: <what is wrong> comment instead.
 
 CRITICAL RULES:
 1. ONE public class only with main() method
@@ -285,7 +306,9 @@ MUST:
 - System.out.println() for output
 - try-catch for all operations
 - Complete, balanced braces
-- On missing input file: print error + System.exit(1). Do NOT fabricate sample records.`
+- On missing input file: print error + System.exit(1). Do NOT fabricate sample records.
+- Do NOT silently repair COBOL a compiler would reject; convert it literally and
+  mark the line // TODO[SOURCE-DEFECT]: <what is wrong>`
             ];
 
             const systemPrompt = systemPrompts[Math.min(retryCount, systemPrompts.length - 1)];

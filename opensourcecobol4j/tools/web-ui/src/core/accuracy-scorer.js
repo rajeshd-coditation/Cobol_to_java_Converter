@@ -293,6 +293,16 @@ function analyzeConversionAccuracy(cobolSource, javaCode) {
                 }
             }
 
+            // 6b. Source-defect markers. The prompt asks the AI to flag COBOL a
+            // compiler would reject (PIC X as a COMPUTE target, undefined
+            // identifier) rather than silently inferring the "intended" type.
+            // The marker means the ORIGINAL doesn't compile, so the Java can't
+            // be behaviorally equivalent — badge it for a human.
+            if (/TODO\[SOURCE-DEFECT\]/i.test(javaCode)) {
+                semanticScore -= 4;
+                penalties.push('Source defect flagged');
+            }
+
             // 7. CICS commands (EXEC CICS SEND, RECEIVE, RETURN, XCTL, LINK, SYNCPOINT)
             const hasCICS = cobolLower.includes('exec cics');
             if (hasCICS) {

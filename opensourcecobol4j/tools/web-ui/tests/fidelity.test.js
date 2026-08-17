@@ -1979,3 +1979,77 @@ test('interactive run WS — rejects unknown conversion id', async () => {
 // (see §14, §15, §18) cover the fallback safety net: if the prompt
 // regresses, the regex post-processor still catches it, and THOSE
 // tests will fail on the output shape rather than the prompt wording.
+
+// ─── 24. Source-defect marker penalty ──────────────────────────────────
+//
+// Context: PAYROL0X in the Open Mainframe Project course declares
+// `77 GROSS-PAY PIC X(5).` and then does `COMPUTE GROSS-PAY = HOURS * RATE`.
+// cobc rejects that outright — but the converter happily produced Java that
+// ran and printed a gross pay, so a program that cannot build on the
+// mainframe looked green in the UI. The prompts now tell the model to
+// convert such constructs literally and mark them TODO[SOURCE-DEFECT]
+// (wording lives in tests/ai-prompt-scenarios.md, per §23). This locks the
+// BEHAVIOR side: when the marker is present the score is penalized and the
+// reviewer gets a badge.
+const COBOL_DEFECTIVE = `
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PAYBAD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       77  RATE       PIC 9(3).
+       77  HOURS      PIC 9(3).
+       77  GROSS-PAY  PIC X(5).
+       PROCEDURE DIVISION.
+           MOVE 19 TO HOURS.
+           MOVE 23 TO RATE.
+           COMPUTE GROSS-PAY = HOURS * RATE.
+           DISPLAY "Gross Pay: " GROSS-PAY.
+           GOBACK.
+`;
+
+const JAVA_WITH_DEFECT_MARKER = `
+public class Paybad {
+    int rate = 0;
+    int hours = 0;
+    String grossPay = "";
+    public void run() {
+        hours = 19;
+        rate = 23;
+        // TODO[SOURCE-DEFECT]: GROSS-PAY is PIC X(5) (alphanumeric) but is the
+        // target of a COMPUTE — a COBOL compiler rejects this.
+        grossPay = String.valueOf(hours * rate);
+        System.out.println("Gross Pay: " + grossPay);
+    }
+    public static void main(String[] args) { new Paybad().run(); }
+}
+`;
+
+test('analyzeConversionAccuracy flags "Source defect flagged" on a TODO[SOURCE-DEFECT] marker', () => {
+    const result = azureAgent.analyzeConversionAccuracy(COBOL_DEFECTIVE, JAVA_WITH_DEFECT_MARKER);
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        penalties.includes('Source defect flagged'),
+        `expected 'Source defect flagged' in penalties; got: ${JSON.stringify(penalties)}`
+    );
+    assert.ok(result.accuracy < 100,
+        `expected accuracy < 100 when a source defect is flagged; got ${result.accuracy}`);
+});
+
+test('analyzeConversionAccuracy does NOT flag Source defect on clean Java', () => {
+    const result = azureAgent.analyzeConversionAccuracy(COBOL_DEFECTIVE,
+        JAVA_WITH_DEFECT_MARKER.replace(/\/\/ TODO\[SOURCE-DEFECT\][\s\S]*?rejects this\.\n/, ''));
+    const penalties = result.semanticPenalties || [];
+    assert.ok(
+        !penalties.includes('Source defect flagged'),
+        `unmarked Java should not get the source-defect penalty; got: ${JSON.stringify(penalties)}`
+    );
+});
+
+// Reviewer guidance must exist for the penalty, or the UI badge renders with
+// no explanation (PENALTY_GUIDANCE lives in public/js/accuracy-panel.js).
+test('PENALTY_GUIDANCE has an entry for "Source defect flagged"', () => {
+    const src = fs.readFileSync(
+        path.resolve(__dirname, '..', 'public', 'js', 'accuracy-panel.js'), 'utf-8');
+    assert.match(src, /'Source defect flagged':/,
+        'accuracy-panel.js must carry reviewer guidance for the Source defect penalty');
+});

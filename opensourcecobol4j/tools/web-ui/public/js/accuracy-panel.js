@@ -32,6 +32,7 @@ const PENALTY_GUIDANCE = {
     'Variable records approximated': 'RECORDING MODE V (variable-length records) is hard to replicate. Verify record serialization format matches source.',
     'Contains simulation markers': 'The Java code has comments marked "mock", "simulate", "placeholder", or "stub". Replace these with real implementations before production use.',
     'Fabricated input fallback': 'The Java silently substitutes hardcoded sample records when an input file is missing — COBOL would fail with status 35. Regenerate or hand-edit so the Java prints a file-not-found error and exits non-zero, matching COBOL behavior.',
+    'Source defect flagged':    'The COBOL contains something a compiler would reject (e.g. a PIC X field used as a COMPUTE target), so the original program cannot build and there is no runtime behavior to match. Search the Java for TODO[SOURCE-DEFECT] — fix the COBOL source first, then re-convert.',
     'CICS simplified':          'EXEC CICS commands (SEND/RECEIVE/LINK/XCTL) were simplified. You need a CICS runtime (JCICS) or equivalent transaction framework.',
     'IMS/DLI simplified':       'EXEC DLI / IMS database calls were simplified. You need an IMS framework (IMS Connect, etc.) or a relational equivalent.',
     'BMS adapted':              'BMS screen maps were adapted to console output. If you need a UI, replace with Swing/JavaFX or web frontend.',
