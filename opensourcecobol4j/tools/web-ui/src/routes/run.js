@@ -412,8 +412,15 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
             includeFlags
         ];
 
+        // -fixed BEFORE -free: this probe accepts the first format that compiles
+        // without error, and fixed-format source compiled as -free compiles
+        // clean (no warnings) but yields a do-nothing binary — the COBOL
+        // baseline then comes back "[no output]" and every diff is meaningless.
+        // Genuinely free-format source fails -fixed and still falls through.
+        const COBC_FORMATS = ['-fixed', '-free'];
+
         // Compile every sibling as a shared module so CALL 'FOO' resolves.
-        if (hasMultiple && !result.cobol) {
+        const compileSiblings = (fmt) => {
             for (const info of sourceInfo) {
                 if (info.path === reportFile.source_path) continue;
                 const pid = info.programId;
@@ -421,51 +428,65 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
                 let ok = false;
                 for (const dialect of COBC_DIALECTS) {
                     if (ok) break;
-                    for (const fmt of ['-free', '-fixed']) {
-                        try {
-                            if (pid) {
-                                execSync(`cobc -m ${fmt} ${dialect} -o "${path.join(cobolWork, pid)}" "${srcToUse}"`, {
-                                    cwd: cobolWork, timeout: 30000, stdio: ['pipe', 'pipe', 'pipe']
-                                });
-                            } else {
-                                execSync(`cobc -m ${fmt} ${dialect} "${srcToUse}"`, {
-                                    cwd: cobolWork, timeout: 30000, stdio: ['pipe', 'pipe', 'pipe']
-                                });
-                            }
-                            ok = true;
-                            break;
-                        } catch {}
-                    }
+                    try {
+                        if (pid) {
+                            execSync(`cobc -m ${fmt} ${dialect} -o "${path.join(cobolWork, pid)}" "${srcToUse}"`, {
+                                cwd: cobolWork, timeout: 30000, stdio: ['pipe', 'pipe', 'pipe']
+                            });
+                        } else {
+                            execSync(`cobc -m ${fmt} ${dialect} "${srcToUse}"`, {
+                                cwd: cobolWork, timeout: 30000, stdio: ['pipe', 'pipe', 'pipe']
+                            });
+                        }
+                        ok = true;
+                    } catch {}
                 }
             }
-        }
+        };
 
-        // Compile the requested file as executable (-x).
+        // Compile the requested file as executable (-x) in one source format,
+        // trying each dialect. Returns true if a binary was produced.
         const entryFile = preprocessSource(reportFile.source_path);
-        let lastErr = '';
-        for (const dialect of COBC_DIALECTS) {
-            if (compiled || result.cobol) break;
-            for (const fmt of ['-free', '-fixed']) {
+        // Keyed by format: reporting whichever error happened to come last means
+        // showing the wrong-format noise ("PROGRAM-ID header missing" from a
+        // -free attempt) instead of the real cause. We surface the error from
+        // the first format probed, which is the one the source most likely is.
+        const errByFmt = {};
+        const compileEntry = (fmt) => {
+            for (const dialect of COBC_DIALECTS) {
+                if (result.cobol) return false;
                 try {
                     execSync(`cobc -x ${fmt} ${dialect} -o "${binPath}" "${entryFile}"`, {
                         cwd: cobolWork, timeout: 30000, stdio: ['pipe', 'pipe', 'pipe']
                     });
-                    compiled = true;
-                    break;
+                    return true;
                 } catch (compileErr) {
                     const errMsg = compileErr.stderr ? compileErr.stderr.toString() : compileErr.message;
-                    lastErr = errMsg;
+                    errByFmt[fmt] = errMsg;
                     if (errMsg.includes('USING clause') || errMsg.includes('PROCEDURE/ENTRY has USING')) {
                         result.cobol = {
                             ok: false,
                             output: '',
                             error: 'This is a subroutine (PROCEDURE DIVISION USING) — no standalone main program was found in this conversion to link against.'
                         };
-                        break;
+                        return false;
                     }
                 }
             }
+            return false;
+        };
+
+        const buildWith = (fmt) => {
+            if (hasMultiple) compileSiblings(fmt);
+            return compileEntry(fmt);
+        };
+
+        let usedFmt = null;
+        for (const fmt of COBC_FORMATS) {
+            if (result.cobol) break;
+            if (buildWith(fmt)) { compiled = true; usedFmt = fmt; break; }
         }
+        const lastErr = COBC_FORMATS.map(f => errByFmt[f]).find(Boolean) || '';
 
         if (!compiled && !result.cobol) {
             log('cobol-compile', 'failed', {
@@ -538,22 +559,53 @@ function runCobol(result, reportFile, conversion, userInput, dataAssignments, he
             stageDataFilesInto(cobolWork, dataAssignments);
 
             const RUN_TIMEOUT_MS = 5000;
-            const start = Date.now();
-            const run = spawnSync(binPath, [], {
-                cwd: cobolWork,
-                timeout: RUN_TIMEOUT_MS,
-                encoding: 'utf-8',
-                input: userInput,
-                maxBuffer: 10 * 1024 * 1024,
-                env: { ...process.env, COB_LIBRARY_PATH: cobolWork }
-            });
-            const dur = Date.now() - start;
-            let output = (run.stdout || '').trim();
-            if (run.stderr && run.stderr.trim()) output += (output ? '\n' : '') + run.stderr.trim();
+            const execute = () => {
+                const start = Date.now();
+                const run = spawnSync(binPath, [], {
+                    cwd: cobolWork,
+                    timeout: RUN_TIMEOUT_MS,
+                    encoding: 'utf-8',
+                    input: userInput,
+                    maxBuffer: 10 * 1024 * 1024,
+                    env: { ...process.env, COB_LIBRARY_PATH: cobolWork }
+                });
+                const dur = Date.now() - start;
+                let output = (run.stdout || '').trim();
+                if (run.stderr && run.stderr.trim()) output += (output ? '\n' : '') + run.stderr.trim();
+                const wasTimedOut =
+                    (run.signal === 'SIGTERM' || run.error && /ETIMEDOUT|timed/i.test(run.error.message || '')) ||
+                    dur >= RUN_TIMEOUT_MS - 100;
+                return { run, dur, output, wasTimedOut };
+            };
 
-            const wasTimedOut =
-                (run.signal === 'SIGTERM' || run.error && /ETIMEDOUT|timed/i.test(run.error.message || '')) ||
-                dur >= RUN_TIMEOUT_MS - 100;
+            let attempt = execute();
+
+            // A build that exits 0 having printed nothing is the signature of a
+            // source-format mismatch: cobc accepts the wrong format without a
+            // warning and emits a do-nothing binary. Compiling cleanly is not
+            // proof the probe picked the right format, so re-probe the
+            // remaining formats and keep the first that actually runs.
+            const isSilent = (a) => !a.wasTimedOut && a.run.status === 0 && !a.output;
+            if (isSilent(attempt)) {
+                for (const alt of COBC_FORMATS.filter(f => f !== usedFmt)) {
+                    if (!buildWith(alt)) continue;
+                    const retry = execute();
+                    if (!isSilent(retry)) {
+                        log('cobol-compile', 'format-reprobe', {
+                            file: reportFile.path, from: usedFmt, to: alt
+                        });
+                        attempt = retry;
+                        usedFmt = alt;
+                        break;
+                    }
+                }
+                // A failed re-probe must not leave a diagnostic behind; the
+                // original build is still the answer we report below.
+                result.cobol = null;
+            }
+
+            const { run, dur, wasTimedOut } = attempt;
+            let { output } = attempt;
 
             if (wasTimedOut) {
                 const hint = `\n\n[Program did not exit within ${RUN_TIMEOUT_MS}ms — likely stuck in an input/validation loop.\n` +
